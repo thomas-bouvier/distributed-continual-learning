@@ -129,7 +129,8 @@ if __name__ == '__main__':
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
-    kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+    # https://github.com/horovod/horovod/issues/2053
+    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
     # issues with Infiniband implementations that are not fork-safe
     if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
@@ -139,7 +140,7 @@ if __name__ == '__main__':
     data_dir = args.data_dir or './data'
     with FileLock(os.path.expanduser("~/.horovod_lock")):
         train_dataset = \
-            datasets.MNIST(data_dir, train=True, download=True,
+            datasets.MNIST(data_dir, train=True, download=False,
                            transform=transforms.Compose([
                                transforms.ToTensor(),
                                transforms.Normalize((0.1307,), (0.3081,))
@@ -152,10 +153,11 @@ if __name__ == '__main__':
         train_dataset, batch_size=args.batch_size, sampler=train_sampler, **kwargs)
 
     test_dataset = \
-        datasets.MNIST(data_dir, train=False, transform=transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
-        ]))
+        datasets.MNIST(data_dir, train=False, download=False,
+                       transform=transforms.Compose([
+                           transforms.ToTensor(),
+                           transforms.Normalize((0.1307,), (0.3081,))
+                       ]))
     # Horovod: use DistributedSampler to partition the test data.
     test_sampler = torch.utils.data.distributed.DistributedSampler(
         test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
