@@ -1,4 +1,5 @@
-tqdm
+filelock
 horovod
 torch
 torchvision
+tqdm
