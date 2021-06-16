@@ -1,6 +1,10 @@
 import argparse
+import json
 import os
+import time
+
 from filelock import FileLock
+from utils.timer import Timer
 
 import torch.multiprocessing as mp
 import torch.nn as nn
@@ -37,6 +41,19 @@ parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
 parser.add_argument('--data-dir',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
 
+def make_head(self):
+    scen_head = {
+        'name' : __file__
+    }
+
+    head = {
+        'dataset' : Dataset.MNIST,
+        'model': Model.NET,
+        'GPUs' : hvd.size(),
+        'scenario' : scen_head
+    }
+
+    return head
 
 class Net(nn.Module):
     def __init__(self):
@@ -57,24 +74,54 @@ class Net(nn.Module):
         return F.log_softmax(x)
 
 
-def train(epoch):
+def train(epoch: int) -> dict:
     model.train()
+    timer.start(f"epoch_{epoch }")
     # Horovod: set epoch to sampler for shuffling.
     train_sampler.set_epoch(epoch)
+
     for batch_idx, (data, target) in enumerate(train_loader):
+        timer.start(f"start_epoch_{epoch}-batch_{batch_idx}")
+        timer.start(f"epoch_{epoch }-batch_{batch_idx}")
+
         if args.cuda:
+            timer.start(f"epoch_{epoch }-batch_{batch_idx}-move_batch_to_gpu")
             data, target = data.cuda(), target.cuda()
+            timer.end(f"epoch_{epoch }-batch_{batch_idx}-move_batch_to_gpu")
+
+        timer.start(f"epoch_{epoch}-batch_{batch_idx}-zero_grad")
         optimizer.zero_grad()
+        timer.end(f"epoch_{epoch }-batch_{batch_idx}-zero_grad")
+
+        timer.start(f"epoch_{epoch }-batch_{batch_idx}-forward_pass")
         output = model(data)
+        timer.end(f"epoch_{epoch }-batch_{batch_idx}-forward_pass")
+
+        timer.start(f"epoch_{epoch }-batch_{batch_idx}-compute_loss")
         loss = F.nll_loss(output, target)
+        timer.end(f"epoch_{epoch }-batch_{batch_idx}-compute_loss")
+
+        timer.start(f"epoch_{epoch }-batch_{batch_idx}-backward_pass")
         loss.backward()
+        timer.end(f"epoch_{epoch }-batch_{batch_idx}-backward_pass")
+
+        timer.start(f"epoch_{epoch }-batch_{batch_idx}-optimizer_step")
         optimizer.step()
+        timer.end(f"epoch_{epoch }-batch_{batch_idx}-optimizer_step")
+
+        timer.end(f"epoch_{epoch }-batch_{batch_idx}")
+        timer.start(f"end_epoch_{epoch}-batch_{batch_idx}")
+
         if batch_idx % args.log_interval == 0:
             # Horovod: use train_sampler to determine the number of examples in
             # this worker's partition.
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_sampler),
                 100. * batch_idx / len(train_loader), loss.item()))
+
+    timer.end(f"epoch_{epoch}")
+
+    return timer.retrieve()
 
 
 def metric_average(val, name):
@@ -106,19 +153,23 @@ def test():
     test_loss = metric_average(test_loss, 'avg_loss')
     test_accuracy = metric_average(test_accuracy, 'avg_accuracy')
 
+    self.trace['Test']["acc"] = test_accuracy
+
     # Horovod: print output only on first rank.
     if hvd.rank() == 0:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
             test_loss, 100. * test_accuracy))
 
 
-if __name__ == '__main__':
+def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
     # Horovod: initialize library.
     hvd.init()
     torch.manual_seed(args.seed)
+
+    timer = Timer()
 
     if args.cuda:
         # Horovod: pin GPU to local rank.
@@ -147,10 +198,12 @@ if __name__ == '__main__':
                            ]))
 
     # Horovod: use DistributedSampler to partition the training data.
+    timer.start('distribute_data')
     train_sampler = torch.utils.data.distributed.DistributedSampler(
         train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, sampler=train_sampler, **kwargs)
+    timer.end('distribute_data')
 
     test_dataset = \
         datasets.MNIST(data_dir, train=False, download=False,
@@ -170,13 +223,16 @@ if __name__ == '__main__':
     lr_scaler = hvd.size() if not args.use_adasum else 1
 
     if args.cuda:
+        timer.start('move_model_to_gpu')
         # Move model to GPU.
         model.cuda()
+        timer.end('move_model_to_gpu')
         # If using GPU Adasum allreduce, scale learning rate by local_size.
         if args.use_adasum and hvd.nccl_built():
             lr_scaler = hvd.local_size()
 
     # Horovod: scale learning rate by lr_scaler.
+    timer.start('create_optimizer')
     optimizer = optim.SGD(model.parameters(), lr=args.lr * lr_scaler,
                           momentum=args.momentum)
 
@@ -193,7 +249,22 @@ if __name__ == '__main__':
                                          compression=compression,
                                          op=hvd.Adasum if args.use_adasum else hvd.Average,
                                          gradient_predivide_factor=args.gradient_predivide_factor)
+    timer.end('create_optimizer')
+    
+    trace = make_head()
+    run_duration = time.time()
 
+    timer.start('training')
     for epoch in range(1, args.epochs + 1):
-        train(epoch)
+        run_trace = train(epoch)
         test()
+    timer.end('training')
+    
+    run_duration = time.time() - run_duration
+    trace = {
+        'run_duration' : run_duration,
+        'run' : run_trace
+    }
+
+    with open(f"trace.json", 'w') as json_file:
+        json.dump(trace, json_file, indent=4)

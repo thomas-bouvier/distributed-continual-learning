@@ -1,4 +1,0 @@
-filelock
-horovod
-torch
-torchvision
