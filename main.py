@@ -24,6 +24,9 @@ model_names = sorted(name for name in models.__dict__
                      and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='Distributed deep learning with PyTorch')
+parser.add_argument('--model', metavar='MODEL', required=True,
+                    choices=model_names,
+                    help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
@@ -134,7 +137,7 @@ class Experiment():
 
 
     def _create_model(self):
-        self.model = models.__dict__['mnist_net']()
+        self.model = models.__dict__[self.args.model]()
         summary(self.model, (1, 28, 28))
 
         # By default, Adasum doesn't need scaling up learning rate.

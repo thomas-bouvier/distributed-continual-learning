@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class mnist_net(nn.Module):
+class mnist_model(nn.Module):
     def __init__(self):
-        super(mnist_net, self).__init__()
+        super(mnist_model, self).__init__()
         self.features = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, stride=1),
             nn.ReLU(),
@@ -29,5 +29,5 @@ class mnist_net(nn.Module):
         return self.features(x)
 
 
-def mnist(**kwargs):
-    return mnist_net()
+def mnistnet(**kwargs):
+    return mnist_model()
