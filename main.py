@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import time
@@ -21,6 +22,74 @@ from torchsummary import summary
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(models.__dict__[name]))
+
+parser = argparse.ArgumentParser(description='Distributed deep learning with PyTorch')
+parser.add_argument('--batch-size', type=int, default=64, metavar='N',
+                    help='input batch size for training (default: 64)')
+parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+                    help='input batch size for testing (default: 1000)')
+parser.add_argument('--epochs', type=int, default=10, metavar='N',
+                    help='number of epochs to train (default: 10)')
+parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
+                    help='learning rate (default: 0.01)')
+parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
+                    help='SGD momentum (default: 0.5)')
+parser.add_argument('--no-cuda', action='store_true', default=False,
+                    help='disables CUDA training')
+parser.add_argument('--seed', type=int, default=42, metavar='S',
+                    help='random seed (default: 42)')
+parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+                    help='how many batches to wait before logging training status')
+parser.add_argument('--fp16-allreduce', action='store_true', default=False,
+                    help='use fp16 compression during allreduce')
+parser.add_argument('--use-adasum', action='store_true', default=False,
+                    help='use adasum algorithm to do reduction')
+parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
+                    help='apply gradient predivide factor in optimizer (default: 1.0)')
+parser.add_argument('--data-dir',
+                    help='location of the training dataset in the local filesystem (will be downloaded if needed)')
+
+
+def main():
+    args = parser.parse_args()
+    args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+    # Horovod: initialize library.
+    hvd.init()
+    torch.manual_seed(args.seed)
+
+    if args.cuda:
+        # Horovod: pin GPU to local rank.
+        torch.cuda.set_device(hvd.local_rank())
+        torch.cuda.manual_seed(args.seed)
+
+
+    # Horovod: limit # of CPU threads to be used per worker.
+    torch.set_num_threads(1)
+
+    # https://github.com/horovod/horovod/issues/2053
+    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
+    # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
+    # issues with Infiniband implementations that are not fork-safe
+    if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
+            mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
+        kwargs['multiprocessing_context'] = 'forkserver'
+
+    xp = Experiment(args, kwargs)
+    
+    run_duration = time.time()
+    run_trace = xp.run()
+    run_duration = time.time() - run_duration
+
+    trace = make_head()
+    trace = {
+        'run_duration' : run_duration,
+        'run' : run_trace
+    }
+
+    with open(f"trace.json", 'w') as json_file:
+        json.dump(trace, json_file, indent=4)
+
 
 class Experiment():
     def __init__(self, args, kwargs):
@@ -210,46 +279,5 @@ def make_head():
 
     return head
 
-
-def main(args):
-    args.cuda = not args.no_cuda and torch.cuda.is_available()
-
-    # Horovod: initialize library.
-    hvd.init()
-    torch.manual_seed(args.seed)
-
-    if args.cuda:
-        # Horovod: pin GPU to local rank.
-        torch.cuda.set_device(hvd.local_rank())
-        torch.cuda.manual_seed(args.seed)
-
-
-    # Horovod: limit # of CPU threads to be used per worker.
-    torch.set_num_threads(1)
-
-    # https://github.com/horovod/horovod/issues/2053
-    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
-    # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
-    # issues with Infiniband implementations that are not fork-safe
-    if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
-            mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
-        kwargs['multiprocessing_context'] = 'forkserver'
-
-    xp = Experiment(args, kwargs)
-    
-    run_duration = time.time()
-    run_trace = xp.run()
-    run_duration = time.time() - run_duration
-
-    trace = make_head()
-    trace = {
-        'run_duration' : run_duration,
-        'run' : run_trace
-    }
-
-    with open(f"trace.json", 'w') as json_file:
-        json.dump(trace, json_file, indent=4)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
