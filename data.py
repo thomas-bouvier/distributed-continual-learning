@@ -13,8 +13,22 @@ from regime import Regime
 def get_dataset(dataset_name='MNIST', split='train', transform=None,
     target_transform=None, download=False, dataset_dir='./data'):
     train = (split == 'train')
-    root = os.path.join(os.path.expanduser(dataset_dir))
+    root = os.path.expanduser(dataset_dir)
 
+    if dataset_name == 'CIFAR10':
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.CIFAR10(root=os.path.join(root, dataset_name),
+                                    train=train,
+                                    transform=transform,
+                                    target_transform=target_transform,
+                                    download=download)
+    elif dataset_name == 'CIFAR100':
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.CIFAR100(root=os.path.join(root, dataset_name),
+                                    train=train,
+                                    transform=transform,
+                                    target_transform=target_transform,
+                                    download=download)
     if dataset_name == 'MNIST':
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return datasets.MNIST(root=root,
@@ -24,6 +38,14 @@ def get_dataset(dataset_name='MNIST', split='train', transform=None,
                             download=download)
 
 def get_transform(transform_name='MNIST'):
+    if transform_name == 'CIFAR10':
+        return transforms.Compose([
+            transforms.ToTensor()
+        ])
+    if transform_name == 'CIFAR100':
+        return transforms.Compose([
+            transforms.ToTensor()
+        ])
     if transform_name == 'MNIST':
         return transforms.Compose([
             transforms.ToTensor(),
