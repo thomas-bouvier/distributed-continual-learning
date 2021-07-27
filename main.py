@@ -16,6 +16,7 @@ import torch.utils.data.distributed
 import horovod.torch as hvd
 
 import models
+from data import DataRegime
 
 from torchsummary import summary
 
@@ -49,7 +50,9 @@ parser.add_argument('--use-adasum', action='store_true', default=False,
                     help='use adasum algorithm to do reduction')
 parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
                     help='apply gradient predivide factor in optimizer (default: 1.0)')
-parser.add_argument('--data-dir',
+parser.add_argument('--dataset-name', required=True,
+                    help="dataset name")
+parser.add_argument('--dataset-dir', default='./data',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
 
 
@@ -101,44 +104,52 @@ class Experiment():
 
         self.timer = Timer()
 
-        self._prepare_dataset()
         self._create_model()
-
+        self.train_data = self._prepare_dataset()
 
     def _prepare_dataset(self):
-            data_dir = self.args.data_dir or './data'
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                train_dataset = \
-                    datasets.MNIST(data_dir, train=True, download=False,
-                                transform=transforms.Compose([
-                                    transforms.ToTensor(),
-                                    transforms.Normalize((0.1307,), (0.3081,))
-                                ]))
-
-            # Horovod: use DistributedSampler to partition the training data.
-            self.timer.start('distribute_data')
-            self.train_sampler = torch.utils.data.distributed.DistributedSampler(
-                train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-            self.train_loader = torch.utils.data.DataLoader(
-                train_dataset, batch_size=self.args.batch_size, sampler=self.train_sampler, **self.kwargs)
-            self.timer.end('distribute_data')
-
-            test_dataset = \
-                datasets.MNIST(data_dir, train=False, download=False,
+        """
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            train_dataset = \
+                datasets.MNIST(self.args.data_dir, train=True, download=False,
                             transform=transforms.Compose([
                                 transforms.ToTensor(),
                                 transforms.Normalize((0.1307,), (0.3081,))
                             ]))
-            # Horovod: use DistributedSampler to partition the test data.
-            self.test_sampler = torch.utils.data.distributed.DistributedSampler(
-                test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-            self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.args.test_batch_size,
-                                                    sampler=self.test_sampler, **self.kwargs)
+
+        # Horovod: use DistributedSampler to partition the training data.
+        self.timer.start('distribute_data')
+        self.train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+        self.train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.args.batch_size, sampler=self.train_sampler, **self.kwargs)
+        self.timer.end('distribute_data')
+
+        test_dataset = \
+            datasets.MNIST(self.args.data_dir, train=False, download=False,
+                        transform=transforms.Compose([
+                            transforms.ToTensor(),
+                            transforms.Normalize((0.1307,), (0.3081,))
+                        ]))
+        # Horovod: use DistributedSampler to partition the test data.
+        self.test_sampler = torch.utils.data.distributed.DistributedSampler(
+            test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
+        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.args.test_batch_size,
+                                                sampler=self.test_sampler, **self.kwargs)
+        """
+        train_data_defaults = {
+            'dataset_dir': self.args.dataset_dir,
+            'dataset_name': self.args.dataset_name,
+            'split': 'train',
+            'batch_size': self.args.batch_size,
+            'shuffle': True
+        }
+
+        return DataRegime(getattr(self.model, 'data_regime', None), hvd, defaults=train_data_defaults)
 
 
     def _create_model(self):
         self.model = models.__dict__[self.args.model]()
-        summary(self.model, (1, 28, 28))
 
         # By default, Adasum doesn't need scaling up learning rate.
         lr_scaler = hvd.size() if not self.args.use_adasum else 1
@@ -185,9 +196,9 @@ class Experiment():
         self.model.train()
         self.timer.start(f"epoch_{epoch }")
         # Horovod: set epoch to sampler for shuffling.
-        self.train_sampler.set_epoch(epoch)
+        self.train_data.set_epoch(epoch)
 
-        for batch_idx, (data, target) in enumerate(self.train_loader):
+        for batch_idx, (data, target) in enumerate(self.train_data.get_loader()):
             self.timer.start(f"start_epoch_{epoch}-batch_{batch_idx}")
             self.timer.start(f"epoch_{epoch }-batch_{batch_idx}")
 
@@ -223,8 +234,8 @@ class Experiment():
                 # Horovod: use train_sampler to determine the number of examples in
                 # this worker's partition.
                 print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx * len(data), len(self.train_sampler),
-                    100. * batch_idx / len(self.train_loader), loss.item()))
+                    epoch, batch_idx * len(data), len(self.train_data),
+                    100. * batch_idx / len(self.train_data.get_loader()), loss.item()))
 
         self.timer.end(f"epoch_{epoch}")
 
