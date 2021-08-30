@@ -50,7 +50,7 @@ parser.add_argument('--use-adasum', action='store_true', default=False,
                     help='use adasum algorithm to do reduction')
 parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
                     help='apply gradient predivide factor in optimizer (default: 1.0)')
-parser.add_argument('--dataset-name', required=True,
+parser.add_argument('--dataset', required=True,
                     help="dataset name")
 parser.add_argument('--dataset-dir', default='./data',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
@@ -108,38 +108,9 @@ class Experiment():
         self.train_data = self._prepare_dataset()
 
     def _prepare_dataset(self):
-        """
-        with FileLock(os.path.expanduser("~/.horovod_lock")):
-            train_dataset = \
-                datasets.MNIST(self.args.data_dir, train=True, download=False,
-                            transform=transforms.Compose([
-                                transforms.ToTensor(),
-                                transforms.Normalize((0.1307,), (0.3081,))
-                            ]))
-
-        # Horovod: use DistributedSampler to partition the training data.
-        self.timer.start('distribute_data')
-        self.train_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-        self.train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=self.args.batch_size, sampler=self.train_sampler, **self.kwargs)
-        self.timer.end('distribute_data')
-
-        test_dataset = \
-            datasets.MNIST(self.args.data_dir, train=False, download=False,
-                        transform=transforms.Compose([
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.1307,), (0.3081,))
-                        ]))
-        # Horovod: use DistributedSampler to partition the test data.
-        self.test_sampler = torch.utils.data.distributed.DistributedSampler(
-            test_dataset, num_replicas=hvd.size(), rank=hvd.rank())
-        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.args.test_batch_size,
-                                                sampler=self.test_sampler, **self.kwargs)
-        """
         train_data_defaults = {
+            'dataset': self.args.dataset,
             'dataset_dir': self.args.dataset_dir,
-            'dataset_name': self.args.dataset_name,
             'split': 'train',
             'batch_size': self.args.batch_size,
             'shuffle': True
@@ -149,7 +120,9 @@ class Experiment():
 
 
     def _create_model(self):
-        self.model = models.__dict__[self.args.model]()
+        model = models.__dict__[self.args.model]
+        config = {'dataset': self.args.dataset}
+        self.model = model(**config)
 
         # By default, Adasum doesn't need scaling up learning rate.
         lr_scaler = hvd.size() if not self.args.use_adasum else 1

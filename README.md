@@ -19,3 +19,5 @@ ln -s /home/tbouvier/Dev/horovod-e2clab-examples/artifacts/data/ data
 ```
 python main.py --model mnistnet --dataset-name MNIST
 ```
+
+Change the network interface if needed: `HOROVOD_GLOO_IFACE=wlo1`.

@@ -10,26 +10,26 @@ from copy import deepcopy
 
 from regime import Regime
 
-def get_dataset(dataset_name='MNIST', split='train', transform=None,
+def get_dataset(dataset='mnist', split='train', transform=None,
     target_transform=None, download=False, dataset_dir='./data'):
     train = (split == 'train')
     root = os.path.expanduser(dataset_dir)
 
-    if dataset_name == 'CIFAR10':
+    if dataset == 'cifar10':
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.CIFAR10(root=os.path.join(root, dataset_name),
+            return datasets.CIFAR10(root=os.path.join(root, 'CIFAR10'),
                                     train=train,
                                     transform=transform,
                                     target_transform=target_transform,
                                     download=download)
-    elif dataset_name == 'CIFAR100':
+    elif dataset == 'cifar100':
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.CIFAR100(root=os.path.join(root, dataset_name),
+            return datasets.CIFAR100(root=os.path.join(root, 'CIFAR100'),
                                     train=train,
                                     transform=transform,
                                     target_transform=target_transform,
                                     download=download)
-    if dataset_name == 'MNIST':
+    if dataset == 'mnist':
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return datasets.MNIST(root=root,
                             train=train,
@@ -37,24 +37,24 @@ def get_dataset(dataset_name='MNIST', split='train', transform=None,
                             target_transform=target_transform,
                             download=download)
 
-def get_transform(transform_name='MNIST'):
-    if transform_name == 'CIFAR10':
+def get_transform(transform_name='mnist'):
+    if transform_name == 'cifar10':
         return transforms.Compose([
             transforms.ToTensor()
         ])
-    if transform_name == 'CIFAR100':
+    elif transform_name == 'cifar100':
         return transforms.Compose([
             transforms.ToTensor()
         ])
-    if transform_name == 'MNIST':
+    elif transform_name == 'mnist':
         return transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])
 
 
-_DATA_ARGS = {'dataset_name', 'split', 'transform', 'target_transform', 'download',
-                    'datasets_path'}
+_DATA_ARGS = {'dataset', 'split', 'transform', 'target_transform', 'download',
+                    'dataset_dir'}
 _DATALOADER_ARGS = {'batch_size', 'shuffle', 'sampler', 'batch_sampler',
                     'num_workers', 'collate_fn', 'pin_memory', 'drop_last',
                     'timeout', 'worker_init_fn'}
@@ -119,7 +119,7 @@ class DataRegime(object):
         other_config = {
             k: v for k, v in config.items() if k in _OTHER_ARGS}
 
-        transform_config.setdefault('transform_name', data_config['dataset_name'])
+        transform_config.setdefault('transform_name', data_config['dataset'])
 
         return {
             'data': data_config,

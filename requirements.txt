@@ -1,4 +1,3 @@
-copy
 filelock
 horovod[pytorch]
 torch
