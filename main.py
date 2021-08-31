@@ -17,6 +17,7 @@ import horovod.torch as hvd
 
 import models
 from data import DataRegime
+from optimizer import OptimizerRegime
 
 from torchsummary import summary
 
@@ -38,6 +39,8 @@ parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
                     help='SGD momentum (default: 0.5)')
+parser.add_argument('--optimizer', type=str, default='SGD', metavar='OPT',
+                    help='optimizer function')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=42, metavar='S',
@@ -50,6 +53,8 @@ parser.add_argument('--use-adasum', action='store_true', default=False,
                     help='use adasum algorithm to do reduction')
 parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
                     help='apply gradient predivide factor in optimizer (default: 1.0)')
+parser.add_argument('--weight-decay', '--wd', type=float, default=0,
+                    metavar='W', help='weight decay (default: 0)')
 parser.add_argument('--dataset', required=True,
                     help="dataset name")
 parser.add_argument('--dataset-dir', default='./data',
@@ -136,24 +141,21 @@ class Experiment():
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = hvd.local_size()
 
-        # Horovod: scale learning rate by lr_scaler.
         self.timer.start('create_optimizer')
-        optimizer = optim.SGD(self.model.parameters(), lr=self.args.lr * lr_scaler,
-                            momentum=self.args.momentum)
-
-        # Horovod: broadcast parameters & optimizer state.
-        hvd.broadcast_parameters(self.model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
-
-        # Horovod: (optional) compression algorithm.
-        compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
-
-        # Horovod: wrap optimizer with DistributedOptimizer.
-        self.optimizer = hvd.DistributedOptimizer(optimizer,
-                                            named_parameters=self.model.named_parameters(),
-                                            compression=compression,
-                                            op=hvd.Adasum if self.args.use_adasum else hvd.Average,
-                                            gradient_predivide_factor=self.args.gradient_predivide_factor)
+        # Horovod: scale learning rate by lr_scaler.
+        optim_regime = getattr(self.model, 'regime', [
+            {
+                'epoch': 0,
+                'optimizer': self.args.optimizer,
+                'lr': self.args.lr * lr_scaler,
+                'momentum': self.args.momentum,
+                'weight_decay': self.args.weight_decay
+            }
+        ])
+        optimizer = OptimizerRegime(self.model, optim_regime,
+                self.args.fp16_allreduce,
+                self.args.use_adasum,
+                self.args.gradient_predivide_factor)
         self.timer.end('create_optimizer')
 
 
