@@ -15,7 +15,14 @@ def get_dataset(dataset='mnist', split='train', transform=None,
     train = (split == 'train')
     root = os.path.expanduser(dataset_dir)
 
-    if dataset == 'cifar10':
+    if dataset == 'mnist':
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.MNIST(root=root,
+                            train=train,
+                            transform=transform,
+                            target_transform=target_transform,
+                            download=download)
+    elif dataset == 'cifar10':
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return datasets.CIFAR10(root=os.path.join(root, 'CIFAR10'),
                                     train=train,
@@ -29,13 +36,6 @@ def get_dataset(dataset='mnist', split='train', transform=None,
                                     transform=transform,
                                     target_transform=target_transform,
                                     download=download)
-    if dataset == 'mnist':
-        with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.MNIST(root=root,
-                            train=train,
-                            transform=transform,
-                            target_transform=target_transform,
-                            download=download)
 
 def get_transform(transform_name='mnist'):
     if transform_name == 'cifar10':

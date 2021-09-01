@@ -206,15 +206,17 @@ class resnet_cifar_model(resnet_model):
 
 
 def resnet(**config):
-    dataset = config.pop('dataset', 'imagenet')
+    dataset = config.pop('dataset', 'cifar10')
 
-    if dataset == 'CIFAR10':
+    if dataset == 'cifar10':
         config.setdefault('num_classes', 10)
         config.setdefault('depth', 44)
-        print("test")
         return resnet_cifar_model(block=BasicBlock, **config)
 
-    elif dataset == 'CIFAR100':
+    elif dataset == 'cifar100':
         config.setdefault('num_classes', 100)
         config.setdefault('depth', 44)
         return resnet_cifar_model(block=BasicBlock, **config)
+    
+    else:
+        raise ValueError('Unknown dataset')

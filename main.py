@@ -111,7 +111,7 @@ class Experiment():
         self.timer = Timer()
 
         self._create_model()
-        self.train_data = self._prepare_dataset()
+        self._prepare_dataset()
 
         self.trainer = Trainer(self.model, args.log_interval, self.optimizer)
         self.trainer.training_steps = args.start_epoch * len(self.train_data)
@@ -147,6 +147,9 @@ class Experiment():
             }
         ])
         self.optimizer = OptimizerRegime(self.model, optim_regime,
+                self.args.lr,
+                lr_scaler,
+                self.args.momentum,
                 self.args.fp16_allreduce,
                 self.args.use_adasum,
                 self.args.gradient_predivide_factor)
@@ -154,6 +157,20 @@ class Experiment():
 
 
     def _prepare_dataset(self):
+        validate_data_defaults = {
+            'dataset': self.args.dataset,
+            'dataset_dir': self.args.dataset_dir,
+            'split': 'validate',
+            'batch_size': self.args.batch_size,
+            'shuffle': False
+        }
+
+        self.validate_data = DataRegime(
+            getattr(self.model, 'data_eval_regime', None),
+            hvd,
+            defaults=validate_data_defaults
+        )
+
         train_data_defaults = {
             'dataset': self.args.dataset,
             'dataset_dir': self.args.dataset_dir,
@@ -162,24 +179,40 @@ class Experiment():
             'shuffle': True
         }
 
-        return DataRegime(getattr(self.model, 'data_regime', None), hvd, defaults=train_data_defaults)
+        self.train_data = DataRegime(
+            getattr(self.model, 'data_regime', None),
+            hvd,
+            defaults=train_data_defaults
+        )
 
 
     def run(self):
         self.timer.start('training')
+
         start_epoch = max(self.args.start_epoch, 0)
         self.trainer.training_steps = start_epoch * len(self.train_data)
         for epoch in range(start_epoch, self.args.epochs):
             self.trainer.epoch = epoch
+
             # Horovod: set epoch to sampler for shuffling.
             self.train_data.set_epoch(epoch)
+            self.validate_data.set_epoch(epoch)
 
             self.timer.start(f"epoch_{epoch }")
             # train for one epoch
-            run_trace = self.trainer.train(self.train_data.get_loader())
+            train_results = self.trainer.train(self.train_data.get_loader())
             self.timer.end(f"epoch_{epoch}")
+
+            # evaluate on validation set
+            validate_results = self.trainer.validate(self.validate_data.get_loader())
+        
+            #print('\nResults - Epoch: {0}\n'
+            #         'Training Loss {train[loss]:.4f} \t'
+            #         'Validation Loss {val[loss]:.4f} \t\n'
+            #         .format(epoch + 1, train=train_results, val=validate_results))
         self.timer.end('training')
-        return run_trace
+
+        return train_results
 
 
 def make_head():
