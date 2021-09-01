@@ -8,8 +8,6 @@ from utils.timer import Timer
 from utils.experiment import Dataset, Model
 
 import torch.multiprocessing as mp
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 import torch.utils.data.distributed
@@ -18,6 +16,7 @@ import horovod.torch as hvd
 import models
 from data import DataRegime
 from optimizer import OptimizerRegime
+from trainer import Trainer
 
 from torchsummary import summary
 
@@ -35,6 +34,8 @@ parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                     help='input batch size for testing (default: 1000)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
+parser.add_argument('--start-epoch', default=-1, type=int, metavar='N',
+                    help='start epoch number, -1 to unset (will start at 0)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
@@ -112,27 +113,20 @@ class Experiment():
         self._create_model()
         self.train_data = self._prepare_dataset()
 
-    def _prepare_dataset(self):
-        train_data_defaults = {
-            'dataset': self.args.dataset,
-            'dataset_dir': self.args.dataset_dir,
-            'split': 'train',
-            'batch_size': self.args.batch_size,
-            'shuffle': True
-        }
-
-        return DataRegime(getattr(self.model, 'data_regime', None), hvd, defaults=train_data_defaults)
+        self.trainer = Trainer(self.model, args.log_interval, self.optimizer)
+        self.trainer.training_steps = args.start_epoch * len(self.train_data)
 
 
     def _create_model(self):
         model = models.__dict__[self.args.model]
         config = {'dataset': self.args.dataset}
         self.model = model(**config)
+        self.model.cuda = self.args.cuda
 
         # By default, Adasum doesn't need scaling up learning rate.
         lr_scaler = hvd.size() if not self.args.use_adasum else 1
 
-        if self.args.cuda:
+        if self.model.cuda:
             self.timer.start('move_model_to_gpu')
             # Move model to GPU.
             self.model.cuda()
@@ -152,106 +146,40 @@ class Experiment():
                 'weight_decay': self.args.weight_decay
             }
         ])
-        optimizer = OptimizerRegime(self.model, optim_regime,
+        self.optimizer = OptimizerRegime(self.model, optim_regime,
                 self.args.fp16_allreduce,
                 self.args.use_adasum,
                 self.args.gradient_predivide_factor)
         self.timer.end('create_optimizer')
 
 
+    def _prepare_dataset(self):
+        train_data_defaults = {
+            'dataset': self.args.dataset,
+            'dataset_dir': self.args.dataset_dir,
+            'split': 'train',
+            'batch_size': self.args.batch_size,
+            'shuffle': True
+        }
+
+        return DataRegime(getattr(self.model, 'data_regime', None), hvd, defaults=train_data_defaults)
+
+
     def run(self):
         self.timer.start('training')
-        for epoch in range(1, self.args.epochs + 1):
-            run_trace = self.train(epoch)
+        start_epoch = max(self.args.start_epoch, 0)
+        self.trainer.training_steps = start_epoch * len(self.train_data)
+        for epoch in range(start_epoch, self.args.epochs):
+            self.trainer.epoch = epoch
+            # Horovod: set epoch to sampler for shuffling.
+            self.train_data.set_epoch(epoch)
+
+            self.timer.start(f"epoch_{epoch }")
+            # train for one epoch
+            run_trace = self.trainer.train(self.train_data.get_loader())
+            self.timer.end(f"epoch_{epoch}")
         self.timer.end('training')
         return run_trace
-
-
-    def train(self, epoch: int) -> dict:
-        self.model.train()
-        self.timer.start(f"epoch_{epoch }")
-        # Horovod: set epoch to sampler for shuffling.
-        self.train_data.set_epoch(epoch)
-
-        for batch_idx, (data, target) in enumerate(self.train_data.get_loader()):
-            self.timer.start(f"start_epoch_{epoch}-batch_{batch_idx}")
-            self.timer.start(f"epoch_{epoch }-batch_{batch_idx}")
-
-            if self.args.cuda:
-                self.timer.start(f"epoch_{epoch }-batch_{batch_idx}-move_batch_to_gpu")
-                data, target = data.cuda(), target.cuda()
-                self.timer.end(f"epoch_{epoch }-batch_{batch_idx}-move_batch_to_gpu")
-
-            self.timer.start(f"epoch_{epoch}-batch_{batch_idx}-zero_grad")
-            self.optimizer.zero_grad()
-            self.timer.end(f"epoch_{epoch }-batch_{batch_idx}-zero_grad")
-
-            self.timer.start(f"epoch_{epoch }-batch_{batch_idx}-forward_pass")
-            output = self.model(data)
-            self.timer.end(f"epoch_{epoch }-batch_{batch_idx}-forward_pass")
-
-            self.timer.start(f"epoch_{epoch }-batch_{batch_idx}-compute_loss")
-            loss = F.nll_loss(output, target)
-            self.timer.end(f"epoch_{epoch }-batch_{batch_idx}-compute_loss")
-
-            self.timer.start(f"epoch_{epoch }-batch_{batch_idx}-backward_pass")
-            loss.backward()
-            self.timer.end(f"epoch_{epoch }-batch_{batch_idx}-backward_pass")
-
-            self.timer.start(f"epoch_{epoch }-batch_{batch_idx}-optimizer_step")
-            self.optimizer.step()
-            self.timer.end(f"epoch_{epoch }-batch_{batch_idx}-optimizer_step")
-
-            self.timer.end(f"epoch_{epoch }-batch_{batch_idx}")
-            self.timer.start(f"end_epoch_{epoch}-batch_{batch_idx}")
-
-            if batch_idx % self.args.log_interval == 0:
-                # Horovod: use train_sampler to determine the number of examples in
-                # this worker's partition.
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                    epoch, batch_idx * len(data), len(self.train_data),
-                    100. * batch_idx / len(self.train_data.get_loader()), loss.item()))
-
-        self.timer.end(f"epoch_{epoch}")
-
-        return self.timer.retrieve()
-
-
-    def metric_average(self, val, name):
-        tensor = torch.tensor(val)
-        avg_tensor = hvd.allreduce(tensor, name=name)
-        return avg_tensor.item()
-
-
-    def test(self):
-        model.eval()
-        test_loss = 0.
-        test_accuracy = 0.
-        for data, target in test_loader:
-            if self.args.cuda:
-                data, target = data.cuda(), target.cuda()
-            output = model(data)
-            # sum up batch loss
-            test_loss += F.nll_loss(output, target, size_average=False).item()
-            # get the index of the max log-probability
-            pred = output.data.max(1, keepdim=True)[1]
-            test_accuracy += pred.eq(target.data.view_as(pred)).cpu().float().sum()
-
-        # Horovod: use test_sampler to determine the number of examples in
-        # this worker's partition.
-        test_loss /= len(test_sampler)
-        test_accuracy /= len(test_sampler)
-
-        # Horovod: average metric values across workers.
-        test_loss = metric_average(test_loss, 'avg_loss')
-        test_accuracy = metric_average(test_accuracy, 'avg_accuracy')
-
-        self.trace['Test']["acc"] = test_accuracy
-
-        # Horovod: print output only on first rank.
-        if hvd.rank() == 0:
-            print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
-                test_loss, 100. * test_accuracy))
 
 
 def make_head():
@@ -267,6 +195,7 @@ def make_head():
     }
 
     return head
+
 
 if __name__ == "__main__":
     main()
