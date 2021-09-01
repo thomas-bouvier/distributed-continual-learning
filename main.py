@@ -146,13 +146,14 @@ class Experiment():
                 'weight_decay': self.args.weight_decay
             }
         ])
-        self.optimizer = OptimizerRegime(self.model, optim_regime,
-                self.args.lr,
-                lr_scaler,
-                self.args.momentum,
-                self.args.fp16_allreduce,
-                self.args.use_adasum,
-                self.args.gradient_predivide_factor)
+        
+        # Distributed training parameters
+        compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
+        reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
+
+        self.optimizer = OptimizerRegime(self.model, compression, reduction,
+                                    self.args.gradient_predivide_factor,
+                                    optim_regime)
         self.timer.end('create_optimizer')
 
 

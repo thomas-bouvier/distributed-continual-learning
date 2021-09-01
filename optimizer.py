@@ -5,38 +5,40 @@ from regime import Regime
 from regularizer import Regularizer
 
 class OptimizerRegime(Regime, torch.optim.Optimizer):
-    def __init__(self, model, regime, lr, lr_scaler, momentum, fp16_allreduce, use_adasum, gradient_predivide_factor, defaults={}):
+    def __init__(self, model, compression, reduction, gradient_predivide_factor, regime, defaults={}):
         super(OptimizerRegime, self).__init__(regime, defaults)
         self.parameters = list(model.parameters())
-        self.optimizer = self._create_optimizer(model, lr, lr_scaler, momentum, fp16_allreduce, use_adasum, gradient_predivide_factor)
         self.regularizer = Regularizer(model)
 
-
-    def _create_optimizer(self, model, lr, lr_scaler, momentum, fp16_allreduce, use_adasum, gradient_predivide_factor):
-        optimizer = torch.optim.SGD(self.parameters, lr=lr*lr_scaler, momentum=momentum)
+        optimizer = torch.optim.SGD(self.parameters, lr=0)
 
         # Horovod: broadcast parameters & optimizer state.
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
-        # Horovod: (optional) compression algorithm.
-        compression = hvd.Compression.fp16 if fp16_allreduce else hvd.Compression.none
-
         # Horovod: wrap optimizer with DistributedOptimizer.
-        return hvd.DistributedOptimizer(optimizer,
-                                            named_parameters=model.named_parameters(),
-                                            compression=compression,
-                                            op=hvd.Adasum if use_adasum else hvd.Average,
-                                            gradient_predivide_factor=gradient_predivide_factor)
+        self.optimizer = hvd.DistributedOptimizer(optimizer,
+                                    named_parameters=model.named_parameters(),
+                                    op=reduction,
+                                    compression=compression,
+                                    gradient_predivide_factor=gradient_predivide_factor)
 
 
     def update(self, epoch=None, training_steps=None):
-        """adjusts optimizer according to current epoch or steps and training regime.
+        """Adjust optimizer according to current epoch or steps and training regime.
         """
-        updated = False
         if super(OptimizerRegime, self).update(epoch, training_steps):
-            self.adjust(self.config)
-            updated = True
+            self.adjust_from_config(self.config)
+
+
+    def adjust_from_config(self, config):
+        for param_group in self.optimizer.param_groups:
+            for key in param_group.keys():
+                if key in config:
+                    new_val = config[key]
+                    if new_val != param_group[key]:
+                        print(f"Updating {key}: {new_val}")
+                        param_group[key] = config[key]
 
 
     def zero_grad(self):
@@ -49,3 +51,31 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         self.regularizer.pre_step()
         self.optimizer.step(*args, **kwargs)
         self.regularizer.post_step()
+
+
+    def __getstate__(self):
+        return {
+            'optimizer_state': self.optimizer.__getstate__(),
+            'regime': self.regime,
+        }
+
+
+    def __setstate__(self, state):
+        self.regime = state.get('regime')
+        self.optimizer.__setstate__(state.get('optimizer_state'))
+
+
+    def state_dict(self):
+        """Returns the state of the optimizer as a :class:`dict`.
+        """
+        return self.optimizer.state_dict()
+
+
+    def load_state_dict(self, state_dict):
+        """Loads the optimizer state.
+        Arguments:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        # deepcopy, to be consistent with module API
+        self.optimizer.load_state_dict(state_dict)
