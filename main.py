@@ -8,12 +8,11 @@ from utils.timer import Timer
 from utils.experiment import Dataset, Model
 
 import torch.multiprocessing as mp
-import torch.optim as optim
-from torchvision import datasets, transforms
 import torch.utils.data.distributed
 import horovod.torch as hvd
 
 import models
+from cross_entropy import CrossEntropyLoss
 from data import DataRegime
 from optimizer import OptimizerRegime
 from trainer import Trainer
@@ -113,7 +112,7 @@ class Experiment():
         self._create_model()
         self._prepare_dataset()
 
-        self.trainer = Trainer(self.model, args.log_interval, self.optimizer)
+        self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.log_interval)
         self.trainer.training_steps = args.start_epoch * len(self.train_data)
 
 
@@ -147,7 +146,7 @@ class Experiment():
             }
         ])
         
-        # Distributed training parameters
+        # distributed training parameters
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
 
@@ -155,6 +154,10 @@ class Experiment():
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
         self.timer.end('create_optimizer')
+
+        # define loss function (criterion) and optimizer
+        loss_params = {}
+        self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
 
     def _prepare_dataset(self):

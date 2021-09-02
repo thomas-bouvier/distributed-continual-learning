@@ -21,3 +21,7 @@ python main.py --model mnistnet --dataset-name MNIST
 ```
 
 Change the network interface if needed: `HOROVOD_GLOO_IFACE=wlo1`.
+
+## Credits
+
+Inspired by https://github.com/eladhoffer/convNet.pytorch.

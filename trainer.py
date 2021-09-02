@@ -5,14 +5,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Trainer(object):
-    def __init__(self, model, log_interval, optimizer=None):
+    def __init__(self, model, optimizer, criterion, log_interval):
         self.timer = Timer()
 
         self.model = model
+        self.optimizer = optimizer
+        self.criterion = criterion
         self.log_interval = log_interval
         self.epoch = 0
         self.training_steps = 0
-        self.optimizer = optimizer
 
     
     def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
@@ -39,7 +40,7 @@ class Trainer(object):
             self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-forward_pass")
 
             self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-compute_loss")
-            loss = F.nll_loss(output, target)
+            loss = self.criterion(output, target)
             self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-compute_loss")
 
             if training:
