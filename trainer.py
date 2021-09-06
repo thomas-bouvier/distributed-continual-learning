@@ -1,4 +1,5 @@
 from utils.timer import Timer
+from meters import AverageMeter, accuracy
 
 import torch
 import torch.nn as nn
@@ -61,9 +62,19 @@ class Trainer(object):
 
         self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}")
 
+        outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
 
     def forward(self, data_loader, training=False, average_output=False):
+        meters = {metric: AverageMeter()
+                  for metric in ['loss', 'prec1', 'prec5']}
+
+        def meter_results(meters):
+            results = {name: meter.avg for name, meter in meters.items()}
+            results['error1'] = 100. - results['prec1']
+            results['error5'] = 100. - results['prec5']
+            return results
+
         for i_batch, (inputs, target) in enumerate(data_loader):
             self.timer.start(f"start_epoch_{self.epoch}-batch_{i_batch}")
             output, loss = self._step(i_batch,
@@ -73,18 +84,29 @@ class Trainer(object):
                                       average_output=average_output)
             self.timer.start(f"end_epoch_{self.epoch}-batch_{i_batch}")
 
-            if i_batch % self.log_interval == 0 or i_batch == len(data_loader) - 1:
-                # Horovod: use train_sampler to determine the number of examples in
-                # this worker's partition.
-                print('Train Epoch: {} [{}/{}] \tLoss: {:.6f}'.format(self.epoch, i_batch, len(data_loader), loss))
+            # measure accuracy and record loss
+            prec1, prec5 = accuracy(output, target, topk=(1, 5))
+            meters['loss'].update(float(loss), inputs.size(0))
+            meters['prec1'].update(float(prec1), inputs.size(0))
+            meters['prec5'].update(float(prec5), inputs.size(0))
 
-        return self.timer.retrieve()
+            if i_batch % self.log_interval == 0 or i_batch == len(data_loader) - 1:
+                print('{phase}: epoch: {0} [{1}/{2}]\t'
+                             'Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t'
+                             'Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t'
+                             'Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t'
+                             .format(
+                                 self.epoch, i_batch, len(data_loader),
+                                 phase='TRAINING' if training else 'EVALUATING',
+                                 meters=meters))
+
+        return meters
 
 
     def train(self, data_loader, average_output=False):
         # switch to train mode
         self.model.train()
-        self.forward(data_loader, average_output=average_output, training=True)
+        return self.forward(data_loader, average_output=average_output, training=True)
 
 
     def validate(self, data_loader, average_output=False):

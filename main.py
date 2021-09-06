@@ -191,6 +191,12 @@ class Experiment():
 
 
     def run(self):
+        def format_results(meters):
+            results = {name: meter.avg for name, meter in meters.items()}
+            results['error1'] = 100. - results['prec1']
+            results['error5'] = 100. - results['prec5']
+            return results
+
         self.timer.start('training')
 
         start_epoch = max(self.args.start_epoch, 0)
@@ -209,11 +215,13 @@ class Experiment():
 
             # evaluate on validation set
             validate_results = self.trainer.validate(self.validate_data.get_loader())
-        
-            #print('\nResults - Epoch: {0}\n'
-            #         'Training Loss {train[loss]:.4f} \t'
-            #         'Validation Loss {val[loss]:.4f} \t\n'
-            #         .format(epoch + 1, train=train_results, val=validate_results))
+
+            print('\nResults: epoch: {0}\n'
+                     'Training Loss {train[loss]:.4f} \t\n'
+                     'Validation Loss {validate[loss]:.4f} \t\n'
+                     .format(epoch + 1, train=format_results(train_results),
+                     validate=format_results(validate_results)))
+
         self.timer.end('training')
 
         return train_results
