@@ -17,7 +17,6 @@ from log import ResultsLog
 from optimizer import OptimizerRegime
 from trainer import Trainer
 from utils.timer import Timer
-from utils.experiment import Dataset, Model
 
 from torchsummary import summary
 
@@ -91,27 +90,30 @@ def main():
             mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
         kwargs['multiprocessing_context'] = 'forkserver'
 
-    xp = Experiment(args, kwargs)
+    time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    if args.save_dir == '':
+        args.save_dir = time_stamp
+    save_path = path.join(args.results_dir, args.save_dir)
+
+    if hvd.local_rank() == 0:
+        if not path.exists(save_path):
+            makedirs(save_path)
+
+    xp = Experiment(save_path, args, kwargs)
     
     run_duration = time.time()
     run_trace = xp.run()
     run_duration = time.time() - run_duration
 
-    trace = make_head()
-    trace = {
-        'run_duration' : run_duration,
-        'run' : run_trace
-    }
-
-    with open(f"trace.json", 'w') as json_file:
-        json.dump(trace, json_file, indent=4)
+    xp.write_results(run_duration, run_trace)
 
 
 class Experiment():
-    def __init__(self, args, kwargs):
+    def __init__(self, save_path, args, kwargs):
         self.args = args
         self.kwargs = kwargs
 
+        self.save_path = save_path
         self.timer = Timer()
 
         self._create_model()
@@ -196,16 +198,7 @@ class Experiment():
 
 
     def run(self):
-        time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        if self.args.save_dir == '':
-            self.args.save_dir = time_stamp
-        save_path = path.join(self.args.results_dir, self.args.save_dir)
-
-        if hvd.local_rank() == 0:
-            if not path.exists(save_path):
-                makedirs(save_path)
-
-        results_path = path.join(save_path, 'results')
+        results_path = path.join(self.save_path, 'results')
         results = ResultsLog(results_path,
                          title='Training Results - %s' % self.args.save_dir)
 
@@ -255,19 +248,21 @@ class Experiment():
         return train_results
 
 
-def make_head():
-    scen_head = {
-        'name' : __file__
-    }
+    def write_results(self, run_duration, run_trace):
+        results = {
+            'experiment': {
+                'GPUs' : hvd.size(),
+                'parameters' : dict(self.args._get_kwargs())
+            },
+            'run_duration': run_duration,
+            'run': run_trace
+        }
 
-    head = {
-        'dataset' : Dataset.MNIST,
-        'model': Model.NET,
-        'GPUs' : hvd.size(),
-        'scenario' : scen_head
-    }
+        filename = path.join(self.save_path, 'trace.json')
+        with open(filename, 'w') as fp:
+            json.dump(results, fp, sort_keys=True, indent=4)
 
-    return head
+        return results
 
 
 if __name__ == "__main__":
