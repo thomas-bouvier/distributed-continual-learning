@@ -1,6 +1,8 @@
+bokeh
 filelock
 horovod[pytorch]
 torch
 torchvision
 tqdm
 torchsummary
+pandas

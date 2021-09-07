@@ -2,20 +2,22 @@ import argparse
 import json
 import os
 import time
-
-from filelock import FileLock
-from utils.timer import Timer
-from utils.experiment import Dataset, Model
-
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import horovod.torch as hvd
 
+from datetime import datetime
+from filelock import FileLock
+from os import path, makedirs
+
 import models
 from cross_entropy import CrossEntropyLoss
 from data import DataRegime
+from log import ResultsLog
 from optimizer import OptimizerRegime
 from trainer import Trainer
+from utils.timer import Timer
+from utils.experiment import Dataset, Model
 
 from torchsummary import summary
 
@@ -59,7 +61,10 @@ parser.add_argument('--dataset', required=True,
                     help="dataset name")
 parser.add_argument('--dataset-dir', default='./data',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
-
+parser.add_argument('--results-dir', metavar='RESULTS_DIR', default='./results',
+                    help='results dir')
+parser.add_argument('--save-dir', metavar='SAVE_DIR', default='',
+                    help='saved folder')
 
 def main():
     args = parser.parse_args()
@@ -191,11 +196,18 @@ class Experiment():
 
 
     def run(self):
-        def format_results(meters):
-            results = {name: meter.avg for name, meter in meters.items()}
-            results['error1'] = 100. - results['prec1']
-            results['error5'] = 100. - results['prec5']
-            return results
+        time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+        if self.args.save_dir == '':
+            self.args.save_dir = time_stamp
+        save_path = path.join(self.args.results_dir, self.args.save_dir)
+
+        if hvd.local_rank() == 0:
+            if not path.exists(save_path):
+                makedirs(save_path)
+
+        results_path = path.join(save_path, 'results')
+        results = ResultsLog(results_path,
+                         title='Training Results - %s' % self.args.save_dir)
 
         self.timer.start('training')
 
@@ -219,8 +231,24 @@ class Experiment():
             print('\nResults: epoch: {0}\n'
                      'Training Loss {train[loss]:.4f} \t\n'
                      'Validation Loss {validate[loss]:.4f} \t\n'
-                     .format(epoch + 1, train=format_results(train_results),
-                     validate=format_results(validate_results)))
+                     .format(epoch + 1, train=train_results,
+                     validate=validate_results))
+
+            values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
+            values.update({'training ' + k: v for k, v in train_results.items()})
+            values.update({'validation ' + k: v for k, v in validate_results.items()})
+
+            results.add(**values)
+            results.plot(x='epoch', y=['training loss', 'validation loss'],
+                     legend=['training', 'validation'],
+                     title='Loss', ylabel='loss')
+            results.plot(x='epoch', y=['training error1', 'validation error1'],
+                        legend=['training', 'validation'],
+                        title='Error@1', ylabel='error %')
+            results.plot(x='epoch', y=['training error5', 'validation error5'],
+                        legend=['training', 'validation'],
+                        title='Error@5', ylabel='error %')
+            results.save()
 
         self.timer.end('training')
 

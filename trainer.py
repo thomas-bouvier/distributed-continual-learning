@@ -69,12 +69,6 @@ class Trainer(object):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 
-        def meter_results(meters):
-            results = {name: meter.avg for name, meter in meters.items()}
-            results['error1'] = 100. - results['prec1']
-            results['error5'] = 100. - results['prec5']
-            return results
-
         for i_batch, (inputs, target) in enumerate(data_loader):
             self.timer.start(f"start_epoch_{self.epoch}-batch_{i_batch}")
             output, loss = self._step(i_batch,
@@ -99,6 +93,10 @@ class Trainer(object):
                                  self.epoch, i_batch, len(data_loader),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
+
+        meters = {name: meter.avg for name, meter in meters.items()}
+        meters['error1'] = 100. - meters['prec1']
+        meters['error5'] = 100. - meters['prec5']
 
         return meters
 
