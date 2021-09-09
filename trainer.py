@@ -16,7 +16,7 @@ class Trainer(object):
         self.epoch = 0
         self.training_steps = 0
 
-    
+
     def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
         outputs = []
         total_loss = 0
@@ -65,7 +65,10 @@ class Trainer(object):
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
 
+
     def forward(self, data_loader, training=False, average_output=False):
+        self.timer.set_training(training)
+
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 

@@ -23,13 +23,23 @@ def gpu_stats():
 
 
 class Timer():
+
+    training = True
+
     def __init__(self):
         self.times = {}
         self.lock = False
 
 
+    def set_training(self, training):
+        self.training = training
+
+
     def start(self, name):
         if self.lock:
+            return
+
+        if not self.training:
             return
 
         if name in self.times.keys():
@@ -40,6 +50,9 @@ class Timer():
 
     def end(self, name):
         if self.lock:
+            return
+
+        if not self.training:
             return
 
         if name not in self.times.keys():
