@@ -24,7 +24,7 @@ model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(models.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='Distributed deep learning with PyTorch')
+parser = argparse.ArgumentParser(description='Distributed deep learning with Horovod + PyTorch')
 parser.add_argument('--model', metavar='MODEL', required=True,
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names))
@@ -127,12 +127,11 @@ class Experiment():
         model = models.__dict__[self.args.model]
         config = {'dataset': self.args.dataset}
         self.model = model(**config)
-        self.model.cuda = self.args.cuda
 
         # By default, Adasum doesn't need scaling up learning rate.
         lr_scaler = hvd.size() if not self.args.use_adasum else 1
 
-        if self.model.cuda:
+        if self.args.cuda:
             self.timer.start('move_model_to_gpu')
             # Move model to GPU.
             self.model.cuda()
