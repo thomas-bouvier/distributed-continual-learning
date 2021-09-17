@@ -73,18 +73,16 @@ class DataRegime(object):
         self.steps = None
         self.get_loader(True)
 
-    def get_loader(self, force_update=False, override_configs=None):
+
+    def get_loader(self, force_update=False):
         if force_update:
             config = self.get_config()
-
-            if override_configs is not None:
-                config.update(override_configs)
 
             self._transform = get_transform(**config['transform'])
             config['data'].setdefault('transform', self._transform)
             self._data = get_dataset(**config['data'])
 
-            if config['other'].get('distributed', False):
+            if config['others'].get('distributed', False):
                 config['loader']['sampler'] = DistributedSampler(
                     self._data, num_replicas=hvd.size(), rank=hvd.rank()
                 )
@@ -97,16 +95,20 @@ class DataRegime(object):
 
         return self._loader
 
+
     def set_epoch(self, epoch):
         self.epoch = epoch
         if self._sampler is not None and hasattr(self._sampler, 'set_epoch'):
             self._sampler.set_epoch(epoch)
 
+
     def __len__(self):
         return len(self._data)
 
+
     def __repr__(self):
         return str(self.regime)
+
 
     def get_config(self):
         config = self.regime.config
@@ -125,8 +127,9 @@ class DataRegime(object):
             'data': data_config,
             'loader': loader_config,
             'transform': transform_config,
-            'other': other_config
+            'others': other_config
         }
+
 
     def get(self, key, default=None):
         return self.regime.config.get(key, default)

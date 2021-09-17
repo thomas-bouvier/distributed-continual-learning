@@ -30,7 +30,7 @@ parser.add_argument('--model', metavar='MODEL', required=True,
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
-parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
                     help='input batch size for testing (default: 1000)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
@@ -119,7 +119,7 @@ class Experiment():
         self._create_model()
         self._prepare_dataset()
 
-        self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.log_interval)
+        self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.cuda, args.log_interval)
         self.trainer.training_steps = args.start_epoch * len(self.train_data)
 
 
@@ -167,32 +167,30 @@ class Experiment():
 
 
     def _prepare_dataset(self):
-        validate_data_defaults = {
-            'dataset': self.args.dataset,
-            'dataset_dir': self.args.dataset_dir,
-            'split': 'validate',
-            'batch_size': self.args.batch_size,
-            'shuffle': False
-        }
-
         self.validate_data = DataRegime(
             getattr(self.model, 'data_eval_regime', None),
             hvd,
-            defaults=validate_data_defaults
+            defaults={
+                'dataset': self.args.dataset,
+                'dataset_dir': self.args.dataset_dir,
+                'split': 'validate',
+                'batch_size': self.args.eval_batch_size,
+                'shuffle': False,
+                'distributed': True
+            }
         )
-
-        train_data_defaults = {
-            'dataset': self.args.dataset,
-            'dataset_dir': self.args.dataset_dir,
-            'split': 'train',
-            'batch_size': self.args.batch_size,
-            'shuffle': True
-        }
 
         self.train_data = DataRegime(
             getattr(self.model, 'data_regime', None),
             hvd,
-            defaults=train_data_defaults
+            defaults={
+                'dataset': self.args.dataset,
+                'dataset_dir': self.args.dataset_dir,
+                'split': 'train',
+                'batch_size': self.args.batch_size,
+                'shuffle': True,
+                'distributed': True
+            }
         )
 
 
@@ -220,27 +218,29 @@ class Experiment():
             # evaluate on validation set
             validate_results = self.trainer.validate(self.validate_data.get_loader())
 
-            print('\nResults: epoch: {0}\n'
-                     'Training Loss {train[loss]:.4f} \t\n'
-                     'Validation Loss {validate[loss]:.4f} \t\n'
-                     .format(epoch + 1, train=train_results,
-                     validate=validate_results))
+            # Horovod: print output only on first rank.
+            if hvd.rank() == 0:
+                print('\nResults: epoch: {0}\n'
+                        'Training Loss {train[loss]:.4f} \t\n'
+                        'Validation Loss {validate[loss]:.4f} \t\n'
+                        .format(epoch + 1, train=train_results,
+                        validate=validate_results))
 
-            values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
-            values.update({'training ' + k: v for k, v in train_results.items()})
-            values.update({'validation ' + k: v for k, v in validate_results.items()})
+                values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
+                values.update({'training ' + k: v for k, v in train_results.items()})
+                values.update({'validation ' + k: v for k, v in validate_results.items()})
 
-            results.add(**values)
-            results.plot(x='epoch', y=['training loss', 'validation loss'],
-                     legend=['training', 'validation'],
-                     title='Loss', ylabel='loss')
-            results.plot(x='epoch', y=['training error1', 'validation error1'],
+                results.add(**values)
+                results.plot(x='epoch', y=['training loss', 'validation loss'],
                         legend=['training', 'validation'],
-                        title='Error@1', ylabel='error %')
-            results.plot(x='epoch', y=['training error5', 'validation error5'],
-                        legend=['training', 'validation'],
-                        title='Error@5', ylabel='error %')
-            results.save()
+                        title='Loss', ylabel='loss')
+                results.plot(x='epoch', y=['training error1', 'validation error1'],
+                            legend=['training', 'validation'],
+                            title='Error@1', ylabel='error %')
+                results.plot(x='epoch', y=['training error5', 'validation error5'],
+                            legend=['training', 'validation'],
+                            title='Error@5', ylabel='error %')
+                results.save()
 
         self.timer.end('training')
 
