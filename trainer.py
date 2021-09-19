@@ -6,12 +6,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Trainer(object):
-    def __init__(self, model, optimizer, criterion, log_interval):
+    def __init__(self, model, optimizer, criterion, cuda, log_interval):
         self.timer = Timer()
 
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
+        self.cuda = cuda
         self.log_interval = log_interval
         self.epoch = 0
         self.training_steps = 0
@@ -31,7 +32,7 @@ class Trainer(object):
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
-            if self.model.cuda:
+            if self.cuda:
                 self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-move_batch_to_gpu")
                 inputs, target = inputs.cuda(), target.cuda()
                 self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-move_batch_to_gpu")
