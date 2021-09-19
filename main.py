@@ -32,6 +32,10 @@ parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
                     help='input batch size for testing (default: 1000)')
+parser.add_argument('--batches-per-allreduce', type=int, default=1,
+                    help='number of batches processed locally before '
+                         'executing allreduce across workers; it multiplies '
+                         'total batch size.')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--start-epoch', default=-1, type=int, metavar='N',
@@ -119,6 +123,10 @@ class Experiment():
         self._create_model()
         self._prepare_dataset()
 
+        # Horovod: broadcast parameters & optimizer state.
+        hvd.broadcast_parameters(self.model.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(self.optimizer, root_rank=0)
+
         self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.cuda, args.log_interval)
         self.trainer.training_steps = args.start_epoch * len(self.train_data)
 
@@ -129,7 +137,8 @@ class Experiment():
         self.model = model(**config)
 
         # By default, Adasum doesn't need scaling up learning rate.
-        lr_scaler = hvd.size() if not self.args.use_adasum else 1
+        # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
+        lr_scaler = self.args.batches_per_allreduce * hvd.size() if not self.args.use_adasum else 1
 
         if self.args.cuda:
             self.timer.start('move_model_to_gpu')
@@ -138,7 +147,7 @@ class Experiment():
             self.timer.end('move_model_to_gpu')
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
-                lr_scaler = hvd.local_size()
+                lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
         self.timer.start('create_optimizer')
         # Horovod: scale learning rate by lr_scaler.
@@ -157,6 +166,7 @@ class Experiment():
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
 
         self.optimizer = OptimizerRegime(self.model, compression, reduction,
+                                    self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
         self.timer.end('create_optimizer')
@@ -180,6 +190,7 @@ class Experiment():
             }
         )
 
+        allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data = DataRegime(
             getattr(self.model, 'data_regime', None),
             hvd,
@@ -187,7 +198,7 @@ class Experiment():
                 'dataset': self.args.dataset,
                 'dataset_dir': self.args.dataset_dir,
                 'split': 'train',
-                'batch_size': self.args.batch_size,
+                'batch_size': allreduce_batch_size,
                 'shuffle': True,
                 'distributed': True
             }

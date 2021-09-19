@@ -5,22 +5,19 @@ from regime import Regime
 from regularizer import Regularizer
 
 class OptimizerRegime(Regime, torch.optim.Optimizer):
-    def __init__(self, model, compression, reduction, gradient_predivide_factor, regime, defaults={}):
+    def __init__(self, model, compression, reduction, batches_per_allreduce, gradient_predivide_factor, regime, defaults={}):
         super(OptimizerRegime, self).__init__(regime, defaults)
         self.parameters = list(model.parameters())
         self.regularizer = Regularizer(model)
 
         optimizer = torch.optim.SGD(self.parameters, lr=0)
 
-        # Horovod: broadcast parameters & optimizer state.
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
-
         # Horovod: wrap optimizer with DistributedOptimizer.
         self.optimizer = hvd.DistributedOptimizer(optimizer,
                                     named_parameters=model.named_parameters(),
-                                    op=reduction,
                                     compression=compression,
+                                    op=reduction,
+                                    backward_passes_per_step=batches_per_allreduce,
                                     gradient_predivide_factor=gradient_predivide_factor)
 
 
