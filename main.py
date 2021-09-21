@@ -18,7 +18,6 @@ from data import DataRegime
 from log import ResultsLog
 from optimizer import OptimizerRegime
 from trainer import Trainer
-from utils.timer import Timer
 
 from torchsummary import summary
 
@@ -86,7 +85,6 @@ def main():
         torch.cuda.set_device(hvd.local_rank())
         torch.cuda.manual_seed(args.seed)
 
-
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
@@ -118,7 +116,6 @@ class Experiment():
         self.kwargs = kwargs
 
         self.save_path = save_path
-        self.timer = Timer()
 
         self._create_model()
         self._prepare_dataset()
@@ -141,15 +138,15 @@ class Experiment():
         lr_scaler = self.args.batches_per_allreduce * hvd.size() if not self.args.use_adasum else 1
 
         if self.args.cuda:
-            self.timer.start('move_model_to_gpu')
+            #self.timer.start('move_model_to_gpu')
             # Move model to GPU.
             self.model.cuda()
-            self.timer.end('move_model_to_gpu')
+            #self.timer.end('move_model_to_gpu')
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
-        self.timer.start('create_optimizer')
+        #self.timer.start('create_optimizer')
         # Horovod: scale learning rate by lr_scaler.
         optim_regime = getattr(self.model, 'regime', [
             {
@@ -169,7 +166,7 @@ class Experiment():
                                     self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
-        self.timer.end('create_optimizer')
+        #self.timer.end('create_optimizer')
 
         # define loss function (criterion) and optimizer
         loss_params = {}
@@ -210,13 +207,11 @@ class Experiment():
             # Log our parameters into mlflow
             for key, value in vars(self.args).items():
                 mlflow.log_param(key, value)
-            mlflow.log_param('gpus' : hvd.size())
+            mlflow.log_param('gpus', hvd.size())
 
             results_path = path.join(self.save_path, 'results')
             results = ResultsLog(results_path,
                             title='Training Results - %s' % self.args.save_dir)
-
-            self.timer.start('training')
 
             start_epoch = max(self.args.start_epoch, 0)
             self.trainer.training_steps = start_epoch * len(self.train_data)
@@ -227,10 +222,8 @@ class Experiment():
                 self.train_data.set_epoch(epoch)
                 self.validate_data.set_epoch(epoch)
 
-                self.timer.start(f"epoch_{epoch }")
                 # train for one epoch
                 train_results = self.trainer.train(self.train_data.get_loader())
-                self.timer.end(f"epoch_{epoch}")
 
                 # evaluate on validation set
                 validate_results = self.trainer.validate(self.validate_data.get_loader())
@@ -257,9 +250,7 @@ class Experiment():
                     results.plot(x='epoch', y=['training error5', 'validation error5'],
                                 legend=['training', 'validation'],
                                 title='Error@5', ylabel='error %')
-                    results.save()
-
-            self.timer.end('training')
+                    #results.save()
 
             return train_results
 

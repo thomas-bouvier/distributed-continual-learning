@@ -1,3 +1,6 @@
+import torch
+
+# TODO: use an Allreduce operation to compute the sum
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -17,6 +20,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
+# TODO: check this function
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""
     maxk = max(topk)
