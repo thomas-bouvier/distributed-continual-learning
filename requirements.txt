@@ -1,8 +1,10 @@
 bokeh
 filelock
 horovod[pytorch]
+mlflow
 torch
 torchvision
 tqdm
 torchsummary
 pandas
+pytorch-lightning

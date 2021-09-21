@@ -1,10 +1,11 @@
 import argparse
+import horovod.torch as hvd
 import json
+import mlflow
 import os
 import time
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
-import horovod.torch as hvd
 
 from ast import literal_eval
 from datetime import datetime
@@ -108,12 +109,7 @@ def main():
             makedirs(save_path)
 
     xp = Experiment(save_path, args, kwargs)
-    
-    run_duration = time.time()
-    run_trace = xp.run()
-    run_duration = time.time() - run_duration
-
-    xp.write_results(run_duration, run_trace)
+    xp.run()
 
 
 class Experiment():
@@ -210,73 +206,62 @@ class Experiment():
 
 
     def run(self):
-        results_path = path.join(self.save_path, 'results')
-        results = ResultsLog(results_path,
-                         title='Training Results - %s' % self.args.save_dir)
+        with mlflow.start_run():
+            # Log our parameters into mlflow
+            for key, value in vars(self.args).items():
+                mlflow.log_param(key, value)
+            mlflow.log_param('gpus' : hvd.size())
 
-        self.timer.start('training')
+            results_path = path.join(self.save_path, 'results')
+            results = ResultsLog(results_path,
+                            title='Training Results - %s' % self.args.save_dir)
 
-        start_epoch = max(self.args.start_epoch, 0)
-        self.trainer.training_steps = start_epoch * len(self.train_data)
-        for epoch in range(start_epoch, self.args.epochs):
-            self.trainer.epoch = epoch
+            self.timer.start('training')
 
-            # Horovod: set epoch to sampler for shuffling.
-            self.train_data.set_epoch(epoch)
-            self.validate_data.set_epoch(epoch)
+            start_epoch = max(self.args.start_epoch, 0)
+            self.trainer.training_steps = start_epoch * len(self.train_data)
+            for epoch in range(start_epoch, self.args.epochs):
+                self.trainer.epoch = epoch
 
-            self.timer.start(f"epoch_{epoch }")
-            # train for one epoch
-            train_results = self.trainer.train(self.train_data.get_loader())
-            self.timer.end(f"epoch_{epoch}")
+                # Horovod: set epoch to sampler for shuffling.
+                self.train_data.set_epoch(epoch)
+                self.validate_data.set_epoch(epoch)
 
-            # evaluate on validation set
-            validate_results = self.trainer.validate(self.validate_data.get_loader())
+                self.timer.start(f"epoch_{epoch }")
+                # train for one epoch
+                train_results = self.trainer.train(self.train_data.get_loader())
+                self.timer.end(f"epoch_{epoch}")
 
-            # Horovod: print output only on first rank.
-            if hvd.rank() == 0:
-                print('\nResults: epoch: {0}\n'
-                        'Training Loss {train[loss]:.4f} \t\n'
-                        'Validation Loss {validate[loss]:.4f} \t\n'
-                        .format(epoch + 1, train=train_results,
-                        validate=validate_results))
+                # evaluate on validation set
+                validate_results = self.trainer.validate(self.validate_data.get_loader())
 
-                values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
-                values.update({'training ' + k: v for k, v in train_results.items()})
-                values.update({'validation ' + k: v for k, v in validate_results.items()})
+                # Horovod: print output only on first rank.
+                if hvd.rank() == 0:
+                    print('\nResults: epoch: {0}\n'
+                            'Training Loss {train[loss]:.4f} \t\n'
+                            'Validation Loss {validate[loss]:.4f} \t\n'
+                            .format(epoch + 1, train=train_results,
+                            validate=validate_results))
 
-                results.add(**values)
-                results.plot(x='epoch', y=['training loss', 'validation loss'],
-                        legend=['training', 'validation'],
-                        title='Loss', ylabel='loss')
-                results.plot(x='epoch', y=['training error1', 'validation error1'],
+                    values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
+                    values.update({'training ' + k: v for k, v in train_results.items()})
+                    values.update({'validation ' + k: v for k, v in validate_results.items()})
+
+                    results.add(**values)
+                    results.plot(x='epoch', y=['training loss', 'validation loss'],
                             legend=['training', 'validation'],
-                            title='Error@1', ylabel='error %')
-                results.plot(x='epoch', y=['training error5', 'validation error5'],
-                            legend=['training', 'validation'],
-                            title='Error@5', ylabel='error %')
-                results.save()
+                            title='Loss', ylabel='loss')
+                    results.plot(x='epoch', y=['training error1', 'validation error1'],
+                                legend=['training', 'validation'],
+                                title='Error@1', ylabel='error %')
+                    results.plot(x='epoch', y=['training error5', 'validation error5'],
+                                legend=['training', 'validation'],
+                                title='Error@5', ylabel='error %')
+                    results.save()
 
-        self.timer.end('training')
+            self.timer.end('training')
 
-        return train_results
-
-
-    def write_results(self, run_duration, run_trace):
-        results = {
-            'experiment': {
-                'GPUs' : hvd.size(),
-                'parameters' : dict(self.args._get_kwargs())
-            },
-            'run_duration': run_duration,
-            'run': run_trace
-        }
-
-        filename = path.join(self.save_path, 'trace.json')
-        with open(filename, 'w') as fp:
-            json.dump(results, fp, sort_keys=True, indent=4)
-
-        return results
+            return train_results
 
 
 if __name__ == "__main__":
