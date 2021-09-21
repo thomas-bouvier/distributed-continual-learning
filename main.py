@@ -6,6 +6,7 @@ import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import horovod.torch as hvd
 
+from ast import literal_eval
 from datetime import datetime
 from filelock import FileLock
 from os import path, makedirs
@@ -28,6 +29,8 @@ parser = argparse.ArgumentParser(description='Distributed deep learning with Hor
 parser.add_argument('--model', metavar='MODEL', required=True,
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names))
+parser.add_argument('--model-config', default='',
+                    help='additional architecture configuration')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
@@ -86,6 +89,7 @@ def main():
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
+    # TODO: check the number of workers
     # https://github.com/horovod/horovod/issues/2053
     kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
@@ -123,17 +127,17 @@ class Experiment():
         self._create_model()
         self._prepare_dataset()
 
-        # Horovod: broadcast parameters & optimizer state.
-        hvd.broadcast_parameters(self.model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(self.optimizer, root_rank=0)
-
         self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.cuda, args.log_interval)
         self.trainer.training_steps = args.start_epoch * len(self.train_data)
 
 
     def _create_model(self):
         model = models.__dict__[self.args.model]
+
         config = {'dataset': self.args.dataset}
+        if self.args.model_config != '':
+            config = dict(config, **literal_eval(self.args.model_config))
+
         self.model = model(**config)
 
         # By default, Adasum doesn't need scaling up learning rate.
