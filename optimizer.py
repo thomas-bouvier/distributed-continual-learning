@@ -12,6 +12,10 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
         optimizer = torch.optim.SGD(self.parameters, lr=0)
 
+        # Horovod: broadcast parameters & optimizer state.
+        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+
         # Horovod: wrap optimizer with DistributedOptimizer.
         self.optimizer = hvd.DistributedOptimizer(optimizer,
                                     named_parameters=model.named_parameters(),

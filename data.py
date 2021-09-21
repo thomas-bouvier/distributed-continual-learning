@@ -5,9 +5,10 @@ from filelock import FileLock
 
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torchvision import datasets, transforms
+from torchvision import datasets
 from copy import deepcopy
 
+from preprocess import get_transform
 from regime import Regime
 
 def get_dataset(dataset='mnist', split='train', transform=None,
@@ -36,21 +37,26 @@ def get_dataset(dataset='mnist', split='train', transform=None,
                                     transform=transform,
                                     target_transform=target_transform,
                                     download=download)
-
-def get_transform(transform_name='mnist'):
-    if transform_name == 'cifar10':
-        return transforms.Compose([
-            transforms.ToTensor()
-        ])
-    elif transform_name == 'cifar100':
-        return transforms.Compose([
-            transforms.ToTensor()
-        ])
-    elif transform_name == 'mnist':
-        return transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
-        ])
+    elif dataset == 'imagenet':
+        root = os.path.join(root, 'ImageNet')
+        if train:
+            root = os.path.join(root, 'train')
+        else:
+            root = os.path.join(root, 'val')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.ImageFolder(root=root,
+                                        transform=transform,
+                                        target_transform=target_transform)
+    elif dataset == 'imagenet_blurred':
+        root = os.path.join(root, 'ImageNet_blurred')
+        if train:
+            root = os.path.join(root, 'train_blurred')
+        else:
+            root = os.path.join(root, 'val_blurred')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.ImageFolder(root=root,
+                                        transform=transform,
+                                        target_transform=target_transform)
 
 
 _DATA_ARGS = {'dataset', 'split', 'transform', 'target_transform', 'download',
