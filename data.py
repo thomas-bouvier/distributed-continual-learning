@@ -37,6 +37,16 @@ def get_dataset(dataset='mnist', split='train', transform=None,
                                     transform=transform,
                                     target_transform=target_transform,
                                     download=download)
+    elif dataset == 'tinyimagenet':
+        root = os.path.join(root, 'TinyImageNet')
+        if train:
+            root = os.path.join(root, 'train')
+        else:
+            root = os.path.join(root, 'val')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.ImageFolder(root=root,
+                                        transform=transform,
+                                        target_transform=target_transform)
     elif dataset == 'imagenet':
         root = os.path.join(root, 'ImageNet')
         if train:

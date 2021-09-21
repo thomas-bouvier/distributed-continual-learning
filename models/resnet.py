@@ -260,7 +260,7 @@ def resnet(**config):
         config.setdefault('depth', 44)
         return resnet_cifar_model(block=BasicBlock, **config)
 
-    elif dataset == 'imagenet' or dataset == 'imagenet_blurred':
+    elif dataset == 'tinyimagenet' or dataset == 'imagenet' or dataset == 'imagenet_blurred':
         config.setdefault('num_classes', 1000)
         depth = config.pop('depth', 50)
         if depth == 18:

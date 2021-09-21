@@ -6,15 +6,18 @@ def get_transform(transform_name='mnist'):
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
         ])
+
     elif transform_name == 'cifar10':
         return transforms.Compose([
             transforms.ToTensor()
         ])
+
     elif transform_name == 'cifar100':
         return transforms.Compose([
             transforms.ToTensor()
         ])
-    elif transform_name == 'imagenet' or transform_name == 'imagenet_blurred':
+
+    elif transform_name == 'tinyimagenet' or transform_name == 'imagenet' or transform_name == 'imagenet_blurred':
         return transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
