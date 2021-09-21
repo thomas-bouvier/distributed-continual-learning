@@ -2,7 +2,9 @@ import argparse
 import horovod.torch as hvd
 import json
 import mlflow
+import mlflow.pytorch
 import os
+import pickle
 import time
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
@@ -251,6 +253,10 @@ class Experiment():
                                 legend=['training', 'validation'],
                                 title='Error@5', ylabel='error %')
                     #results.save()
+
+            # Log the model as an artifact of the MLflow run.
+            print("Logging the trained model as a run artifact...")
+            mlflow.pytorch.log_model(self.model, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
 
             return train_results
 

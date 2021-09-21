@@ -85,9 +85,9 @@ class Trainer(object):
             meters['prec5'].update(float(prec5), inputs.size(0))
 
             mlflow.log_metrics({
-                'loss': value=float(loss),
-                'prec1': value=float(prec1),
-                'prec5': value=float(prec5),
+                'loss': float(loss),
+                'prec1': float(prec1),
+                'prec5': float(prec5)
             }, step=self.epoch)
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_loader) - 1:
