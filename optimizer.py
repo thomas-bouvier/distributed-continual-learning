@@ -25,10 +25,10 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
                                     gradient_predivide_factor=gradient_predivide_factor)
 
 
-    def update(self, epoch=None, training_steps=None):
+    def update(self, epoch=None, steps=None):
         """Adjust optimizer according to current epoch or steps and training regime.
         """
-        if super(OptimizerRegime, self).update(epoch, training_steps):
+        if super(OptimizerRegime, self).update(epoch, steps):
             self.adjust_from_config(self.config)
 
 

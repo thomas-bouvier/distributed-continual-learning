@@ -17,14 +17,14 @@ class Regime(object):
         self.current_regime_phase = None
 
 
-    def update(self, epoch, training_steps):
+    def update(self, epoch, steps):
         """Adjusts config according to current epoch or steps and regime.
         """
         if self.regime is None:
             return False
 
         epoch = -1 if epoch is None else epoch
-        training_steps = -1 if training_steps is None else training_steps
+        steps = -1 if steps is None else steps
         config = deepcopy(self.config)
 
         if self.current_regime_phase is None:
@@ -32,7 +32,7 @@ class Regime(object):
             for regime_phase, regime_config in enumerate(self.regime):
                 start_epoch = regime_config.get('epoch', 0)
                 start_step = regime_config.get('step', 0)
-                if epoch >= start_epoch or training_steps >= start_step:
+                if epoch >= start_epoch or steps >= start_step:
                     self.current_regime_phase = regime_phase
                     break
                 config.update(regime_config)
@@ -42,7 +42,7 @@ class Regime(object):
             # Any more regime steps?
             start_epoch = self.regime[next_phase].get('epoch', float('inf'))
             start_step = self.regime[next_phase].get('step', float('inf'))
-            if epoch >= start_epoch or training_steps >= start_step:
+            if epoch >= start_epoch or steps >= start_step:
                 self.current_regime_phase = next_phase
 
         config.update(self.regime[self.current_regime_phase])

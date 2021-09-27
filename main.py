@@ -33,6 +33,10 @@ parser.add_argument('--model', metavar='MODEL', required=True,
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--model-config', default='',
                     help='additional architecture configuration')
+parser.add_argument('--continual', action='store_true', default=False,
+                    help='continual learning')
+parser.add_argument('--continual-config', default='',
+                    help='additional continual learning configuration')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
@@ -123,7 +127,7 @@ class Experiment():
         self._prepare_dataset()
 
         self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.cuda, args.log_interval)
-        self.trainer.training_steps = args.start_epoch * len(self.train_data)
+        self.trainer.steps = args.start_epoch * len(self.train_data)
 
 
     def _create_model(self):
@@ -176,30 +180,32 @@ class Experiment():
 
 
     def _prepare_dataset(self):
-        self.validate_data = DataRegime(
-            getattr(self.model, 'data_eval_regime', None),
-            hvd,
-            defaults={
-                'dataset': self.args.dataset,
-                'dataset_dir': self.args.dataset_dir,
-                'split': 'validate',
-                'batch_size': self.args.eval_batch_size,
-                'shuffle': False,
-                'distributed': True
-            }
-        )
-
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data = DataRegime(
-            getattr(self.model, 'data_regime', None),
             hvd,
+            getattr(self.model, 'data_regime', None),
             defaults={
                 'dataset': self.args.dataset,
                 'dataset_dir': self.args.dataset_dir,
                 'split': 'train',
                 'batch_size': allreduce_batch_size,
                 'shuffle': True,
-                'distributed': True
+                'distributed': True,
+                'continual': self.args.continual
+            }
+        )
+
+        self.validate_data = DataRegime(
+            hvd,
+            getattr(self.model, 'data_eval_regime', None),
+            defaults={
+                'dataset': self.args.dataset,
+                'dataset_dir': self.args.dataset_dir,
+                'split': 'validate',
+                'batch_size': self.args.eval_batch_size,
+                'shuffle': False,
+                'distributed': True,
+                'continual': self.args.continual
             }
         )
 
@@ -211,54 +217,72 @@ class Experiment():
                 mlflow.log_param(key, value)
             mlflow.log_param('gpus', hvd.size())
 
-            results_path = path.join(self.save_path, 'results')
-            results = ResultsLog(results_path,
-                            title='Training Results - %s' % self.args.save_dir)
-
-            start_epoch = max(self.args.start_epoch, 0)
-            self.trainer.training_steps = start_epoch * len(self.train_data)
-            for epoch in range(start_epoch, self.args.epochs):
-                self.trainer.epoch = epoch
-
-                # Horovod: set epoch to sampler for shuffling.
-                self.train_data.set_epoch(epoch)
-                self.validate_data.set_epoch(epoch)
-
-                # train for one epoch
-                train_results = self.trainer.train(self.train_data.get_loader())
-
-                # evaluate on validation set
-                validate_results = self.trainer.validate(self.validate_data.get_loader())
-
-                # Horovod: print output only on first rank.
-                if hvd.rank() == 0:
-                    print('\nResults: epoch: {0}\n'
-                            'Training Loss {train[loss]:.4f} \t\n'
-                            'Validation Loss {validate[loss]:.4f} \t\n'
-                            .format(epoch + 1, train=train_results,
-                            validate=validate_results))
-
-                    values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
-                    values.update({'training ' + k: v for k, v in train_results.items()})
-                    values.update({'validation ' + k: v for k, v in validate_results.items()})
-
-                    results.add(**values)
-                    results.plot(x='epoch', y=['training loss', 'validation loss'],
-                            legend=['training', 'validation'],
-                            title='Loss', ylabel='loss')
-                    results.plot(x='epoch', y=['training error1', 'validation error1'],
-                                legend=['training', 'validation'],
-                                title='Error@1', ylabel='error %')
-                    results.plot(x='epoch', y=['training error5', 'validation error5'],
-                                legend=['training', 'validation'],
-                                title='Error@5', ylabel='error %')
-                    #results.save()
-
+            if self.args.continual:
+                self.run_workload_c()
+            else:
+                self.run_workload()
+        
             # Log the model as an artifact of the MLflow run.
             print("Logging the trained model as a run artifact...")
             mlflow.pytorch.log_model(self.model, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
 
-            return train_results
+
+    def run_workload_c(self):
+        for task_id in range(0, len(self.train_data.scenario)):
+            if hvd.rank() == 0:
+                print('\nTask: {0}\n'.format(task_id))
+
+            self.train_data.set_task_id(task_id)
+            self.validate_data.set_task_id(task_id)
+
+            self.run_workload()
+
+
+    def run_workload(self):
+        results_path = path.join(self.save_path, 'results')
+        results = ResultsLog(results_path,
+                        title='Training Results - %s' % self.args.save_dir)
+
+        start_epoch = max(self.args.start_epoch, 0)
+        self.trainer.steps = start_epoch * len(self.train_data)
+
+        for epoch in range(start_epoch, self.args.epochs):
+            self.trainer.epoch = epoch
+
+            # Horovod: set epoch to sampler for shuffling.
+            self.train_data.set_epoch(epoch)
+            self.validate_data.set_epoch(epoch)
+
+            # train for one epoch
+            train_results = self.trainer.train(self.train_data.get_loader())
+
+            # evaluate on validation set
+            validate_results = self.trainer.validate(self.validate_data.get_loader())
+
+            if hvd.rank() == 0:
+                print('\nResults: epoch: {0}\n'
+                        'Training Loss {train[loss]:.4f} \t\n'
+                        'Validation Loss {validate[loss]:.4f} \t\n'
+                        .format(epoch + 1, train=train_results,
+                        validate=validate_results))
+
+                values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
+                values.update({'training ' + k: v for k, v in train_results.items()})
+                values.update({'validation ' + k: v for k, v in validate_results.items()})
+
+                results.add(**values)
+                results.plot(x='epoch', y=['training loss', 'validation loss'],
+                        legend=['training', 'validation'],
+                        title='Loss', ylabel='loss')
+                results.plot(x='epoch', y=['training error1', 'validation error1'],
+                            legend=['training', 'validation'],
+                            title='Error@1', ylabel='error %')
+                results.plot(x='epoch', y=['training error5', 'validation error5'],
+                            legend=['training', 'validation'],
+                            title='Error@5', ylabel='error %')
+                #results.save()
+
+        return train_results
 
 
 if __name__ == "__main__":

@@ -69,7 +69,10 @@ class Trainer(object):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 
-        for i_batch, (inputs, target) in enumerate(data_loader):
+        for i_batch, item in enumerate(data_loader):
+            inputs = item[0]
+            target = item[1]
+
             #self.timer.start(f"start_epoch_{self.epoch}-batch_{i_batch}")
             output, loss = self._step(i_batch,
                                       inputs,
