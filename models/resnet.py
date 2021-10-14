@@ -204,6 +204,7 @@ class resnet_cifar_model(resnet_model):
             {'epoch': 164, 'lr': 1e-4}
         ]
 
+
 class resnet_imagenet_model(resnet_model):
     num_train_images = 1281167
 
@@ -248,7 +249,7 @@ class resnet_imagenet_model(resnet_model):
 
 
 def resnet(**config):
-    dataset = config.pop('dataset', 'cifar10')
+    dataset = config.get('dataset', 'cifar10')
 
     if dataset == 'cifar10':
         config.setdefault('num_classes', 10)
@@ -275,7 +276,6 @@ def resnet(**config):
             config.update(dict(block=Bottleneck, layers=[3, 4, 6, 3]))
         elif depth == 101:
             config.update(dict(block=Bottleneck, layers=[3, 4, 23, 3]))
-
         return resnet_imagenet_model(**config)
 
     else:

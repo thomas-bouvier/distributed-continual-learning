@@ -15,6 +15,8 @@ from filelock import FileLock
 from os import path, makedirs
 
 import models
+import wrappers
+
 from cross_entropy import CrossEntropyLoss
 from data import DataRegime
 from log import ResultsLog
@@ -27,16 +29,29 @@ model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(models.__dict__[name]))
 
+wrapper_names = sorted(name for name in wrappers.__dict__
+                     if name.islower() and not name.startswith("__")
+                     and callable(wrappers.__dict__[name]))
+
 parser = argparse.ArgumentParser(description='Distributed deep learning with Horovod + PyTorch')
+parser.add_argument('--dataset', required=True,
+                    help="dataset name")
+parser.add_argument('--dataset-dir', default='./data',
+                    help='location of the training dataset in the local filesystem (will be downloaded if needed)')
+parser.add_argument('--dataset-config', default='',
+                    help='additional dataset configuration (useful for continual learning)')
+parser.add_argument('--wrapper', metavar='WRAPPER', default=None,
+                    choices=wrapper_names,
+                    help='model wrapper: ' + ' | '.join(wrapper_names))
+parser.add_argument('--wrapper-config', default='',
+                    help='additional wrapper configuration')
 parser.add_argument('--model', metavar='MODEL', required=True,
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--model-config', default='',
-                    help='additional architecture configuration')
+                    help='additional model architecture configuration')
 parser.add_argument('--continual', action='store_true', default=False,
                     help='continual learning')
-parser.add_argument('--continual-config', default='',
-                    help='additional continual learning configuration')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
@@ -69,10 +84,6 @@ parser.add_argument('--gradient-predivide-factor', type=float, default=1.0,
                     help='apply gradient predivide factor in optimizer (default: 1.0)')
 parser.add_argument('--weight-decay', '--wd', type=float, default=0,
                     metavar='W', help='weight decay (default: 0)')
-parser.add_argument('--dataset', required=True,
-                    help="dataset name")
-parser.add_argument('--dataset-dir', default='./data',
-                    help='location of the training dataset in the local filesystem (will be downloaded if needed)')
 parser.add_argument('--results-dir', metavar='RESULTS_DIR', default='./results',
                     help='results dir')
 parser.add_argument('--save-dir', metavar='SAVE_DIR', default='',
@@ -131,13 +142,19 @@ class Experiment():
 
 
     def _create_model(self):
-        model = models.__dict__[self.args.model]
+        config = {
+            'model': self.args.model,
+            'dataset': self.args.dataset
+        }
 
-        config = {'dataset': self.args.dataset}
+        model = wrappers.__dict__[self.args.wrapper] if self.args.wrapper is not None else models.__dict__[self.args.model]
+
         if self.args.model_config != '':
             config = dict(config, **literal_eval(self.args.model_config))
+        if self.args.wrapper_config != '':
+            config = dict(config, **literal_eval(self.args.wrapper_config))
 
-        self.model = model(**config)
+        self.model = model(config)
 
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce

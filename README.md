@@ -21,14 +21,14 @@ ln -s /home/tbouvier/Dev/horovod-e2clab-examples/artifacts/data/ data
 ```
 python main.py --model mnistnet --dataset mnist
 python main.py --model resnet --dataset cifar10
-python main.py --model resnet --model-config {'depth': 48} --dataset cifar100
+python main.py --model resnet --model-config "{'depth': 48}" --dataset cifar100
 ```
 
 ### Continual learning
 
 ```
-python main.py --model mnistnet --continual --continual-config {'scenario': 'class', 'initial_increment': 10, 'increment': 2} --dataset cifar100
-python main.py --model resnet --model-config {'depth': 101} --continual --continual-config {'scenario': 'domain', 'nb_tasks': 5} --dataset tinyimagenet
+python main.py --model mnistnet --dataset cifar100 --dataset-config "{'scenario': 'class', 'initial_increment': 10, 'increment': 2}" --continual
+python main.py --model resnet --model-config "{'depth': 101}" --dataset tinyimagenet --dataset-config "{'scenario': 'domain', 'nb_tasks': 5}" --continual
 ```
 
 Change the network interface if needed: `HOROVOD_GLOO_IFACE=wlo1`.
