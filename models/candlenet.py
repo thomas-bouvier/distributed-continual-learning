@@ -25,6 +25,9 @@ class candle_model(nn.Module):
     def forward(self, x):
         return self.features(x)
 
+    def should_distill(self):
+        return False
+
 
 def candlenet(**config):
     return candle_model()

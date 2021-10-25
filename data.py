@@ -34,20 +34,32 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
                                 download=download)
 
     elif dataset == 'cifar10':
-        with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.CIFAR10(root=os.path.join(root, 'CIFAR10'),
-                                    train=train,
-                                    transform=transform,
-                                    target_transform=target_transform,
-                                    download=download)
+        if continual:
+            with FileLock(os.path.expanduser("~/.horovod_lock")):
+                return datasets_c.CIFAR10(data_path=os.path.join(root, 'CIFAR10'),
+                                train=train,
+                                download=download)
+        else:
+            with FileLock(os.path.expanduser("~/.horovod_lock")):
+                return datasets.CIFAR10(root=os.path.join(root, 'CIFAR10'),
+                                        train=train,
+                                        transform=transform,
+                                        target_transform=target_transform,
+                                        download=download)
 
     elif dataset == 'cifar100':
-        with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.CIFAR100(root=os.path.join(root, 'CIFAR100'),
-                                    train=train,
-                                    transform=transform,
-                                    target_transform=target_transform,
-                                    download=download)
+        if continual:
+            with FileLock(os.path.expanduser("~/.horovod_lock")):
+                return datasets_c.CIFAR100(data_path=os.path.join(root, 'CIFAR100'),
+                                train=train,
+                                download=download)
+        else:
+            with FileLock(os.path.expanduser("~/.horovod_lock")):
+                return datasets.CIFAR100(root=os.path.join(root, 'CIFAR100'),
+                                        train=train,
+                                        transform=transform,
+                                        target_transform=target_transform,
+                                        download=download)
 
     elif dataset == 'tinyimagenet':
         root = os.path.join(root, 'TinyImageNet')

@@ -166,6 +166,9 @@ class resnet_model(nn.Module):
         x = self.fc(x)
         return x
 
+    def should_distill(self):
+        return False
+
 
 class resnet_cifar_model(resnet_model):
     def __init__(self, num_classes=10, inplanes=16,
@@ -248,8 +251,8 @@ class resnet_imagenet_model(resnet_model):
         ]
 
 
-def resnet(**config):
-    dataset = config.get('dataset', 'cifar10')
+def resnet(config):
+    dataset = config.pop('dataset', 'cifar10')
 
     if dataset == 'cifar10':
         config.setdefault('num_classes', 10)
@@ -264,18 +267,23 @@ def resnet(**config):
     elif dataset == 'tinyimagenet' or dataset == 'imagenet' or dataset == 'imagenet_blurred':
         config.setdefault('num_classes', 1000)
         depth = config.pop('depth', 50)
+
         if depth == 18:
             config.update(dict(block=BasicBlock,
                                layers=[2, 2, 2, 2],
                                expansion=1))
+
         elif depth == 34:
             config.update(dict(block=BasicBlock,
                                layers=[3, 4, 6, 3],
                                expansion=1))
+
         elif depth == 50:
             config.update(dict(block=Bottleneck, layers=[3, 4, 6, 3]))
+
         elif depth == 101:
             config.update(dict(block=Bottleneck, layers=[3, 4, 23, 3]))
+
         return resnet_imagenet_model(**config)
 
     else:

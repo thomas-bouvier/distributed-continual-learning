@@ -15,7 +15,6 @@ class icarl_candlenet_model(nn.Module):
         self.fc2 = nn.Linear(200, 20)
         self.fc3 = nn.Linear(20, 2)
 
-
     def forward(self, x):
         x = self.conv1(x)
         x = F.relu(x)
@@ -33,6 +32,9 @@ class icarl_candlenet_model(nn.Module):
         x = self.fc3(x)
         return fv, x
 
+    def should_distill(self):
+        return True
 
-def icarl_candlenet(**config):
+
+def icarl_candlenet(config):
     return icarl_candlenet_model()

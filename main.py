@@ -142,15 +142,13 @@ class Experiment():
 
 
     def _create_model(self):
-        config = {
-            'model': self.args.model,
-            'dataset': self.args.dataset
-        }
-
+        config = { 'dataset': self.args.dataset }
         model = wrappers.__dict__[self.args.wrapper] if self.args.wrapper is not None else models.__dict__[self.args.model]
 
         if self.args.model_config != '':
             config = dict(config, **literal_eval(self.args.model_config))
+        if self.args.wrapper is not None:
+            config = dict(config, model=self.args.model)
         if self.args.wrapper_config != '':
             config = dict(config, **literal_eval(self.args.wrapper_config))
 
@@ -161,15 +159,12 @@ class Experiment():
         lr_scaler = self.args.batches_per_allreduce * hvd.size() if not self.args.use_adasum else 1
 
         if self.args.cuda:
-            #self.timer.start('move_model_to_gpu')
             # Move model to GPU.
             self.model.cuda()
-            #self.timer.end('move_model_to_gpu')
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
-        #self.timer.start('create_optimizer')
         # Horovod: scale learning rate by lr_scaler.
         optim_regime = getattr(self.model, 'regime', [
             {
@@ -189,11 +184,12 @@ class Experiment():
                                     self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
-        #self.timer.end('create_optimizer')
 
-        # define loss function (criterion) and optimizer
         loss_params = {}
         self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
+
+        # Create masked loss function
+        #celoss = nn.CrossEntropyLoss(weight=mask)
 
 
     def _prepare_dataset(self):
@@ -252,7 +248,19 @@ class Experiment():
             self.train_data.set_task_id(task_id)
             self.validate_data.set_task_id(task_id)
 
+            # Create mask so the loss is only used for classes learnt during this task
+            nc = set([data[1] for data in self.train_data.get_loader()])
+            mask = torch.tensor([False for _ in range(self.model.num_classes)])
+            for y in nc:
+                mask[y] = True
+            mask = mask.float().cuda()
+
+            if task_id > 0:
+                self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
+                hvd.broadcast_optimizer_state(self.opt, root_rank=0)
+
             self.run_workload()
+            self.update_examplars(nc)
 
 
     def run_workload(self):
@@ -263,6 +271,10 @@ class Experiment():
         start_epoch = max(self.args.start_epoch, 0)
         self.trainer.steps = start_epoch * len(self.train_data)
 
+        if self.model.should_distill():
+            mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
+            mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
+
         for epoch in range(start_epoch, self.args.epochs):
             self.trainer.epoch = epoch
 
@@ -270,11 +282,23 @@ class Experiment():
             self.train_data.set_epoch(epoch)
             self.validate_data.set_epoch(epoch)
 
+            if self.model.should_distill():
+                cand_x = torch.zeros([self.nb_candidates] + list(mem_x[0].size())).share_memory_()
+                cand_y = torch.zeros([self.nb_candidates] + list(mem_y[0].size())).share_memory_()
+                lock_make = mp.Lock()
+                lock_made = mp.Lock()
+                lock_made.acquire()
+                p = mp.Process(target=make_candidates, args=(self.nb_candidates, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, len(self.train_data.get_loader())))
+                p.start()
+
             # train for one epoch
             train_results = self.trainer.train(self.train_data.get_loader())
 
             # evaluate on validation set
             validate_results = self.trainer.validate(self.validate_data.get_loader())
+
+            if self.model.should_distill():
+                p.join()
 
             if hvd.rank() == 0:
                 print('\nResults: epoch: {0}\n'

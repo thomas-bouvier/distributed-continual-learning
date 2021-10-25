@@ -29,6 +29,7 @@ python main.py --model resnet --model-config "{'depth': 48}" --dataset cifar100
 ```
 python main.py --model mnistnet --dataset cifar100 --dataset-config "{'scenario': 'class', 'initial_increment': 10, 'increment': 2}" --continual
 python main.py --model resnet --model-config "{'depth': 101}" --dataset tinyimagenet --dataset-config "{'scenario': 'domain', 'nb_tasks': 5}" --continual
+python main.py --model resnet --model-config "{'depth': 101}" --wrapper icarl --dataset tinyimagenet --dataset-config "{'scenario': 'domain', 'nb_tasks': 5}" --continual
 ```
 
 Change the network interface if needed: `HOROVOD_GLOO_IFACE=wlo1`.

@@ -20,46 +20,44 @@ class Trainer(object):
         outputs = []
         total_loss = 0
 
-        #self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}")
-
         if training:
-            #self.timer.start(f"epoch_{self.epoch}-batch_{i_batch}-zero_grad")
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.training_steps)
-            #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-zero_grad")
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
             if self.cuda:
-                #self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-move_batch_to_gpu")
                 inputs, target = inputs.cuda(), target.cuda()
-                #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-move_batch_to_gpu")
 
-            #self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-forward_pass")
+            if self.model.should_distill() and self.epoch + 1 == num_epochs:
+                if self.memx is None:
+                    self.memx = inputs.detach()
+                    self.memy = target.detach()
+                else:
+                    self.memx = torch.cat(self.memx, inputs.detach())
+                    self.memy = torch.cat(self.memy, target.detach())
+
+                lock_made.acquire()
+                x = torch.cat(x, cand_x.cuda())
+                dist_y = cand_y.cuda()
+                lock_make.release()
+
             output = self.model(inputs)
-            #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-forward_pass")
-
-            #self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-compute_loss")
             loss = self.criterion(output, target)
-            #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-compute_loss")
+
+            # Compute distillation loss
+            if self.model.should_distill():
+                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
 
             if training:
-                #self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-backward_pass")
                 # accumulate gradient
                 loss.backward()
-                #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-backward_pass")
-
-            if training:
-                #self.timer.start(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-optimizer_step")
                 # SGD step
                 self.optimizer.step()
                 self.training_steps += 1
-                #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}-chunk_{i}-optimizer_step")
 
             outputs.append(output.detach())
             total_loss += float(loss)
-
-        #self.timer.end(f"epoch_{self.epoch }-batch_{i_batch}")
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
@@ -70,16 +68,14 @@ class Trainer(object):
                   for metric in ['loss', 'prec1', 'prec5']}
 
         for i_batch, item in enumerate(data_loader):
-            inputs = item[0]
-            target = item[1]
+            inputs = item[0] # x
+            target = item[1] # y
 
-            #self.timer.start(f"start_epoch_{self.epoch}-batch_{i_batch}")
             output, loss = self._step(i_batch,
                                       inputs,
                                       target,
                                       training=training,
                                       average_output=average_output)
-            #self.timer.start(f"end_epoch_{self.epoch}-batch_{i_batch}")
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, target, topk=(1, 5))
