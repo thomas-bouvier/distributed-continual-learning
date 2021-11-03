@@ -32,9 +32,6 @@ class icarl_candlenet_model(nn.Module):
         x = self.fc3(x)
         return fv, x
 
-    def should_distill(self):
-        return True
-
 
 def icarl_candlenet(config):
     return icarl_candlenet_model()

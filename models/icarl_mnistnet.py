@@ -23,9 +23,6 @@ class icarl_mnistnet_model(nn.Module):
         x = self.fc2(x)
         return fv, x
 
-    def should_distill(self):
-        return True
-
 
 def icarl_mnistnet(config):
     return icarl_mnistnet_model()

@@ -117,9 +117,6 @@ class icarl_resnet_model(nn.Module):
         out = self.linear(out)
         return fv, out
 
-    def should_distill(self):
-        return True
-
 
 def icarl_resnet(config):
     dataset = config.pop('dataset', 'cifar10')

@@ -15,8 +15,8 @@ from utils import *
 from models import *
 
 
-def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, nb_batches):
-    for i in range(nb_batches):
+def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_batches):
+    for i in range(num_batches):
         lock_make.acquire()
 
         selection = torch.randperm(len(mem_x))[n].clone()
@@ -45,7 +45,6 @@ class icarl_wrapper(nn.Module):
         self.num_exemplars = 0
         self.num_features = config.get('num_features')
         self.num_classes = config.get('num_classes')
-        #self.learning_rate = config.get('learning_rate')
         self.num_candidates = config.get('num_candidates')
         #self.candle = self.num_classes == 2
 
@@ -64,12 +63,57 @@ class icarl_wrapper(nn.Module):
         self.mem_class_y = {} 
         self.mem_class_means = {}
 
-        self.first_task = True
         self.val_set = None
 
 
-    def get_state_dict(self):
-        return self.model.state_dict()
+    def before_all_tasks(self):
+        if self.mem_class_x != {}:
+            mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
+            mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
+
+
+    def before_every_task(self, train_taskset):
+        # Create mask so the loss is only used for classes learnt during this task
+        nc = set([data[1] for data in train_taskset])
+        mask = torch.tensor([False for _ in range(self.num_classes)])
+        for y in nc:
+            mask[y] = True
+        mask = mask.float().cuda()
+
+
+    def after_every_task(self):
+        self.update_examplars(self.nc)
+
+
+    def before_every_epoch(self, i_epoch):
+        cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
+        cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
+
+        lock_make = mp.Lock()
+        lock_made = mp.Lock()
+        lock_made.acquire()
+
+        p = mp.Process(target=make_candidates, args=(self.num_candidates, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, len(self.train_data.get_loader())))
+        p.start()
+
+
+    def after_every_epoch(self):
+        p.join()
+
+
+    def before_every_batch(self, inputs, target):
+        if self.epoch + 1 == num_epochs:
+            if self.memx is None:
+                self.memx = inputs.detach()
+                self.memy = target.detach()
+            else:
+                self.memx = torch.cat(self.memx, inputs.detach())
+                self.memy = torch.cat(self.memy, target.detach())
+
+            lock_made.acquire()
+            x = torch.cat(x, cand_x.cuda())
+            dist_y = cand_y.cuda()
+            lock_make.release()
 
 
     def forward(self, x):
@@ -203,69 +247,34 @@ class icarl_wrapper(nn.Module):
         self.memy = None
 
 
-    def should_distill(self):
-        return self.mem_class_x != {}
+    def get_state_dict(self):
+        return self.model.state_dict()
 
 
-    def test(self, incremental_test_taskset, task_id):
-        self.cuda()
-
-        tot = 0
-        test_accuracy = torch.zeros(1)
-        test_task = 0
-
-        self.trace[f"Task {task_id}"]['Test'] = {}
-
-        for test_taskset in incremental_test_taskset:
-            test_task += 1
-            curr_acc = test_accuracy.clone().detach()
-            curr_tot = tot
-
-            # Partition the testing data between the workers
-            test_sampler, test_loader = distribute(test_taskset)
-
-            self.eval()
-
-            for x, y, _t in test_loader:
-                x, y = x.cuda(), y.cuda()
-                output = self(x)
-                pred = output.data.max(1, keepdim=True)[1]
-                pred = torch.flatten(pred).cpu().numpy()
-                y = y.cpu().numpy()
-
-                for i in range(len(y)):
-                    tot += 1
-                    test_accuracy += 1 if pred[i] == y[i] else 0
-
-            task_acc = metric_average((test_accuracy - curr_acc), (tot - curr_tot), f"avg_task{test_task}_acc")
-
-            self.trace[f"Task {task_id}"]['Test'][f"Task {test_task} acc"] = task_acc
-
-        # Average metric values across workers
-        accuracy = metric_average(test_accuracy, tot, 'avg_acc')
-        self.trace[f"Task {task_id}"]['Test']["acc"] = accuracy
-
-        hprint(f"Accuracy over all tasks seen so far: {accuracy}")
-
-
-def icarl(config):
-    model = config.pop('model', 'resnet')
-    depth = config.get('depth', 18)
-
-    config.setdefault('num_classes', 200)
-    #config.setdefault('num_representatives', 0)
-    #config.setdefault('num_candidates', 10)
+def icarl(model_config, wrapper_config=None):
+    model = model_config.pop('model', 'resnet')
+    depth = model_config.get('depth', 18)
 
     if model == 'resnet':
-        config['num_features'] = config.get('num_features', 50) * (8 if depth < 50 else 32)
-        return icarl_wrapper(icarl_resnet(config), config)
+        model_config.setdefault('num_classes', 200)
+        model_config.setdefault('num_features', 50)
+        wrapper_config.setdefault('num_classes', 200)
+        wrapper_config.setdefault('num_features', 50)
+        wrapper_config.setdefault('num_representatives', 0)
+        wrapper_config['num_features'] = wrapper_config['num_features'] * (8 if depth < 50 else 32)
+        return icarl_wrapper(icarl_resnet(model_config), wrapper_config)
 
     elif model == 'mnistnet':
-        return icarl_wrapper(icarl_mnistnet(config), config)
+        wrapper_config.setdefault('num_classes', 200)
+        wrapper_config.setdefault('num_features', 50)
+        wrapper_config.setdefault('num_representatives', 0)
+        return icarl_wrapper(icarl_mnistnet(model_config), wrapper_config)
 
     elif model == 'candlenet':
-        config.setdefault('num_classes', 20)
-        return icarl_wrapper(icarl_candlenet(), config)
+        wrapper_config.setdefault('num_classes', 20)
+        wrapper_config.setdefault('num_features', 50)
+        wrapper_config.setdefault('num_representatives', 0)
+        return icarl_wrapper(icarl_candlenet(), wrapper_config)
 
     else:
         raise ValueError('Unknown model')

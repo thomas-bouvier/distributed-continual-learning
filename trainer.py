@@ -29,27 +29,19 @@ class Trainer(object):
             if self.cuda:
                 inputs, target = inputs.cuda(), target.cuda()
 
-            if self.model.should_distill() and self.epoch + 1 == num_epochs:
-                if self.memx is None:
-                    self.memx = inputs.detach()
-                    self.memy = target.detach()
-                else:
-                    self.memx = torch.cat(self.memx, inputs.detach())
-                    self.memy = torch.cat(self.memy, target.detach())
-
-                lock_made.acquire()
-                x = torch.cat(x, cand_x.cuda())
-                dist_y = cand_y.cuda()
-                lock_make.release()
-
             output = self.model(inputs)
             loss = self.criterion(output, target)
+
+            #TODO: see below
+            #dw = w / torch.sum(w)
 
             # Compute distillation loss
             if self.model.should_distill():
                 loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
 
             if training:
+                # TODO: Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
+                #loss.backward(dw)
                 # accumulate gradient
                 loss.backward()
                 # SGD step
@@ -71,11 +63,15 @@ class Trainer(object):
             inputs = item[0] # x
             target = item[1] # y
 
+            self.model.before_every_batch(i_batch, inputs, target)
+
             output, loss = self._step(i_batch,
                                       inputs,
                                       target,
                                       training=training,
                                       average_output=average_output)
+            
+            self.model.after_every_batch()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, target, topk=(1, 5))

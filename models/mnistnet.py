@@ -24,9 +24,6 @@ class mnist_model(nn.Module):
     def forward(self, x):
         return self.features(x)
 
-    def should_distill(self):
-        return False
-
 
 def mnistnet(config):
     return mnist_model()

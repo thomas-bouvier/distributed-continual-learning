@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-def conv3x3(in_planes, out_planes, stride=1, groups=1, bias=False):
+def __conv3x3(in_planes, out_planes, stride=1, groups=1, bias=False):
     "3x3 convolution with padding"
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                      padding=1, groups=groups, bias=bias)
@@ -42,10 +42,10 @@ class BasicBlock(nn.Module):
         super(BasicBlock, self).__init__()
 
         dropout = 0 if dropout is None else dropout
-        self.conv1 = conv3x3(inplanes, planes, stride, groups=groups)
+        self.conv1 = __conv3x3(inplanes, planes, stride, groups=groups)
         self.bn1 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, expansion * planes, groups=groups)
+        self.conv2 = __conv3x3(planes, expansion * planes, groups=groups)
         self.bn2 = nn.BatchNorm2d(expansion * planes)
         self.downsample = downsample
         self.residual_block = residual_block
@@ -83,7 +83,7 @@ class Bottleneck(nn.Module):
         self.conv1 = nn.Conv2d(
             inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = conv3x3(planes, planes, stride=stride, groups=groups)
+        self.conv2 = __conv3x3(planes, planes, stride=stride, groups=groups)
         self.bn2 = nn.BatchNorm2d(planes)
         self.conv3 = nn.Conv2d(
             planes, planes * expansion, kernel_size=1, bias=False)
@@ -165,9 +165,6 @@ class resnet_model(nn.Module):
         x = self.features(x)
         x = self.fc(x)
         return x
-
-    def should_distill(self):
-        return False
 
 
 class resnet_cifar_model(resnet_model):
