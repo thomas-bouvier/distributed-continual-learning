@@ -142,7 +142,7 @@ class Experiment():
 
 
     def _create_model(self):
-        wrapper = wrappers.__dict__[self.args.wrapper] if self.args.wrapper is not None else 'fake'
+        wrapper = wrappers.__dict__[self.args.wrapper] if self.args.wrapper is not None else wrappers.basic
 
         model_config = { 'dataset': self.args.dataset }
         if self.args.model_config != '':
@@ -152,7 +152,7 @@ class Experiment():
         if self.args.wrapper_config != '':
             wrapper_config = dict(wrapper_config, **literal_eval(self.args.wrapper_config))
 
-        self.model = wrapper(model_config, wrapper_config)
+        self.model = wrapper(model_config, wrapper_config, self.args.cuda)
 
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
@@ -250,7 +250,7 @@ class Experiment():
             self.train_data.set_task_id(task_id)
             self.validate_data.set_task_id(task_id)
 
-            self.model.before_every_task(self.train_data.get_loader())
+            self.model.before_every_task(task_id, self.train_data.get_loader())
 
             if task_id > 0:
                 self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
@@ -271,12 +271,12 @@ class Experiment():
         start_epoch = max(self.args.start_epoch, 0)
         self.trainer.steps = start_epoch * len(self.train_data)
 
-        for epoch in range(start_epoch, self.args.epochs):
-            self.trainer.epoch = epoch
+        for i_epoch in range(start_epoch, self.args.epochs):
+            self.trainer.epoch = i_epoch
 
             # Horovod: set epoch to sampler for shuffling.
-            self.train_data.set_epoch(epoch)
-            self.validate_data.set_epoch(epoch)
+            self.train_data.set_epoch(i_epoch)
+            self.validate_data.set_epoch(i_epoch)
 
             self.model.before_every_epoch(i_epoch)
 
@@ -292,10 +292,10 @@ class Experiment():
                 print('\nResults: epoch: {0}\n'
                         'Training Loss {train[loss]:.4f} \t\n'
                         'Validation Loss {validate[loss]:.4f} \t\n'
-                        .format(epoch + 1, train=train_results,
+                        .format(i_epoch+1, train=train_results,
                         validate=validate_results))
 
-                values = dict(epoch=epoch + 1, steps=self.trainer.training_steps)
+                values = dict(epoch=i_epoch+1, steps=self.trainer.training_steps)
                 values.update({'training ' + k: v for k, v in train_results.items()})
                 values.update({'validation ' + k: v for k, v in validate_results.items()})
 

@@ -29,15 +29,15 @@ class Trainer(object):
             if self.cuda:
                 inputs, target = inputs.cuda(), target.cuda()
 
-            output = self.model(inputs)
+            output = self.model.forward(inputs)
             loss = self.criterion(output, target)
 
             #TODO: see below
             #dw = w / torch.sum(w)
 
             # Compute distillation loss
-            if self.model.should_distill():
-                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+            #if self.model.should_distill():
+            #    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
 
             if training:
                 # TODO: Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself

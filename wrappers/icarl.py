@@ -4,13 +4,13 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
 from continuum.tasks import split_train_val
 
+from wrappers.base import Agent
 from utils import *
 from models import *
 
@@ -30,91 +30,92 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
         lock_made.release()
 
 
-class icarl_wrapper(nn.Module):
+class icarl_wrapper(Agent):
     # Re-implementation of
     # S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert.
     # iCaRL: Incremental classifier and representation learning.
     # CVPR, 2017.
-    def __init__(self, model, config, state_dict=None):
-        super(icarl_wrapper, self).__init__()
-
-        self.model = model
+    def __init__(self, model, config, cuda=False, state_dict=None):
+        super(icarl_wrapper, self).__init__(model, config, cuda, state_dict)
 
         # Modified parameters
-        self.num_memories = config.get('num_representatives') * config.get('num_classes')
         self.num_exemplars = 0
+        self.num_memories = config.get('num_representatives') * config.get('num_classes')
         self.num_features = config.get('num_features')
         self.num_classes = config.get('num_classes')
         self.num_candidates = config.get('num_candidates')
-        #self.candle = self.num_classes == 2
-
-        if state_dict is not None:
-            self.model.load_state_dict(state_dict)
-
-        # setup distillation losses
-        self.kl = nn.KLDivLoss(reduction='batchmean')
-        self.lsm = nn.LogSoftmax(dim=1)
-        self.sm = nn.Softmax(dim=1)
 
         # memory
-        self.memx = None  # stores raw inputs, PxD
-        self.memy = None
+        self.mem_x = None  # stores raw inputs, PxD
+        self.mem_y = None
         self.mem_class_x = {}  # stores exemplars class by class
         self.mem_class_y = {} 
         self.mem_class_means = {}
-
         self.val_set = None
 
-
     def before_all_tasks(self):
-        if self.mem_class_x != {}:
-            mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
-            mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
+        pass
 
+    def after_all_tasks(self):
+        pass
 
-    def before_every_task(self, train_taskset):
+    def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
-        nc = set([data[1] for data in train_taskset])
+        self.nc = set([data[1] for data in train_taskset])
         mask = torch.tensor([False for _ in range(self.num_classes)])
-        for y in nc:
+        for y in self.nc:
             mask[y] = True
-        mask = mask.float().cuda()
+        
+        if self.cuda:
+            self.mask = mask.float().cuda()
+        else:
+            self.mask = mask
 
+        # Distillation
+        if self.mem_class_x != {}:
+            self.mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
+            self.mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
 
     def after_every_task(self):
         self.update_examplars(self.nc)
 
-
     def before_every_epoch(self, i_epoch):
-        cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
-        cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
+        # Distillation
+        if self.mem_class_x != {}:
+            self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
+            self.cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
 
-        lock_make = mp.Lock()
-        lock_made = mp.Lock()
-        lock_made.acquire()
+            self.lock_make = mp.Lock()
+            self.lock_made = mp.Lock()
+            self.lock_made.acquire()
 
-        p = mp.Process(target=make_candidates, args=(self.num_candidates, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, len(self.train_data.get_loader())))
-        p.start()
-
+            self.p = mp.Process(target=make_candidates, args=(self.num_candidates, self.mem_x, self.mem_y, cand_x, cand_y, lock_make, lock_made, len(self.train_data.get_loader())))
+            self.p.start()
 
     def after_every_epoch(self):
-        p.join()
+        # Distillation
+        if self.mem_class_x != {}:
+            self.p.join()
 
-
-    def before_every_batch(self, inputs, target):
+    def before_every_batch(self, i_batch, inputs, target):
+        """
         if self.epoch + 1 == num_epochs:
-            if self.memx is None:
-                self.memx = inputs.detach()
-                self.memy = target.detach()
+            if self.mem_x is None:
+                self.mem_x = inputs.detach()
+                self.mem_y = target.detach()
             else:
-                self.memx = torch.cat(self.memx, inputs.detach())
-                self.memy = torch.cat(self.memy, target.detach())
+                self.mem_x = torch.cat(self.mem_x, inputs.detach())
+                self.mem_y = torch.cat(self.mem_y, target.detach())
+        """
+        # Distillation
+        if self.mem_class_x != {}:
+            self.lock_made.acquire()
+            inputs = torch.cat(inputs, self.cand_x.cuda())
+            dist_y = self.cand_y.cuda()
+            self.lock_make.release()
 
-            lock_made.acquire()
-            x = torch.cat(x, cand_x.cuda())
-            dist_y = cand_y.cuda()
-            lock_make.release()
-
+    def after_every_batch(self):
+        pass
 
     def forward(self, x):
         self.model.eval()
@@ -129,7 +130,6 @@ class icarl_wrapper(nn.Module):
                 classpred[ss] = torch.argmin(dist[ss])
 
             out = torch.zeros(ns, self.num_classes).cuda()
-
             for ss in range(ns):
                 out[ss, classpred[ss]] = 1
 
@@ -146,16 +146,16 @@ class icarl_wrapper(nn.Module):
                 self.mem_class_x[c] = self.mem_class_x[c][:self.num_exemplars]
                 self.mem_class_y[c] = self.mem_class_y[c][:self.num_exemplars]
 
-            for c in nc:
+            for c in self.nc:
                 # Find indices of examples of classse c
-                indxs = (self.memy == c).nonzero(as_tuple=False).squeeze()
+                indxs = (self.mem_y == c).nonzero(as_tuple=False).squeeze()
 
                 # Select examples of classse c
-                memx_c = torch.index_select(self.memx, 0, indxs)
+                mem_x_c = torch.index_select(self.mem_x, 0, indxs)
 
                 if not self.candle:
                     # Compute feature vectors of examples of classse c
-                    memf_c, _ = self.model(memx_c)
+                    memf_c, _ = self.model(mem_x_c)
 
                     # Compute the mean feature vector of classse              
                     nb_samples = torch.tensor(memf_c.size(0))
@@ -165,7 +165,6 @@ class icarl_wrapper(nn.Module):
                     sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
 
                     mean_memf_c = sum_memf_c / sum_nb_samples
-
                     mean_memf_c = mean_memf_c.view(1, self.nb_features)
 
                     # Compute the distance between each feature vector of the examples of classse c and the mean feature vector of classse c
@@ -176,25 +175,24 @@ class icarl_wrapper(nn.Module):
                     indices = torch.sort(dist_memf_c)[1][:self.num_exemplars]
 
                     # Save the self.num_exemplars examples of class c with the closest feature vector to the mean feature vector of classse c
-                    self.mem_class_x[c] = torch.index_select(memx_c, 0, indices)
+                    self.mem_class_x[c] = torch.index_select(mem_x_c, 0, indices)
                 else:
                     means = []
                     fs = {}
 
-                    for i in range(0, len(memx_c), 5):
-                        x = memx_c[i:min(len(memx_c), i + 5)]
+                    for i in range(0, len(mem_x_c), 5):
+                        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
                         fs[i], _ = self.model(x)
                         means.append(fs[i].sum(0))
 
-                    mean_memf_c = (torch.stack(means).sum(0) / len(memx_c)).view(1, self.nb_features)
+                    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.nb_features)
 
                     dist_memf_c = None
                     tmp_mem_x = None
-
                     torch.cuda.empty_cache()
 
-                    for i in range(0, len(memx_c), 5):
-                        x = memx_c[i:min(len(memx_c), i + 5)]
+                    for i in range(0, len(mem_x_c), 5):
+                        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
                         
                         dist = torch.cdist(fs[i], mean_memf_c)
                         dist = dist.view(dist.size(0))
@@ -211,7 +209,6 @@ class icarl_wrapper(nn.Module):
                             tmp_mem_x = torch.index_select(x, 0, indices)
 
                     self.mem_class_x[c] = tmp_mem_x
-
                     del fs
 
             # recompute outputs for distillation purposes and means for inference purposes
@@ -228,8 +225,7 @@ class icarl_wrapper(nn.Module):
                     self.mem_class_y[cc] = torch.cat(outs)
                 else:
                     tmp_features, self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
-                    
-                    
+
                 nb_samples = torch.tensor(tmp_features.size(0))
                 sum_memf_c = tmp_features.sum(0)
 
@@ -240,41 +236,35 @@ class icarl_wrapper(nn.Module):
                 self.mean_features = torch.stack(tuple(self.mem_class_means.values()))
 
         del tmp_features
-
         torch.cuda.empty_cache()
-
-        self.memx = None
-        self.memy = None
-
-
-    def get_state_dict(self):
-        return self.model.state_dict()
+        self.mem_x = None
+        self.mem_y = None
 
 
-def icarl(model_config, wrapper_config=None):
-    model = model_config.pop('model', 'resnet')
+def icarl(model_config, wrapper_config=None, cuda=False):
+    model_name = model_config.pop('model', 'resnet')
     depth = model_config.get('depth', 18)
 
-    if model == 'resnet':
+    if model_name == 'resnet':
         model_config.setdefault('num_classes', 200)
         model_config.setdefault('num_features', 50)
         wrapper_config.setdefault('num_classes', 200)
         wrapper_config.setdefault('num_features', 50)
         wrapper_config.setdefault('num_representatives', 0)
         wrapper_config['num_features'] = wrapper_config['num_features'] * (8 if depth < 50 else 32)
-        return icarl_wrapper(icarl_resnet(model_config), wrapper_config)
+        return icarl_wrapper(icarl_resnet(model_config), wrapper_config, cuda)
 
-    elif model == 'mnistnet':
+    elif model_name == 'mnistnet':
         wrapper_config.setdefault('num_classes', 200)
         wrapper_config.setdefault('num_features', 50)
         wrapper_config.setdefault('num_representatives', 0)
-        return icarl_wrapper(icarl_mnistnet(model_config), wrapper_config)
+        return icarl_wrapper(icarl_mnistnet(model_config), wrapper_config, cuda)
 
-    elif model == 'candlenet':
+    elif model_name == 'candlenet':
         wrapper_config.setdefault('num_classes', 20)
         wrapper_config.setdefault('num_features', 50)
         wrapper_config.setdefault('num_representatives', 0)
-        return icarl_wrapper(icarl_candlenet(), wrapper_config)
+        return icarl_wrapper(icarl_candlenet(), wrapper_config, cuda)
 
     else:
         raise ValueError('Unknown model')
