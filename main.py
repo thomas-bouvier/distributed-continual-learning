@@ -15,7 +15,7 @@ from filelock import FileLock
 from os import path, makedirs
 
 import models
-import wrappers
+import agents
 
 from cross_entropy import CrossEntropyLoss
 from data import DataRegime
@@ -29,9 +29,9 @@ model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(models.__dict__[name]))
 
-wrapper_names = sorted(name for name in wrappers.__dict__
+agent_names = sorted(name for name in agents.__dict__
                      if name.islower() and not name.startswith("__")
-                     and callable(wrappers.__dict__[name]))
+                     and callable(agents.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='Distributed deep learning with Horovod + PyTorch')
 parser.add_argument('--dataset', required=True,
@@ -40,11 +40,11 @@ parser.add_argument('--dataset-dir', default='./data',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
 parser.add_argument('--dataset-config', default='',
                     help='additional dataset configuration (useful for continual learning)')
-parser.add_argument('--wrapper', metavar='WRAPPER', default=None,
-                    choices=wrapper_names,
-                    help='model wrapper: ' + ' | '.join(wrapper_names))
-parser.add_argument('--wrapper-config', default='',
-                    help='additional wrapper configuration')
+parser.add_argument('--agent', metavar='AGENT', default=None,
+                    choices=agent_names,
+                    help='model agent: ' + ' | '.join(agent_names))
+parser.add_argument('--agent-config', default='',
+                    help='additional agent configuration')
 parser.add_argument('--model', metavar='MODEL', required=True,
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names))
@@ -137,22 +137,22 @@ class Experiment():
         self._create_model()
         self._prepare_dataset()
 
-        self.trainer = Trainer(self.model, self.optimizer, self.criterion, args.cuda, args.log_interval)
+        self.trainer = Trainer(self.agent, self.optimizer, self.criterion, args.cuda, args.log_interval)
         self.trainer.steps = args.start_epoch * len(self.train_data)
 
 
     def _create_model(self):
-        wrapper = wrappers.__dict__[self.args.wrapper] if self.args.wrapper is not None else wrappers.basic
+        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.basic
 
         model_config = { 'dataset': self.args.dataset }
         if self.args.model_config != '':
             model_config = dict(model_config, **literal_eval(self.args.model_config))
 
-        wrapper_config = { 'model': self.args.model }
-        if self.args.wrapper_config != '':
-            wrapper_config = dict(wrapper_config, **literal_eval(self.args.wrapper_config))
+        agent_config = { 'model': self.args.model }
+        if self.args.agent_config != '':
+            agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
 
-        self.model = wrapper(model_config, wrapper_config, self.args.cuda)
+        self.agent = agent(model_config, agent_config, self.args.cuda)
 
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
@@ -160,13 +160,13 @@ class Experiment():
 
         if self.args.cuda:
             # Move model to GPU.
-            self.model.cuda()
+            self.agent.cuda()
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
         # Horovod: scale learning rate by lr_scaler.
-        optim_regime = getattr(self.model, 'regime', [
+        optim_regime = getattr(self.agent, 'regime', [
             {
                 'epoch': 0,
                 'optimizer': self.args.optimizer,
@@ -180,13 +180,13 @@ class Experiment():
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
 
-        self.optimizer = OptimizerRegime(self.model, compression, reduction,
+        self.optimizer = OptimizerRegime(self.agent, compression, reduction,
                                     self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
 
         loss_params = {}
-        self.criterion = getattr(self.model, 'criterion', CrossEntropyLoss)(**loss_params)
+        self.criterion = getattr(self.agent, 'criterion', CrossEntropyLoss)(**loss_params)
 
         # Create masked loss function
         #celoss = nn.CrossEntropyLoss(weight=mask)
@@ -196,7 +196,7 @@ class Experiment():
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data = DataRegime(
             hvd,
-            getattr(self.model, 'data_regime', None),
+            getattr(self.agent, 'data_regime', None),
             defaults={
                 'dataset': self.args.dataset,
                 'dataset_dir': self.args.dataset_dir,
@@ -210,7 +210,7 @@ class Experiment():
 
         self.validate_data = DataRegime(
             hvd,
-            getattr(self.model, 'data_eval_regime', None),
+            getattr(self.agent, 'data_eval_regime', None),
             defaults={
                 'dataset': self.args.dataset,
                 'dataset_dir': self.args.dataset_dir,
@@ -237,11 +237,11 @@ class Experiment():
         
             # Log the model as an artifact of the MLflow run.
             print("Logging the trained model as a run artifact...")
-            mlflow.pytorch.log_model(self.model, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
+            mlflow.pytorch.log_model(self.agent, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
 
 
     def run_workload_c(self):
-        self.model.before_all_tasks()
+        self.agent.before_all_tasks()
 
         for task_id in range(0, len(self.train_data.scenario)):
             if hvd.rank() == 0:
@@ -250,7 +250,7 @@ class Experiment():
             self.train_data.set_task_id(task_id)
             self.validate_data.set_task_id(task_id)
 
-            self.model.before_every_task(task_id, self.train_data.get_loader())
+            self.agent.before_every_task(task_id, self.train_data.get_loader())
 
             if task_id > 0:
                 self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
@@ -258,9 +258,9 @@ class Experiment():
 
             self.run_workload()
 
-            self.model.after_every_task()
+            self.agent.after_every_task()
 
-        self.model.after_all_tasks()
+        self.agent.after_all_tasks()
 
 
     def run_workload(self):
@@ -278,7 +278,7 @@ class Experiment():
             self.train_data.set_epoch(i_epoch)
             self.validate_data.set_epoch(i_epoch)
 
-            self.model.before_every_epoch(i_epoch)
+            self.agent.before_every_epoch(i_epoch)
 
             # train for one epoch
             train_results = self.trainer.train(self.train_data.get_loader())
@@ -286,7 +286,7 @@ class Experiment():
             # evaluate on validation set
             validate_results = self.trainer.validate(self.validate_data.get_loader())
 
-            self.model.after_every_epoch()
+            self.agent.after_every_epoch()
 
             if hvd.rank() == 0:
                 print('\nResults: epoch: {0}\n'

@@ -10,7 +10,7 @@ import torch.optim as optim
 
 from continuum.tasks import split_train_val
 
-from wrappers.base import Agent
+from agents.base import Agent
 from utils import *
 from models import *
 
@@ -30,13 +30,13 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
         lock_made.release()
 
 
-class icarl_wrapper(Agent):
+class icarl_agent(Agent):
     # Re-implementation of
     # S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert.
     # iCaRL: Incremental classifier and representation learning.
     # CVPR, 2017.
     def __init__(self, model, config, cuda=False, state_dict=None):
-        super(icarl_wrapper, self).__init__(model, config, cuda, state_dict)
+        super(icarl_agent, self).__init__(model, config, cuda, state_dict)
 
         # Modified parameters
         self.num_exemplars = 0
@@ -241,30 +241,30 @@ class icarl_wrapper(Agent):
         self.mem_y = None
 
 
-def icarl(model_config, wrapper_config=None, cuda=False):
+def icarl(model_config, agent_config=None, cuda=False):
     model_name = model_config.pop('model', 'resnet')
     depth = model_config.get('depth', 18)
 
     if model_name == 'resnet':
         model_config.setdefault('num_classes', 200)
         model_config.setdefault('num_features', 50)
-        wrapper_config.setdefault('num_classes', 200)
-        wrapper_config.setdefault('num_features', 50)
-        wrapper_config.setdefault('num_representatives', 0)
-        wrapper_config['num_features'] = wrapper_config['num_features'] * (8 if depth < 50 else 32)
-        return icarl_wrapper(icarl_resnet(model_config), wrapper_config, cuda)
+        agent_config.setdefault('num_classes', 200)
+        agent_config.setdefault('num_features', 50)
+        agent_config.setdefault('num_representatives', 0)
+        agent_config['num_features'] = agent_config['num_features'] * (8 if depth < 50 else 32)
+        return icarl_agent(icarl_resnet(model_config), agent_config, cuda)
 
     elif model_name == 'mnistnet':
-        wrapper_config.setdefault('num_classes', 200)
-        wrapper_config.setdefault('num_features', 50)
-        wrapper_config.setdefault('num_representatives', 0)
-        return icarl_wrapper(icarl_mnistnet(model_config), wrapper_config, cuda)
+        agent_config.setdefault('num_classes', 200)
+        agent_config.setdefault('num_features', 50)
+        agent_config.setdefault('num_representatives', 0)
+        return icarl_agent(icarl_mnistnet(model_config), agent_config, cuda)
 
     elif model_name == 'candlenet':
-        wrapper_config.setdefault('num_classes', 20)
-        wrapper_config.setdefault('num_features', 50)
-        wrapper_config.setdefault('num_representatives', 0)
-        return icarl_wrapper(icarl_candlenet(), wrapper_config, cuda)
+        agent_config.setdefault('num_classes', 20)
+        agent_config.setdefault('num_features', 50)
+        agent_config.setdefault('num_representatives', 0)
+        return icarl_agent(icarl_candlenet(), agent_config, cuda)
 
     else:
         raise ValueError('Unknown model')

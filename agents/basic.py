@@ -2,9 +2,9 @@ import models
 
 from .base import Agent
 
-class basic_wrapper(Agent):
+class basic_agent(Agent):
     def __init__(self, model, config, cuda=False, state_dict=None):
-        super(basic_wrapper, self).__init__(model, config, cuda, state_dict)
+        super(basic_agent, self).__init__(model, config, cuda, state_dict)
 
     def before_all_tasks(self):
         pass
@@ -31,8 +31,8 @@ class basic_wrapper(Agent):
         pass
 
 
-def basic(model_config, wrapper_config=None, cuda=False):
+def basic(model_config, agent_config=None, cuda=False):
     model_name = model_config.pop('model', 'resnet')
     model = models.__dict__[model_name]
 
-    return basic_wrapper(model(model_config), wrapper_config, cuda)
+    return basic_agent(model(model_config), agent_config, cuda)

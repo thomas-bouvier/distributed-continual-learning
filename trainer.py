@@ -6,8 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Trainer(object):
-    def __init__(self, model, optimizer, criterion, cuda, log_interval):
-        self.model = model
+    def __init__(self, agent, optimizer, criterion, cuda, log_interval):
+        self.agent = agent
         self.optimizer = optimizer
         self.criterion = criterion
         self.cuda = cuda
@@ -29,14 +29,14 @@ class Trainer(object):
             if self.cuda:
                 inputs, target = inputs.cuda(), target.cuda()
 
-            output = self.model.forward(inputs)
+            output = self.agent.forward(inputs)
             loss = self.criterion(output, target)
 
             #TODO: see below
             #dw = w / torch.sum(w)
 
             # Compute distillation loss
-            #if self.model.should_distill():
+            #if self.agent.should_distill():
             #    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
 
             if training:
@@ -63,7 +63,7 @@ class Trainer(object):
             inputs = item[0] # x
             target = item[1] # y
 
-            self.model.before_every_batch(i_batch, inputs, target)
+            self.agent.before_every_batch(i_batch, inputs, target)
 
             output, loss = self._step(i_batch,
                                       inputs,
@@ -71,7 +71,7 @@ class Trainer(object):
                                       training=training,
                                       average_output=average_output)
             
-            self.model.after_every_batch()
+            self.agent.after_every_batch()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, target, topk=(1, 5))
@@ -104,12 +104,12 @@ class Trainer(object):
 
     def train(self, data_loader, average_output=False):
         # switch to train mode
-        self.model.train()
+        self.agent.train()
         return self.forward(data_loader, average_output=average_output, training=True)
 
 
     def validate(self, data_loader, average_output=False):
         # switch to evaluate mode
-        self.model.eval()
+        self.agent.eval()
         with torch.no_grad():
             return self.forward(data_loader, average_output=average_output, training=False)
