@@ -134,15 +134,14 @@ class Experiment():
 
         self.save_path = save_path
 
-        self._create_model()
+        self._create_agent()
         self._prepare_dataset()
-
-        self.trainer = Trainer(self.agent, self.optimizer, self.criterion, args.cuda, args.log_interval)
-        self.trainer.steps = args.start_epoch * len(self.train_data)
+        self.agent.steps = self.args.start_epoch * len(self.train_data)
 
 
-    def _create_model(self):
-        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.basic
+    def _create_agent(self):
+        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base.Agent
+        model = models.__dict__[self.args.model]
 
         model_config = { 'dataset': self.args.dataset }
         if self.args.model_config != '':
@@ -152,21 +151,19 @@ class Experiment():
         if self.args.agent_config != '':
             agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
 
-        self.agent = agent(model_config, agent_config, self.args.cuda)
-
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
         lr_scaler = self.args.batches_per_allreduce * hvd.size() if not self.args.use_adasum else 1
 
         if self.args.cuda:
-            # Move model to GPU.
-            self.agent.cuda()
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
+        model = model(model_config)
+
         # Horovod: scale learning rate by lr_scaler.
-        optim_regime = getattr(self.agent, 'regime', [
+        optim_regime = getattr(model, 'regime', [
             {
                 'epoch': 0,
                 'optimizer': self.args.optimizer,
@@ -180,16 +177,18 @@ class Experiment():
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
 
-        self.optimizer = OptimizerRegime(self.agent, compression, reduction,
+        self.optimizer = OptimizerRegime(model, compression, reduction,
                                     self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
 
         loss_params = {}
-        self.criterion = getattr(self.agent, 'criterion', CrossEntropyLoss)(**loss_params)
+        self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
         # Create masked loss function
         #celoss = nn.CrossEntropyLoss(weight=mask)
+
+        self.agent = agent(model, agent_config, self.optimizer, self.criterion, self.args.cuda, self.args.log_interval)
 
 
     def _prepare_dataset(self):
@@ -269,10 +268,10 @@ class Experiment():
                         title='Training Results - %s' % self.args.save_dir)
 
         start_epoch = max(self.args.start_epoch, 0)
-        self.trainer.steps = start_epoch * len(self.train_data)
+        self.agent.steps = start_epoch * len(self.train_data)
 
         for i_epoch in range(start_epoch, self.args.epochs):
-            self.trainer.epoch = i_epoch
+            self.agent.epoch = i_epoch
 
             # Horovod: set epoch to sampler for shuffling.
             self.train_data.set_epoch(i_epoch)
@@ -281,10 +280,10 @@ class Experiment():
             self.agent.before_every_epoch(i_epoch)
 
             # train for one epoch
-            train_results = self.trainer.train(self.train_data.get_loader())
+            train_results = self.agent.train(self.train_data.get_loader())
 
             # evaluate on validation set
-            validate_results = self.trainer.validate(self.validate_data.get_loader())
+            validate_results = self.agent.validate(self.validate_data.get_loader())
 
             self.agent.after_every_epoch()
 
@@ -295,7 +294,7 @@ class Experiment():
                         .format(i_epoch+1, train=train_results,
                         validate=validate_results))
 
-                values = dict(epoch=i_epoch+1, steps=self.trainer.training_steps)
+                values = dict(epoch=i_epoch+1, steps=self.agent.training_steps)
                 values.update({'training ' + k: v for k, v in train_results.items()})
                 values.update({'validation ' + k: v for k, v in validate_results.items()})
 
