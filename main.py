@@ -172,7 +172,7 @@ class Experiment():
                 'weight_decay': self.args.weight_decay
             }
         ])
-        
+
         # distributed training parameters
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
@@ -185,10 +185,7 @@ class Experiment():
         loss_params = {}
         self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
-        # Create masked loss function
-        #celoss = nn.CrossEntropyLoss(weight=mask)
-
-        self.agent = agent(model, agent_config, self.optimizer, self.criterion, self.args.cuda, self.args.log_interval)
+        self.agent = agent(agent_config, model, self.optimizer, self.criterion, self.args.cuda, self.args.log_interval)
 
 
     def _prepare_dataset(self):
@@ -277,15 +274,11 @@ class Experiment():
             self.train_data.set_epoch(i_epoch)
             self.validate_data.set_epoch(i_epoch)
 
-            self.agent.before_every_epoch(i_epoch)
-
             # train for one epoch
             train_results = self.agent.train(self.train_data.get_loader())
 
             # evaluate on validation set
             validate_results = self.agent.validate(self.validate_data.get_loader())
-
-            self.agent.after_every_epoch()
 
             if hvd.rank() == 0:
                 print('\nResults: epoch: {0}\n'

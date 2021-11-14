@@ -6,9 +6,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Agent(nn.Module):
-    '''
-    Abstract module which is inherited by each and every continual learning algorithm.
-    '''
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(Agent, self).__init__()
         self.model = model
@@ -44,16 +41,7 @@ class Agent(nn.Module):
             output = self.model(inputs)
             loss = self.criterion(output, target)
 
-            #TODO: see below
-            #dw = w / torch.sum(w)
-
-            # Compute distillation loss
-            #if self.agent.should_distill():
-            #    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
-
             if training:
-                # TODO: Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
-                #loss.backward(dw)
                 # accumulate gradient
                 loss.backward()
                 # SGD step
@@ -67,6 +55,9 @@ class Agent(nn.Module):
         return outputs, total_loss
 
 
+    """
+    Forward pass for the current epoch
+    """
     def forward(self, data_loader, training=False, average_output=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
@@ -75,15 +66,11 @@ class Agent(nn.Module):
             inputs = item[0] # x
             target = item[1] # y
 
-            self.before_every_batch(i_batch, inputs, target)
-
             output, loss = self._step(i_batch,
                                       inputs,
                                       target,
                                       training=training,
                                       average_output=average_output)
-            
-            self.after_every_batch()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, target, topk=(1, 5))
@@ -140,22 +127,6 @@ class Agent(nn.Module):
 
 
     def after_every_task(self):
-        pass
-
-
-    def before_every_epoch(self, i_epoch):
-        pass
-
-
-    def after_every_epoch(self):
-        pass
-
-
-    def before_every_batch(self, i_batch, input, target):
-        pass
-
-
-    def after_every_batch(self):
         pass
 
 

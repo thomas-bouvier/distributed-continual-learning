@@ -1,9 +1,3 @@
-# Copyright 2017-present, Facebook, Inc.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -35,8 +29,8 @@ class icarl_agent(Agent):
     # S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert.
     # iCaRL: Incremental classifier and representation learning.
     # CVPR, 2017.
-    def __init__(self, model, config, cuda=False, state_dict=None):
-        super(icarl_agent, self).__init__(model, config, cuda, state_dict)
+    def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
+        super(icarl_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
         # Modified parameters
         self.num_exemplars = 0
@@ -51,13 +45,9 @@ class icarl_agent(Agent):
         self.mem_class_x = {}  # stores exemplars class by class
         self.mem_class_y = {} 
         self.mem_class_means = {}
+
         self.val_set = None
 
-    def before_all_tasks(self):
-        pass
-
-    def after_all_tasks(self):
-        pass
 
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
@@ -65,7 +55,7 @@ class icarl_agent(Agent):
         mask = torch.tensor([False for _ in range(self.num_classes)])
         for y in self.nc:
             mask[y] = True
-        
+
         if self.cuda:
             self.mask = mask.float().cuda()
         else:
@@ -76,10 +66,69 @@ class icarl_agent(Agent):
             self.mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
             self.mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
 
+
     def after_every_task(self):
         self.update_examplars(self.nc)
 
-    def before_every_epoch(self, i_epoch):
+    
+    def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
+        outputs = []
+        total_loss = 0
+
+        if self.epoch + 1 == num_epochs:
+            if self.mem_x is None:
+                self.mem_x = inputs.detach()
+                self.mem_y = target.detach()
+            else:
+                self.mem_x = torch.cat(self.mem_x, inputs.detach())
+                self.mem_y = torch.cat(self.mem_y, target.detach())
+
+        if training:
+            self.optimizer.zero_grad()
+            self.optimizer.update(self.epoch, self.training_steps)
+
+        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
+                                                 target_batch.chunk(chunk_batch, dim=0))):
+            if self.cuda:
+                inputs, target = inputs.cuda(), target.cuda()
+
+            # Distillation
+            if self.mem_class_x != {}:
+                self.lock_made.acquire()
+                inputs = torch.cat(inputs, self.cand_x.cuda())
+                dist_y = self.cand_y.cuda()
+                self.lock_make.release()
+
+            output = self.model(inputs)
+            loss = self.criterion(output[:target.size(0)], target)
+
+            # Compute distillation loss
+            if self.agent.should_distill():
+                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+
+            if training:
+                # Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
+                loss.backward(dw)
+                # accumulate gradient
+                loss.backward()
+                # SGD step
+                self.optimizer.step()
+                self.training_steps += 1
+
+            outputs.append(output.detach())
+            total_loss += float(loss)
+
+        outputs = torch.cat(outputs, dim=0)
+        return outputs, total_loss
+
+
+    """
+    Forward pass for the current epoch
+    """
+    def forward(self, data_loader, training=False, average_output=False):
+        meters = {metric: AverageMeter()
+                  for metric in ['loss', 'prec1', 'prec5']}
+        
         # Distillation
         if self.mem_class_x != {}:
             self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
@@ -92,30 +141,48 @@ class icarl_agent(Agent):
             self.p = mp.Process(target=make_candidates, args=(self.num_candidates, self.mem_x, self.mem_y, cand_x, cand_y, lock_make, lock_made, len(self.train_data.get_loader())))
             self.p.start()
 
-    def after_every_epoch(self):
+        for i_batch, item in enumerate(data_loader):
+            inputs = item[0] # x
+            target = item[1] # y
+
+            output, loss = self._step(i_batch,
+                                      inputs,
+                                      target,
+                                      training=training,
+                                      average_output=average_output)
+
+            # measure accuracy and record loss
+            prec1, prec5 = accuracy(output, target, topk=(1, 5))
+            meters['loss'].update(float(loss), inputs.size(0))
+            meters['prec1'].update(float(prec1), inputs.size(0))
+            meters['prec5'].update(float(prec5), inputs.size(0))
+
+            mlflow.log_metrics({
+                'loss': float(loss),
+                'prec1': float(prec1),
+                'prec5': float(prec5)
+            }, step=self.epoch)
+
+            if i_batch % self.log_interval == 0 or i_batch == len(data_loader) - 1:
+                print('{phase}: epoch: {0} [{1}/{2}]\t'
+                             'Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t'
+                             'Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t'
+                             'Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t'
+                             .format(
+                                 self.epoch, i_batch, len(data_loader),
+                                 phase='TRAINING' if training else 'EVALUATING',
+                                 meters=meters))
+
         # Distillation
         if self.mem_class_x != {}:
             self.p.join()
 
-    def before_every_batch(self, i_batch, inputs, target):
-        """
-        if self.epoch + 1 == num_epochs:
-            if self.mem_x is None:
-                self.mem_x = inputs.detach()
-                self.mem_y = target.detach()
-            else:
-                self.mem_x = torch.cat(self.mem_x, inputs.detach())
-                self.mem_y = torch.cat(self.mem_y, target.detach())
-        """
-        # Distillation
-        if self.mem_class_x != {}:
-            self.lock_made.acquire()
-            inputs = torch.cat(inputs, self.cand_x.cuda())
-            dist_y = self.cand_y.cuda()
-            self.lock_make.release()
+        meters = {name: meter.avg for name, meter in meters.items()}
+        meters['error1'] = 100. - meters['prec1']
+        meters['error5'] = 100. - meters['prec5']
 
-    def after_every_batch(self):
-        pass
+        return meters
+
 
     def forward(self, x):
         self.model.eval()
@@ -241,9 +308,9 @@ class icarl_agent(Agent):
         self.mem_y = None
 
 
-def icarl(model_config, agent_config=None, cuda=False):
-    model_name = model_config.pop('model', 'resnet')
-    depth = model_config.get('depth', 18)
+def icarl(agent_config, model, optimizer, criterion, cuda, log_interval):
+    model_name = agent_config['model']
+    depth = model.config.get('depth', 18)
 
     if model_name == 'resnet':
         model_config.setdefault('num_classes', 200)
@@ -252,19 +319,19 @@ def icarl(model_config, agent_config=None, cuda=False):
         agent_config.setdefault('num_features', 50)
         agent_config.setdefault('num_representatives', 0)
         agent_config['num_features'] = agent_config['num_features'] * (8 if depth < 50 else 32)
-        return icarl_agent(icarl_resnet(model_config), agent_config, cuda)
+        return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
 
     elif model_name == 'mnistnet':
         agent_config.setdefault('num_classes', 200)
         agent_config.setdefault('num_features', 50)
         agent_config.setdefault('num_representatives', 0)
-        return icarl_agent(icarl_mnistnet(model_config), agent_config, cuda)
+        return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
 
     elif model_name == 'candlenet':
         agent_config.setdefault('num_classes', 20)
         agent_config.setdefault('num_features', 50)
         agent_config.setdefault('num_representatives', 0)
-        return icarl_agent(icarl_candlenet(), agent_config, cuda)
+        return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
 
     else:
         raise ValueError('Unknown model')
