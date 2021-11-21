@@ -132,3 +132,7 @@ class Agent(nn.Module):
 
     def get_state_dict(self):
         return self.model.state_dict()
+
+
+def base(agent_config, model, optimizer, criterion, cuda, log_interval):
+    return Agent(model, agent_config, optimizer, criterion, cuda, log_interval)

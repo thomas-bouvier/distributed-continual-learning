@@ -140,7 +140,7 @@ class Experiment():
 
 
     def _create_agent(self):
-        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base.Agent
+        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base
         model = models.__dict__[self.args.model]
 
         model_config = { 'dataset': self.args.dataset }
