@@ -1,3 +1,6 @@
+from meters import AverageMeter, accuracy
+
+import mlflow
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -14,7 +17,7 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
         lock_make.acquire()
 
         selection = torch.randperm(len(mem_x))[n].clone()
-        
+
         nx = mem_x[selection].clone() - cand_x
         ny = mem_y[selection].clone() - cand_y
 
@@ -48,6 +51,11 @@ class icarl_agent(Agent):
 
         self.val_set = None
 
+        # setup distillation losses
+        self.kl = nn.KLDivLoss(reduction='batchmean')
+        self.lsm = nn.LogSoftmax(dim=1)
+        self.sm = nn.Softmax(dim=1)
+
 
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
@@ -70,12 +78,12 @@ class icarl_agent(Agent):
     def after_every_task(self):
         self.update_examplars(self.nc)
 
-    
+
     def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
         outputs = []
         total_loss = 0
 
-        if self.epoch + 1 == num_epochs:
+        if self.epoch + 1 == self.num_epochs:
             if self.mem_x is None:
                 self.mem_x = inputs.detach()
                 self.mem_y = target.detach()
@@ -103,12 +111,10 @@ class icarl_agent(Agent):
             loss = self.criterion(output[:target.size(0)], target)
 
             # Compute distillation loss
-            if self.agent.should_distill():
+            if self.mem_class_x != {}:
                 loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
 
             if training:
-                # Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
-                loss.backward(dw)
                 # accumulate gradient
                 loss.backward()
                 # SGD step
@@ -125,10 +131,10 @@ class icarl_agent(Agent):
     """
     Forward pass for the current epoch
     """
-    def forward(self, data_loader, training=False, average_output=False):
+    def forward(self, data_loader, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
-        
+
         # Distillation
         if self.mem_class_x != {}:
             self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
@@ -184,6 +190,7 @@ class icarl_agent(Agent):
         return meters
 
 
+    """
     def forward(self, x):
         self.model.eval()
         ns = x.size(0)
@@ -201,6 +208,7 @@ class icarl_agent(Agent):
                 out[ss, classpred[ss]] = 1
 
             return out
+    """
 
 
     def update_examplars(self, nc):
@@ -227,7 +235,7 @@ class icarl_agent(Agent):
                     # Compute the mean feature vector of classse              
                     nb_samples = torch.tensor(memf_c.size(0))
                     sum_memf_c = memf_c.sum(0)
-    
+
                     sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
                     sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
 
@@ -260,7 +268,7 @@ class icarl_agent(Agent):
 
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                        
+
                         dist = torch.cdist(fs[i], mean_memf_c)
                         dist = dist.view(dist.size(0))
 
@@ -308,9 +316,9 @@ class icarl_agent(Agent):
         self.mem_y = None
 
 
-def icarl(agent_config, model, optimizer, criterion, cuda, log_interval):
+def icarl(agent_config, model_config, model, optimizer, criterion, cuda, log_interval):
     model_name = agent_config['model']
-    depth = model.config.get('depth', 18)
+    depth = model_config.get('depth', 18)
 
     if model_name == 'resnet':
         model_config.setdefault('num_classes', 200)

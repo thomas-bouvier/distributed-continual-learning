@@ -185,7 +185,7 @@ class Experiment():
         loss_params = {}
         self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
-        self.agent = agent(agent_config, model, self.optimizer, self.criterion, self.args.cuda, self.args.log_interval)
+        self.agent = agent(agent_config, model_config, model, self.optimizer, self.criterion, self.args.cuda, self.args.log_interval)
 
 
     def _prepare_dataset(self):
@@ -266,6 +266,7 @@ class Experiment():
 
         start_epoch = max(self.args.start_epoch, 0)
         self.agent.steps = start_epoch * len(self.train_data)
+        self.agent.num_epochs = self.args.epochs
 
         for i_epoch in range(start_epoch, self.args.epochs):
             self.agent.epoch = i_epoch

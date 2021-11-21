@@ -58,7 +58,7 @@ class Agent(nn.Module):
     """
     Forward pass for the current epoch
     """
-    def forward(self, data_loader, training=False, average_output=False):
+    def forward(self, data_loader, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 
@@ -134,5 +134,5 @@ class Agent(nn.Module):
         return self.model.state_dict()
 
 
-def base(agent_config, model, optimizer, criterion, cuda, log_interval):
+def base(agent_config, model_config, model, optimizer, criterion, cuda, log_interval):
     return Agent(model, agent_config, optimizer, criterion, cuda, log_interval)
