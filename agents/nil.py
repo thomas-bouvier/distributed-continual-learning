@@ -1,3 +1,7 @@
+from meters import AverageMeter, accuracy
+
+import horovod.torch as hvd
+import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -5,7 +9,7 @@ import torch.optim as optim
 from continuum.tasks import split_train_val
 
 from agents.base import Agent
-from utils import *
+from utils.utils import move_cuda
 from models import *
 
 
@@ -119,11 +123,11 @@ class nil_agent(Agent):
 
 
     def before_all_tasks(self, scenario):
-        x_dim = list(scenario[0][0][0].size())
+        self.x_dim = list(scenario[0][0][0].size())
 
-        self.reps_x = torch.zeros([1, self.num_candidates + self.batch_size] + x_dim).cuda().share_memory_()
-        self.reps_y = torch.zeros([1, self.num_candidates + self.batch_size], dtype=torch.long).cuda().share_memory_()
-        self.reps_w = torch.zeros([1, self.num_candidates + self.batch_size]).cuda().share_memory_()
+        self.reps_x = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size] + self.x_dim), self.cuda).share_memory_()
+        self.reps_y = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size], dtype=torch.long), self.cuda).share_memory_()
+        self.reps_w = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size]), self.cuda).share_memory_()
 
         self.q = mp.Queue()
         self.lock = mp.Lock()
@@ -148,11 +152,11 @@ class nil_agent(Agent):
         mask = torch.tensor([False for _ in range(self.num_classes)])
         for y in nc:
             mask[y] = True
-        mask = mask.float().cuda()
+        self.mask = move_cuda(self.mask.float(), self.cuda)
 
-        self.x = torch.zeros([self.num_candidates + self.batch_size] + x_dim).cuda()
-        self.y = torch.zeros([self.num_candidates + self.batch_size], dtype=torch.long).cuda()
-        self.w = torch.zeros([self.num_candidates + self.batch_size]).cuda()
+        self.x = move_cuda(torch.zeros([self.num_candidates + self.batch_size] + self.x_dim), self.cuda)
+        self.y = move_cuda(torch.zeros([self.num_candidates + self.batch_size], dtype=torch.long), self.cuda)
+        self.w = move_cuda(torch.zeros([self.num_candidates + self.batch_size]), self.cuda)
 
 
     def after_every_task(self):
@@ -169,8 +173,7 @@ class nil_agent(Agent):
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
-            if self.cuda:
-                inputs, target = inputs.cuda(), target.cuda()
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
 
             output = self.model(inputs)
             loss = self.criterion(output, target)

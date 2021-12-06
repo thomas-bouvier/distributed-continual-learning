@@ -8,7 +8,7 @@ import torch.optim as optim
 from continuum.tasks import split_train_val
 
 from agents.base import Agent
-from utils import *
+from utils.utils import move_cuda
 from models import *
 
 
@@ -63,11 +63,7 @@ class icarl_agent(Agent):
         mask = torch.tensor([False for _ in range(self.num_classes)])
         for y in self.nc:
             mask[y] = True
-
-        if self.cuda:
-            self.mask = mask.float().cuda()
-        else:
-            self.mask = mask
+        self.mask = move_cuda(self.mask.float(), self.cuda)
 
         # Distillation
         if self.mem_class_x != {}:
@@ -97,14 +93,13 @@ class icarl_agent(Agent):
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
-            if self.cuda:
-                inputs, target = inputs.cuda(), target.cuda()
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
 
             # Distillation
             if self.mem_class_x != {}:
                 self.lock_made.acquire()
-                inputs = torch.cat(inputs, self.cand_x.cuda())
-                dist_y = self.cand_y.cuda()
+                inputs = torch.cat(inputs, move_cuda(self.cand_x, self.cuda))
+                dist_y = move_cuda(self.cand_y, self.cuda)
                 self.lock_make.release()
 
             output = self.model(inputs)

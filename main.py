@@ -147,7 +147,10 @@ class Experiment():
         if self.args.model_config != '':
             model_config = dict(model_config, **literal_eval(self.args.model_config))
 
-        agent_config = { 'model': self.args.model }
+        agent_config = {
+            'model': self.args.model,
+            'batch_size': self.args.batch_size
+        }
         if self.args.agent_config != '':
             agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
 
@@ -237,7 +240,7 @@ class Experiment():
 
 
     def run_workload_c(self):
-        self.agent.before_all_tasks()
+        self.agent.before_all_tasks(self.train_data.scenario)
 
         for task_id in range(0, len(self.train_data.scenario)):
             if hvd.rank() == 0:
