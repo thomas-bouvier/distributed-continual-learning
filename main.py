@@ -21,7 +21,6 @@ from cross_entropy import CrossEntropyLoss
 from data import DataRegime
 from log import ResultsLog
 from optimizer import OptimizerRegime
-from trainer import Trainer
 
 from torchsummary import summary
 
@@ -245,7 +244,9 @@ class Experiment():
 
         for task_id in range(0, len(self.train_data)):
             if hvd.rank() == 0:
-                print('\nTask: {0}\n'.format(task_id))
+                print('=======================================================')
+                print('Task: {0}'.format(task_id))
+                print('=======================================================')
 
             self.train_data.set_task_id(task_id)
             self.validate_data.set_task_id(task_id)
