@@ -57,7 +57,6 @@ def memory_manager(dataset, q, lock, lock_make, lock_made, num_classes, num_cand
                 total_weight = (batch_size * 1.0) / n_candidates
                 total_weight *= (total_count / np.sum([len(cls) for cls in representatives]))
 
-
                 probs = [count / total_count for count in class_count]
 
                 for i in range(len(representatives)):
@@ -122,8 +121,8 @@ class nil_agent(Agent):
         self.val_set = None
 
 
-    def before_all_tasks(self, scenario):
-        self.x_dim = list(scenario[0][0][0].size())
+    def before_all_tasks(self, taskets):
+        self.x_dim = list(taskets[0][0][0].size())
 
         self.reps_x = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size] + self.x_dim), self.cuda).share_memory_()
         self.reps_y = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size], dtype=torch.long), self.cuda).share_memory_()
@@ -135,7 +134,7 @@ class nil_agent(Agent):
         self.lock_made = mp.Lock()
         self.lock_made.acquire()
 
-        self.p = mp.Process(target=memory_manager, args=[scenario, self.q, self.lock, self.lock_make, self.lock_made, self.num_classes, self.num_candidates, self.memory_size, self.batch_size, hvd.size(), hvd.rank()])
+        self.p = mp.Process(target=memory_manager, args=[taskets, self.q, self.lock, self.lock_make, self.lock_made, self.num_classes, self.num_candidates, self.memory_size, self.batch_size, hvd.size(), hvd.rank()])
         self.p.start()
         self.q.put((self.reps_x, self.reps_y, self.reps_w))
 
@@ -152,7 +151,7 @@ class nil_agent(Agent):
         mask = torch.tensor([False for _ in range(self.num_classes)])
         for y in nc:
             mask[y] = True
-        self.mask = move_cuda(self.mask.float(), self.cuda)
+        self.mask = move_cuda(mask.float(), self.cuda)
 
         self.x = move_cuda(torch.zeros([self.num_candidates + self.batch_size] + self.x_dim), self.cuda)
         self.y = move_cuda(torch.zeros([self.num_candidates + self.batch_size], dtype=torch.long), self.cuda)
@@ -200,7 +199,7 @@ class nil_agent(Agent):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 
-        for i_batch, item in enumerate(data_loader):
+        for i_batch in range(int(len(data_loader) / (hvd.size() * self.batch_size)) + ((len(data_loader) % (hvd.size() * self.batch_size)) != 0)):
             self.q.put(i_batch)
 
             self.lock_made.acquire()

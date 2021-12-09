@@ -63,7 +63,7 @@ class icarl_agent(Agent):
         mask = torch.tensor([False for _ in range(self.num_classes)])
         for y in self.nc:
             mask[y] = True
-        self.mask = move_cuda(self.mask.float(), self.cuda)
+        self.mask = move_cuda(mask.float(), self.cuda)
 
         # Distillation
         if self.mem_class_x != {}:

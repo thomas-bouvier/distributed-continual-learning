@@ -114,7 +114,7 @@ class Agent(nn.Module):
             return self.forward(data_loader, average_output=average_output, training=False)
 
 
-    def before_all_tasks(self):
+    def before_all_tasks(self, taskets):
         pass
 
 

@@ -1,17 +1,18 @@
 import os
 import torch
 import horovod.torch as hvd
-from filelock import FileLock
 
 from copy import deepcopy
 from continuum import datasets as datasets_c
 from continuum import ClassIncremental, InstanceIncremental
+from filelock import FileLock
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchvision import datasets
 
 from preprocess import get_transform
 from regime import Regime      
+from sampler import MyDistributedSampler
 
 
 def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
@@ -106,9 +107,10 @@ _DATA_ARGS = {'dataset', 'split', 'transform', 'target_transform', 'download',
 _DATALOADER_ARGS = {'batch_size', 'shuffle', 'sampler', 'batch_sampler',
                     'num_workers', 'collate_fn', 'pin_memory', 'drop_last',
                     'timeout', 'worker_init_fn'}
-_CONTINUAL_ARGS = {'scenario', 'increment', 'initial_increment', 'nb_tasks'}
+_CONTINUAL_ARGS = {'scenario', 'increment', 'initial_increment', 'nb_tasks',
+                    'concatenate_tasksets'}
 _TRANSFORM_ARGS = {'transform_name'}
-_OTHER_ARGS = {'distributed'}
+_OTHER_ARGS = {'distributed', 'shard'}
 
 
 """
@@ -122,7 +124,7 @@ class DataRegime(object):
         self.task_id = 0
         self.current_task_id = 0
         self.steps = None
-        self.scenario = None
+        self.tasksets = None
         self.get_loader(True)
 
 
@@ -139,9 +141,8 @@ class DataRegime(object):
                 config['loader']['sampler'] = DistributedSampler(
                     self._data, num_replicas=hvd.size(), rank=hvd.rank()
                 )
-                config['loader']['shuffle'] = None
-                # pin-memory currently broken for distributed
-                config['loader']['pin_memory'] = False
+
+            config['loader']['shuffle'] = None
 
             self._sampler = config['loader'].get('sampler', None)
             self._loader = DataLoader(self._data, **config['loader'])
@@ -151,26 +152,41 @@ class DataRegime(object):
 
     def get_taskset(self, config):
         if config['data'].get('continual', False):
-            if self.scenario is None:
-                self.prepare_scenario(config)
-            return self.scenario[self.current_task_id]
+            if self.tasksets is None:
+                self.prepare_tasksets(config)
+            
+            if config['continual'].get('concatenate_tasksets', False):
+                current_taskset = self.tasksets[self.current_task_id]
+                if self.concat_taskset is None:
+                    self.concat_taskset = current_taskset
+                else:
+                    x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
+                    nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
+                    x = np.concatenate((x, nx))
+                    y = np.concatenate((y, ny))
+                    t = np.concatenate((t, nt))
+                    self.concat_taskset = TaskSet(x, y, t, trsf=current_taskset.trsf, data_type=current_taskset.data_type)
+                return self.concat_taskset
+
+            return self.tasksets[self.current_task_id]
+
         return get_dataset(**config['data'])
 
 
-    def prepare_scenario(self, config):
+    def prepare_tasksets(self, config):
         self.scenario_type = config['continual'].pop('scenario', 'class')
         if self.scenario_type == 'class':
             ii = config['continual'].pop('initial_increment', 0)
             i = config['continual'].pop('increment', 1)
 
-            self.scenario = ClassIncremental(
+            self.tasksets = ClassIncremental(
                 get_dataset(**config['data']),
                 initial_increment = ii,
                 increment = i
             )
         else:
             nbt = continual_config.pop('nb_tasks', 5)
-            self.scenario = InstanceIncremental(
+            self.tasksets = InstanceIncremental(
                 get_dataset(**config['data']),
                 nb_tasks = nbt
             )
@@ -187,7 +203,7 @@ class DataRegime(object):
 
 
     def __len__(self):
-        return len(self._data)
+        return len(self._data) or 1
 
 
     def __repr__(self):

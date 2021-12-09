@@ -37,6 +37,17 @@ python main.py --model resnet --model-config "{'depth': 101}" --agent icarl --da
 
 Change the network interface if needed: `HOROVOD_GLOO_IFACE=wlo1`.
 
+#### Scenarios
+
+##### Naive baseline
+
+```
+python main.py --model mnistnet --dataset cifar100 --dataset-config "{'scenario': 'class', 'initial_increment': 10, 'increment': 2}" --continual
+python main.py --model resnet --model-config "{'depth': 101}" --dataset tinyimagenet --dataset-config "{'scenario': 'domain', 'nb_tasks': 5}" --continual
+python main.py --model resnet --agent nil --dataset mnist --dataset-config "{'scenario': 'domain', 'nb_tasks': 5}" --continual
+python main.py --model resnet --model-config "{'depth': 101}" --agent icarl --dataset tinyimagenet --dataset-config "{'scenario': 'domain', 'nb_tasks': 5}" --continual
+```
+
 ## Credits
 
 Inspired by https://github.com/eladhoffer/convNet.pytorch.

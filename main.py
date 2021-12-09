@@ -38,8 +38,8 @@ parser.add_argument('--dataset', required=True,
                     help="dataset name")
 parser.add_argument('--dataset-dir', default='./data',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
-parser.add_argument('--dataset-config', default='',
-                    help='additional dataset configuration (useful for continual learning)')
+parser.add_argument('--tasksets-config', default='',
+                    help='additional taskset configuration (useful for continual learning)')
 parser.add_argument('--agent', metavar='AGENT', default=None,
                     choices=agent_names,
                     help='model agent: ' + ' | '.join(agent_names))
@@ -229,20 +229,21 @@ class Experiment():
                 mlflow.log_param(key, value)
             mlflow.log_param('gpus', hvd.size())
 
-            if self.args.continual:
-                self.run_workload_c()
-            else:
-                self.run_workload()
+            self.run_workload()
         
             # Log the model as an artifact of the MLflow run.
             print("Logging the trained model as a run artifact...")
             mlflow.pytorch.log_model(self.agent, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
 
 
-    def run_workload_c(self):
-        self.agent.before_all_tasks(self.train_data.scenario)
+    def run_workload(self):
+        results_path = path.join(self.save_path, 'results')
+        results = ResultsLog(results_path,
+                        title='Training Results - %s' % self.args.save_dir)
 
-        for task_id in range(0, len(self.train_data.scenario)):
+        #self.agent.before_all_tasks(self.train_data.tasksets)
+
+        for task_id in range(0, len(self.train_data)):
             if hvd.rank() == 0:
                 print('\nTask: {0}\n'.format(task_id))
 
@@ -255,57 +256,48 @@ class Experiment():
                 self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
                 hvd.broadcast_optimizer_state(self.opt, root_rank=0)
 
-            self.run_workload()
+            start_epoch = max(self.args.start_epoch, 0)
+            self.agent.steps = start_epoch * len(self.train_data)
+            self.agent.num_epochs = self.args.epochs
+
+            for i_epoch in range(start_epoch, self.args.epochs):
+                self.agent.epoch = i_epoch
+
+                # Horovod: set epoch to sampler for shuffling.
+                self.train_data.set_epoch(i_epoch)
+                self.validate_data.set_epoch(i_epoch)
+
+                # train for one epoch
+                train_results = self.agent.train(self.train_data.get_loader())
+
+                # evaluate on validation set
+                validate_results = self.agent.validate(self.validate_data.get_loader())
+
+                if hvd.rank() == 0:
+                    print('\nResults: epoch: {0}\n'
+                            'Training Loss {train[loss]:.4f} \t\n'
+                            'Validation Loss {validate[loss]:.4f} \t\n'
+                            .format(i_epoch+1, train=train_results,
+                            validate=validate_results))
+
+                    values = dict(epoch=i_epoch+1, steps=self.agent.training_steps)
+                    values.update({'training ' + k: v for k, v in train_results.items()})
+                    values.update({'validation ' + k: v for k, v in validate_results.items()})
+
+                    results.add(**values)
+                    results.plot(x='epoch', y=['training loss', 'validation loss'],
+                            legend=['training', 'validation'],
+                            title='Loss', ylabel='loss')
+                    results.plot(x='epoch', y=['training error1', 'validation error1'],
+                                legend=['training', 'validation'],
+                                title='Error@1', ylabel='error %')
+                    results.plot(x='epoch', y=['training error5', 'validation error5'],
+                                legend=['training', 'validation'],
+                                title='Error@5', ylabel='error %')
+                    #results.save()
 
             self.agent.after_every_task()
-
         self.agent.after_all_tasks()
-
-
-    def run_workload(self):
-        results_path = path.join(self.save_path, 'results')
-        results = ResultsLog(results_path,
-                        title='Training Results - %s' % self.args.save_dir)
-
-        start_epoch = max(self.args.start_epoch, 0)
-        self.agent.steps = start_epoch * len(self.train_data)
-        self.agent.num_epochs = self.args.epochs
-
-        for i_epoch in range(start_epoch, self.args.epochs):
-            self.agent.epoch = i_epoch
-
-            # Horovod: set epoch to sampler for shuffling.
-            self.train_data.set_epoch(i_epoch)
-            self.validate_data.set_epoch(i_epoch)
-
-            # train for one epoch
-            train_results = self.agent.train(self.train_data.get_loader())
-
-            # evaluate on validation set
-            validate_results = self.agent.validate(self.validate_data.get_loader())
-
-            if hvd.rank() == 0:
-                print('\nResults: epoch: {0}\n'
-                        'Training Loss {train[loss]:.4f} \t\n'
-                        'Validation Loss {validate[loss]:.4f} \t\n'
-                        .format(i_epoch+1, train=train_results,
-                        validate=validate_results))
-
-                values = dict(epoch=i_epoch+1, steps=self.agent.training_steps)
-                values.update({'training ' + k: v for k, v in train_results.items()})
-                values.update({'validation ' + k: v for k, v in validate_results.items()})
-
-                results.add(**values)
-                results.plot(x='epoch', y=['training loss', 'validation loss'],
-                        legend=['training', 'validation'],
-                        title='Loss', ylabel='loss')
-                results.plot(x='epoch', y=['training error1', 'validation error1'],
-                            legend=['training', 'validation'],
-                            title='Error@1', ylabel='error %')
-                results.plot(x='epoch', y=['training error5', 'validation error5'],
-                            legend=['training', 'validation'],
-                            title='Error@5', ylabel='error %')
-                #results.save()
 
         return train_results
 
