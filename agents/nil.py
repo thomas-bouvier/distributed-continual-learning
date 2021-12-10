@@ -195,7 +195,7 @@ class nil_agent(Agent):
     """
     Forward pass for the current epoch
     """
-    def forward(self, data_loader, average_output=False, training=False):
+    def loop(self, data_loader, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 

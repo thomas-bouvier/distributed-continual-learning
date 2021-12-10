@@ -126,7 +126,7 @@ class icarl_agent(Agent):
     """
     Forward pass for the current epoch
     """
-    def forward(self, data_loader, average_output=False, training=False):
+    def loop(self, data_loader, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 
@@ -185,7 +185,6 @@ class icarl_agent(Agent):
         return meters
 
 
-    """
     def forward(self, x):
         self.model.eval()
         ns = x.size(0)
@@ -203,7 +202,6 @@ class icarl_agent(Agent):
                 out[ss, classpred[ss]] = 1
 
             return out
-    """
 
 
     def update_examplars(self, nc):

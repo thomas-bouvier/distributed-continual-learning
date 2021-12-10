@@ -56,7 +56,7 @@ class Agent():
     """
     Forward pass for the current epoch
     """
-    def forward(self, data_loader, average_output=False, training=False):
+    def loop(self, data_loader, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
 
@@ -102,14 +102,14 @@ class Agent():
     def train(self, data_loader, average_output=False):
         # switch to train mode
         self.model.train()
-        return self.forward(data_loader, average_output=average_output, training=True)
+        return self.loop(data_loader, average_output=average_output, training=True)
 
 
     def validate(self, data_loader, average_output=False):
         # switch to evaluate mode
         self.model.eval()
         with torch.no_grad():
-            return self.forward(data_loader, average_output=average_output, training=False)
+            return self.loop(data_loader, average_output=average_output, training=False)
 
 
     def before_all_tasks(self, taskets):
