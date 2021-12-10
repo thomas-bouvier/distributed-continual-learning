@@ -232,7 +232,7 @@ class Experiment():
         
             # Log the model as an artifact of the MLflow run.
             print("Logging the trained model as a run artifact...")
-            mlflow.pytorch.log_model(self.agent, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
+            mlflow.pytorch.log_model(self.agent.model, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
 
 
     def run_workload(self):
