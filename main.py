@@ -49,8 +49,6 @@ parser.add_argument('--model', metavar='MODEL', required=True,
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--model-config', default='',
                     help='additional model architecture configuration')
-parser.add_argument('--continual', action='store_true', default=False,
-                    help='continual learning')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
@@ -202,7 +200,7 @@ class Experiment():
                 'batch_size': allreduce_batch_size,
                 'shuffle': True,
                 'distributed': True,
-                'continual': self.args.continual
+                'continual': bool(self.args.tasksets_config)
             }
         )
 
@@ -216,7 +214,7 @@ class Experiment():
                 'batch_size': self.args.eval_batch_size,
                 'shuffle': False,
                 'distributed': True,
-                'continual': self.args.continual
+                'continual': bool(self.args.tasksets_config)
             }
         )
 
