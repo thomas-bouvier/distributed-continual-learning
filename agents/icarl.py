@@ -204,7 +204,7 @@ class icarl_agent(Agent):
 
 
     def update_examplars(self, nc):
-        self.eval()
+        self.model.eval()
         with torch.no_grad():
             # Reduce exemplar set by updating value of num. exemplars per class
             self.num_exemplars = int(self.num_memories / (len(nc) + len(self.mem_class_x.keys())))
@@ -279,7 +279,7 @@ class icarl_agent(Agent):
                     del fs
 
             # recompute outputs for distillation purposes and means for inference purposes
-            self.eval()
+            self.model.eval()
             for cc in self.mem_class_x.keys():
                 if self.candle:
                     outs = []
