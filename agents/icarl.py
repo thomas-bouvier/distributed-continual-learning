@@ -78,14 +78,6 @@ class icarl_agent(Agent):
         outputs = []
         total_loss = 0
 
-        if self.epoch + 1 == self.num_epochs:
-            if self.mem_x is None:
-                self.mem_x = inputs.detach()
-                self.mem_y = target.detach()
-            else:
-                self.mem_x = torch.cat(self.mem_x, inputs.detach())
-                self.mem_y = torch.cat(self.mem_y, target.detach())
-
         if training:
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.training_steps)
@@ -93,6 +85,14 @@ class icarl_agent(Agent):
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
             inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
+
+            if self.epoch + 1 == self.num_epochs:
+                if self.mem_x is None:
+                    self.mem_x = inputs.detach()
+                    self.mem_y = target.detach()
+                else:
+                    self.mem_x = torch.cat((self.mem_x, inputs.detach()))
+                    self.mem_y = torch.cat((self.mem_y, target.detach()))
 
             # Distillation
             if self.mem_class_x != {}:
