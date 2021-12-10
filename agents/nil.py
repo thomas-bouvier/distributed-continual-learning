@@ -234,7 +234,7 @@ class nil_agent(Agent):
                              'Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t'
                              'Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t'
                              .format(
-                                 self.epoch, i_batch, len(data_loader),
+                                 self.epoch+1, i_batch, len(data_loader),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
 
