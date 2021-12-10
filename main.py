@@ -242,16 +242,16 @@ class Experiment():
 
         #self.agent.before_all_tasks(self.train_data.tasksets)
 
-        for task_id in range(0, len(self.train_data)):
+        for task_id in range(0, len(self.train_data.tasksets) if self.train_data.tasksets else 1):
             if hvd.rank() == 0:
-                print('=======================================================')
+                print('===========================================================')
                 print('Task: {0}'.format(task_id))
-                print('=======================================================')
+                print('===========================================================\n')
 
             self.train_data.set_task_id(task_id)
             self.validate_data.set_task_id(task_id)
 
-            self.agent.before_every_task(task_id, self.train_data.get_loader())
+            self.agent.before_every_task(task_id, self.train_data._data)
 
             if task_id > 0:
                 self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
