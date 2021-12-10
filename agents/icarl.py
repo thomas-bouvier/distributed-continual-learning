@@ -1,5 +1,3 @@
-from meters import AverageMeter, accuracy
-
 import mlflow
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,6 +7,7 @@ from continuum.tasks import split_train_val
 
 from agents.base import Agent
 from utils.utils import move_cuda
+from meters import AverageMeter, accuracy
 from models import *
 
 
@@ -191,13 +190,13 @@ class icarl_agent(Agent):
 
         with torch.no_grad():
             classpred = torch.LongTensor(ns)
-            preds = self.model(x)[0].detach().clone().cuda()
+            preds = move_cuda(self.model(x)[0].detach().clone(), self.cuda)
             dist = torch.cdist(preds.view(1, *preds.size()), self.mean_features.view(1, *self.mean_features.size())).view(ns, len(self.mem_class_means.keys()))
 
             for ss in range(ns):
                 classpred[ss] = torch.argmin(dist[ss])
 
-            out = torch.zeros(ns, self.num_classes).cuda()
+            out = move_cuda(torch.zeros(ns, self.num_classes), self.cuda)
             for ss in range(ns):
                 out[ss, classpred[ss]] = 1
 

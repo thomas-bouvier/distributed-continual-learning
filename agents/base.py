@@ -1,7 +1,8 @@
-from meters import AverageMeter, accuracy
-
 import mlflow
 import torch
+
+from meters import AverageMeter, accuracy
+from utils.utils import move_cuda
 
 class Agent():
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
@@ -15,9 +16,8 @@ class Agent():
         self.epoch = 0
         self.training_steps = 0
 
-        if cuda:
-            # Move model to GPU.
-            self.model.cuda()
+        # Move model to GPU.
+        move_cuda(self.model, cuda)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -33,8 +33,7 @@ class Agent():
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
-            if self.cuda:
-                inputs, target = inputs.cuda(), target.cuda()
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
 
             output = self.model(inputs)
             loss = self.criterion(output, target)
