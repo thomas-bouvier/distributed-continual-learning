@@ -2,10 +2,8 @@ from meters import AverageMeter, accuracy
 
 import mlflow
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-class Agent(nn.Module):
+class Agent():
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(Agent, self).__init__()
         self.model = model
