@@ -7,22 +7,30 @@ from regularizer import Regularizer
 class OptimizerRegime(Regime, torch.optim.Optimizer):
     def __init__(self, model, compression, reduction, batches_per_allreduce, gradient_predivide_factor, regime, defaults={}):
         super(OptimizerRegime, self).__init__(regime, defaults)
+        self.model = model
         self.parameters = list(model.parameters())
         self.regularizer = Regularizer(model)
+        self.compression = compression
+        self.reduction = reduction
+        self.batches_per_allreduce = batches_per_allreduce
+        self.gradient_predivide_factor = gradient_predivide_factor
 
+        self.optimizer = self._create_optimizer()
+
+
+    def _create_optimizer(self):
         optimizer = torch.optim.SGD(self.parameters, lr=0)
 
-        # Horovod: broadcast parameters & optimizer state.
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        # Horovod: broadcast optimizer state.
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
         # Horovod: wrap optimizer with DistributedOptimizer.
-        self.optimizer = hvd.DistributedOptimizer(optimizer,
-                                    named_parameters=model.named_parameters(),
-                                    compression=compression,
-                                    op=reduction,
-                                    backward_passes_per_step=batches_per_allreduce,
-                                    gradient_predivide_factor=gradient_predivide_factor)
+        return hvd.DistributedOptimizer(optimizer,
+                                    named_parameters=self.model.named_parameters(),
+                                    compression=self.compression,
+                                    op=self.reduction,
+                                    backward_passes_per_step=self.batches_per_allreduce,
+                                    gradient_predivide_factor=self.gradient_predivide_factor)
 
 
     def update(self, epoch=None, steps=None):
@@ -80,3 +88,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         """
         # deepcopy, to be consistent with module API
         self.optimizer.load_state_dict(state_dict)
+
+
+    def reset(self):
+        self.load_state_dict(self._create_optimizer().state_dict())

@@ -10,7 +10,7 @@ class Regime(object):
          ]"
     """
 
-    def __init__(self, regime: list, defaults = {}):
+    def __init__(self, regime: list, defaults={}):
         self.regime = regime
         self.defaults = defaults
         self.config = defaults

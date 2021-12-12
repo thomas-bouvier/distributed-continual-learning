@@ -120,7 +120,8 @@ class Agent():
 
 
     def before_every_task(self, task_id, train_taskset):
-        pass
+        if task_id > 0:
+            self.optimizer.reset()
 
 
     def after_every_task(self):

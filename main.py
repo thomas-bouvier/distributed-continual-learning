@@ -126,14 +126,12 @@ def main():
 
 class Experiment():
     def __init__(self, save_path, args, kwargs):
+        self.save_path = save_path
         self.args = args
         self.kwargs = kwargs
 
-        self.save_path = save_path
-
         self._create_agent()
         self._prepare_dataset()
-        self.agent.steps = self.args.start_epoch * len(self.train_data)
 
 
     def _create_agent(self):
@@ -161,6 +159,8 @@ class Experiment():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
         model = model(model_config)
+        # Horovod: broadcast parameters.
+        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 
         # Horovod: scale learning rate by lr_scaler.
         optim_regime = getattr(model, 'regime', [
@@ -173,11 +173,10 @@ class Experiment():
             }
         ])
 
-        # distributed training parameters
+        # Distributed training parameters.
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
-
-        self.optimizer = OptimizerRegime(model, compression, reduction,
+        optimizer = OptimizerRegime(model, compression, reduction,
                                     self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
@@ -185,7 +184,9 @@ class Experiment():
         loss_params = {}
         self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
-        self.agent = agent(agent_config, model_config, model, self.optimizer, self.criterion, self.args.cuda, self.args.log_interval)
+        self.agent = agent(agent_config, model_config, model, optimizer,
+                           self.criterion, self.args.cuda, self.args.log_interval)
+        self.agent.num_epochs = self.args.epochs
 
 
     def _prepare_dataset(self):
@@ -260,15 +261,8 @@ class Experiment():
 
             self.agent.before_every_task(task_id, self.train_data._data)
 
-            """
-            if task_id > 0:
-                self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
-                hvd.broadcast_optimizer_state(self.opt, root_rank=0)
-            """
-
             start_epoch = max(self.args.start_epoch, 0)
             self.agent.steps = start_epoch * len(self.train_data)
-            self.agent.num_epochs = self.args.epochs
 
             for i_epoch in range(start_epoch, self.args.epochs):
                 self.agent.epoch = i_epoch
