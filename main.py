@@ -18,7 +18,7 @@ import models
 import agents
 
 from cross_entropy import CrossEntropyLoss
-from data import DataRegime
+from data_regime import DataRegime
 from log import ResultsLog
 from optimizer import OptimizerRegime
 
@@ -205,8 +205,6 @@ class Experiment():
             'num_tasks': tasksets_config.get('num_tasks', 5),
             'concatenate_tasksets': tasksets_config.get('concatenate_tasksets', False)
         }
-
-        print({**defaults, 'split': 'train'})
 
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data = DataRegime(
