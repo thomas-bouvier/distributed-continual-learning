@@ -174,10 +174,9 @@ class DataRegime(object):
 
 
     def prepare_tasksets(self, config):
-        self.scenario_type = config['continual'].pop('scenario', 'class')
-        if self.scenario_type == 'class':
-            ii = config['continual'].pop('initial_increment', 0)
-            i = config['continual'].pop('increment', 1)
+        if config['continual'].get('scenario') == 'class':
+            ii = config['continual'].get('initial_increment')
+            i = config['continual'].get('increment')
 
             self.tasksets = ClassIncremental(
                 get_dataset(**config['data']),
@@ -185,10 +184,9 @@ class DataRegime(object):
                 increment = i
             )
         else:
-            nbt = continual_config.pop('nb_tasks', 5)
             self.tasksets = InstanceIncremental(
                 get_dataset(**config['data']),
-                nb_tasks = nbt
+                nb_tasks = continual_config.get('num_tasks')
             )
 
 

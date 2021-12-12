@@ -189,6 +189,10 @@ class Experiment():
 
 
     def _prepare_dataset(self):
+        tasksets_config = {'continual': bool(self.args.tasksets_config)}
+        if self.args.tasksets_config != '':
+            tasksets_config = dict(tasksets_config, **literal_eval(self.args.tasksets_config))
+
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data = DataRegime(
             hvd,
@@ -200,7 +204,11 @@ class Experiment():
                 'batch_size': allreduce_batch_size,
                 'shuffle': True,
                 'distributed': True,
-                'continual': bool(self.args.tasksets_config)
+                'continual': tasksets_config.get('continual'),
+                'scenario': tasksets_config.get('scenario', 'class'),
+                'initial_increment': tasksets_config.get('initial_increment', 0),
+                'increment': tasksets_config.get('increment', 1),
+                'num_tasks': tasksets_config.get('num_tasksets', 5),
             }
         )
 
@@ -214,7 +222,11 @@ class Experiment():
                 'batch_size': self.args.eval_batch_size,
                 'shuffle': False,
                 'distributed': True,
-                'continual': bool(self.args.tasksets_config)
+                'continual': tasksets_config.get('continual'),
+                'scenario': tasksets_config.get('scenario', 'class'),
+                'initial_increment': tasksets_config.get('initial_increment', 0),
+                'increment': tasksets_config.get('increment', 1),
+                'num_tasks': tasksets_config.get('num_tasksets', 5)
             }
         )
 
@@ -251,9 +263,11 @@ class Experiment():
 
             self.agent.before_every_task(task_id, self.train_data._data)
 
+            """
             if task_id > 0:
                 self.optimizer.load_state_dict(self._create_optimizer(lr_scaler).state_dict())
                 hvd.broadcast_optimizer_state(self.opt, root_rank=0)
+            """
 
             start_epoch = max(self.args.start_epoch, 0)
             self.agent.steps = start_epoch * len(self.train_data)
