@@ -192,23 +192,29 @@ class Experiment():
         tasksets_config = {'continual': bool(self.args.tasksets_config)}
         if self.args.tasksets_config != '':
             tasksets_config = dict(tasksets_config, **literal_eval(self.args.tasksets_config))
+        
+        defaults={
+            'dataset': self.args.dataset,
+            'dataset_dir': self.args.dataset_dir,
+            'shuffle': False,
+            'distributed': True,
+            'continual': tasksets_config.get('continual'),
+            'scenario': tasksets_config.get('scenario', 'class'),
+            'initial_increment': tasksets_config.get('initial_increment', 0),
+            'increment': tasksets_config.get('increment', 1),
+            'num_tasks': tasksets_config.get('num_tasks', 5)
+        }
+
+        print({**defaults, 'split': 'train'})
 
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data = DataRegime(
             hvd,
             getattr(self.agent, 'data_regime', None),
             defaults={
-                'dataset': self.args.dataset,
-                'dataset_dir': self.args.dataset_dir,
+                **defaults,
                 'split': 'train',
-                'batch_size': allreduce_batch_size,
-                'shuffle': True,
-                'distributed': True,
-                'continual': tasksets_config.get('continual'),
-                'scenario': tasksets_config.get('scenario', 'class'),
-                'initial_increment': tasksets_config.get('initial_increment', 0),
-                'increment': tasksets_config.get('increment', 1),
-                'num_tasks': tasksets_config.get('num_tasksets', 5),
+                'batch_size': self.args.batch_size
             }
         )
 
@@ -216,17 +222,9 @@ class Experiment():
             hvd,
             getattr(self.agent, 'data_eval_regime', None),
             defaults={
-                'dataset': self.args.dataset,
-                'dataset_dir': self.args.dataset_dir,
+                **defaults,
                 'split': 'validate',
-                'batch_size': self.args.eval_batch_size,
-                'shuffle': False,
-                'distributed': True,
-                'continual': tasksets_config.get('continual'),
-                'scenario': tasksets_config.get('scenario', 'class'),
-                'initial_increment': tasksets_config.get('initial_increment', 0),
-                'increment': tasksets_config.get('increment', 1),
-                'num_tasks': tasksets_config.get('num_tasksets', 5)
+                'batch_size': self.args.eval_batch_size
             }
         )
 
