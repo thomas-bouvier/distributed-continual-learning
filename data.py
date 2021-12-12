@@ -1,10 +1,12 @@
+import horovod.torch as hvd
+import numpy as np
 import os
 import torch
-import horovod.torch as hvd
 
 from copy import deepcopy
 from continuum import datasets as datasets_c
 from continuum import ClassIncremental, InstanceIncremental
+from continuum.tasks import TaskSet
 from filelock import FileLock
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -107,7 +109,7 @@ _DATA_ARGS = {'dataset', 'split', 'transform', 'target_transform', 'download',
 _DATALOADER_ARGS = {'batch_size', 'shuffle', 'sampler', 'batch_sampler',
                     'num_workers', 'collate_fn', 'pin_memory', 'drop_last',
                     'timeout', 'worker_init_fn'}
-_CONTINUAL_ARGS = {'scenario', 'increment', 'initial_increment', 'nb_tasks',
+_CONTINUAL_ARGS = {'scenario', 'increment', 'initial_increment', 'num_tasks',
                     'concatenate_tasksets'}
 _TRANSFORM_ARGS = {'transform_name'}
 _OTHER_ARGS = {'distributed', 'shard'}
@@ -125,6 +127,7 @@ class DataRegime(object):
         self.current_task_id = 0
         self.steps = None
         self.tasksets = None
+        self.concat_taskset = None
         self.get_loader(True)
 
 
@@ -155,8 +158,8 @@ class DataRegime(object):
             if self.tasksets is None:
                 self.prepare_tasksets(config)
             
+            current_taskset = self.tasksets[self.current_task_id]
             if config['continual'].get('concatenate_tasksets', False):
-                current_taskset = self.tasksets[self.current_task_id]
                 if self.concat_taskset is None:
                     self.concat_taskset = current_taskset
                 else:
@@ -168,7 +171,7 @@ class DataRegime(object):
                     self.concat_taskset = TaskSet(x, y, t, trsf=current_taskset.trsf, data_type=current_taskset.data_type)
                 return self.concat_taskset
 
-            return self.tasksets[self.current_task_id]
+            return current_taskset
 
         return get_dataset(**config['data'])
 

@@ -202,7 +202,8 @@ class Experiment():
             'scenario': tasksets_config.get('scenario', 'class'),
             'initial_increment': tasksets_config.get('initial_increment', 0),
             'increment': tasksets_config.get('increment', 1),
-            'num_tasks': tasksets_config.get('num_tasks', 5)
+            'num_tasks': tasksets_config.get('num_tasks', 5),
+            'concatenate_tasksets': tasksets_config.get('concatenate_tasksets', False)
         }
 
         print({**defaults, 'split': 'train'})
