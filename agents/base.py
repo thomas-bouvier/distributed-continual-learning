@@ -1,3 +1,4 @@
+import copy
 import mlflow
 import torch
 
@@ -21,7 +22,9 @@ class Agent():
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
-
+            self.model_snapshot = copy.deepcopy(state_dict)
+        else:
+            self.model_snapshot = copy.deepcopy(self.model.state_dict())
 
     def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
         outputs = []
@@ -50,7 +53,6 @@ class Agent():
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
-
 
     """
     Forward pass for the current epoch
@@ -97,7 +99,6 @@ class Agent():
 
         return meters
 
-
     def train(self, data_loader, average_output=False):
         # switch to train mode
         self.model.train()
@@ -110,23 +111,20 @@ class Agent():
         with torch.no_grad():
             return self.loop(data_loader, average_output=average_output, training=False)
 
-
     def before_all_tasks(self, taskets):
         pass
-
 
     def after_all_tasks(self):
         pass
 
-
     def before_every_task(self, task_id, train_taskset):
         if task_id > 0:
+            if self.config.get('reset_state_dict', False):
+                self.model.load_state_dict(copy.deepcopy(self.model_snapshot))
             self.optimizer.reset()
-
 
     def after_every_task(self):
         pass
-
 
     def get_state_dict(self):
         return self.model.state_dict()
