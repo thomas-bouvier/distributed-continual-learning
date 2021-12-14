@@ -3,6 +3,7 @@ import horovod.torch as hvd
 import json
 import mlflow
 import mlflow.pytorch
+import logging
 import os
 import pickle
 import time
@@ -263,7 +264,6 @@ class Experiment():
 
             start_epoch = max(self.args.start_epoch, 0)
             self.agent.steps = start_epoch * len(self.train_data)
-
             for i_epoch in range(start_epoch, self.args.epochs):
                 self.agent.epoch = i_epoch
 
@@ -284,7 +284,8 @@ class Experiment():
                             .format(i_epoch+1, train=train_results,
                             validate=validate_results))
 
-                    values = dict(epoch=i_epoch+1, steps=self.agent.training_steps)
+                    draw_epoch = i_epoch + 1 + task_id * self.args.epochs
+                    values = dict(epoch=draw_epoch, steps=self.agent.training_steps)
                     values.update({'training ' + k: v for k, v in train_results.items()})
                     values.update({'validation ' + k: v for k, v in validate_results.items()})
 
@@ -292,13 +293,19 @@ class Experiment():
                     results.plot(x='epoch', y=['training loss', 'validation loss'],
                             legend=['training', 'validation'],
                             title='Loss', ylabel='loss')
+                    results.plot(x='epoch', y=['training prec1', 'validation prec1'],
+                            legend=['training', 'validation'],
+                            title='Prec@1', ylabel='prec %')
+                    results.plot(x='epoch', y=['training prec5', 'validation prec5'],
+                            legend=['training', 'validation'],
+                            title='Prec@5', ylabel='prec %')
                     results.plot(x='epoch', y=['training error1', 'validation error1'],
                                 legend=['training', 'validation'],
                                 title='Error@1', ylabel='error %')
                     results.plot(x='epoch', y=['training error5', 'validation error5'],
                                 legend=['training', 'validation'],
                                 title='Error@5', ylabel='error %')
-                    #results.save()
+                    results.save()
 
             self.agent.after_every_task()
         self.agent.after_all_tasks()
