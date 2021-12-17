@@ -234,7 +234,7 @@ class icarl_agent(Agent):
                     sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
 
                     mean_memf_c = sum_memf_c / sum_nb_samples
-                    mean_memf_c = mean_memf_c.view(1, self.nb_features)
+                    mean_memf_c = mean_memf_c.view(1, self.num_features)
 
                     # Compute the distance between each feature vector of the examples of classse c and the mean feature vector of classse c
                     dist_memf_c = torch.cdist(memf_c, mean_memf_c)
@@ -254,7 +254,7 @@ class icarl_agent(Agent):
                         fs[i], _ = self.model(x)
                         means.append(fs[i].sum(0))
 
-                    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.nb_features)
+                    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.num_features)
 
                     dist_memf_c = None
                     tmp_mem_x = None
