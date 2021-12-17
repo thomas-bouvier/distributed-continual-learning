@@ -139,7 +139,9 @@ class Experiment():
         agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base
         model = models.__dict__[self.args.model]
 
-        model_config = { 'dataset': self.args.dataset }
+        model_config = {
+            'dataset': self.args.dataset
+        }
         if self.args.model_config != '':
             model_config = dict(model_config, **literal_eval(self.args.model_config))
 

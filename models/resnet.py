@@ -172,6 +172,7 @@ class resnet_cifar_model(resnet_model):
                  block=BasicBlock, depth=18, width=[16, 32, 64],
                  groups=[1, 1, 1], residual_block=None, regime='normal', dropout=None, mixup=False):
         super(resnet_cifar_model, self).__init__()
+        self.num_classes = num_classes
         self.inplanes = inplanes
         n = int((depth - 2) / 6)
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1,
@@ -214,6 +215,7 @@ class resnet_imagenet_model(resnet_model):
                  regime='normal', scale_lr=1, ramp_up_lr=True, ramp_up_epochs=5, checkpoint_segments=0, mixup=False, epochs=90,
                  base_devices=4, base_device_batch=64, base_duplicates=1, base_image_size=224, mix_size_regime='D+'):
         super(resnet_imagenet_model, self).__init__()
+        self.num_classes = num_classes
         self.inplanes = inplanes
         self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=False)

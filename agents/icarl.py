@@ -36,7 +36,7 @@ class icarl_agent(Agent):
 
         # Modified parameters
         self.num_exemplars = 0
-        self.num_memories = config.get('num_representatives') * config.get('num_classes')
+        self.num_memories = config.get('num_representatives') * model.num_classes
         self.num_features = config.get('num_features')
         self.num_classes = config.get('num_classes')
         self.num_candidates = config.get('num_candidates')
@@ -59,10 +59,12 @@ class icarl_agent(Agent):
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
         self.nc = set([data[1] for data in train_taskset])
-        mask = torch.tensor([False for _ in range(self.num_classes)])
+        mask = torch.tensor([False for _ in range(self.model.num_classes)])
         for y in self.nc:
             mask[y] = True
         self.mask = move_cuda(mask.float(), self.cuda)
+
+        self.criterion = nn.CrossEntropyLoss(weight=self.mask)
 
         # Distillation
         if self.mem_class_x != {}:
@@ -106,7 +108,7 @@ class icarl_agent(Agent):
 
             # Compute distillation loss
             if self.mem_class_x != {}:
-                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+                loss += self.kl(self.lsm(output[target.size(0):]), self.sm(dist_y))
 
             if training:
                 # accumulate gradient
@@ -313,22 +315,17 @@ def icarl(agent_config, model_config, model, optimizer, criterion, cuda, log_int
     depth = model_config.get('depth', 18)
 
     if model_name == 'resnet':
-        model_config.setdefault('num_classes', 200)
-        model_config.setdefault('num_features', 50)
-        agent_config.setdefault('num_classes', 200)
-        agent_config.setdefault('num_features', 50)
+        agent_config.setdefault('num_features', 20 if depth <= 18 else 64)
         agent_config.setdefault('num_representatives', 0)
         agent_config['num_features'] = agent_config['num_features'] * (8 if depth < 50 else 32)
         return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
 
     elif model_name == 'mnistnet':
-        agent_config.setdefault('num_classes', 200)
         agent_config.setdefault('num_features', 50)
         agent_config.setdefault('num_representatives', 0)
         return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
 
     elif model_name == 'candlenet':
-        agent_config.setdefault('num_classes', 20)
         agent_config.setdefault('num_features', 50)
         agent_config.setdefault('num_representatives', 0)
         return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
