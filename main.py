@@ -33,10 +33,10 @@ agent_names = sorted(name for name in agents.__dict__
                      if name.islower() and not name.startswith("__")
                      and callable(agents.__dict__[name]))
 
-parser = argparse.ArgumentParser(description='Distributed deep learning with Horovod + PyTorch')
+parser = argparse.ArgumentParser(description='Distributed deep/continual learning with Horovod + PyTorch')
 parser.add_argument('--dataset', required=True,
                     help="dataset name")
-parser.add_argument('--dataset-dir', default='./data',
+parser.add_argument('--dataset-dir', default='./datasets',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
 parser.add_argument('--tasksets-config', default='',
                     help='additional taskset configuration (useful for continual learning)')
