@@ -222,11 +222,12 @@ class icarl_agent(Agent):
                 # Select examples of classse c
                 mem_x_c = torch.index_select(self.mem_x, 0, indxs)
 
-                if not self.candle:
-                    # Compute feature vectors of examples of classse c
+                # Not the CANDLE dataset
+                if self.model.num_classes != 2:
+                    # Compute feature vectors of examples of class c
                     memf_c, _ = self.model(mem_x_c)
 
-                    # Compute the mean feature vector of classse              
+                    # Compute the mean feature vector of class
                     nb_samples = torch.tensor(memf_c.size(0))
                     sum_memf_c = memf_c.sum(0)
 
@@ -283,7 +284,8 @@ class icarl_agent(Agent):
             # recompute outputs for distillation purposes and means for inference purposes
             self.model.eval()
             for cc in self.mem_class_x.keys():
-                if self.candle:
+                # CANDLE dataset
+                if self.model.num_classes == 2:
                     outs = []
                     feats = []
                     for i in range(0, len(self.mem_class_x[cc]), 40):
