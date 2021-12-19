@@ -187,7 +187,7 @@ class Experiment():
         loss_params = {}
         self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
-        self.agent = agent(agent_config, model_config, model, optimizer,
+        self.agent = agent(model, agent_config, optimizer,
                            self.criterion, self.args.cuda, self.args.log_interval)
         self.agent.num_epochs = self.args.epochs
 

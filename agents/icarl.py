@@ -1,3 +1,4 @@
+import horovod.torch as hvd
 import mlflow
 import torch.nn as nn
 import torch.nn.functional as F
@@ -36,10 +37,8 @@ class icarl_agent(Agent):
 
         # Modified parameters
         self.num_exemplars = 0
-        self.num_memories = config.get('num_representatives') * model.num_classes
-        self.num_features = config.get('num_features')
-        self.num_classes = config.get('num_classes')
-        self.num_candidates = config.get('num_candidates')
+        self.num_memories = config.get('num_representatives', 0) * model.num_classes
+        self.num_candidates = config.get('num_candidates', 20)
 
         # memory
         self.mem_x = None  # stores raw inputs, PxD
@@ -103,7 +102,7 @@ class icarl_agent(Agent):
                 dist_y = move_cuda(self.cand_y, self.cuda)
                 self.lock_make.release()
 
-            output = self.model(inputs)
+            _, output = self.model(inputs)
             loss = self.criterion(output[:target.size(0)], target)
 
             # Compute distillation loss
@@ -198,7 +197,7 @@ class icarl_agent(Agent):
             for ss in range(ns):
                 classpred[ss] = torch.argmin(dist[ss])
 
-            out = move_cuda(torch.zeros(ns, self.num_classes), self.cuda)
+            out = move_cuda(torch.zeros(ns, self.model.num_classes), self.cuda)
             for ss in range(ns):
                 out[ss, classpred[ss]] = 1
 
@@ -235,16 +234,16 @@ class icarl_agent(Agent):
                     sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
 
                     mean_memf_c = sum_memf_c / sum_nb_samples
-                    mean_memf_c = mean_memf_c.view(1, self.num_features)
+                    mean_memf_c = mean_memf_c.view(1, self.model.num_features)
 
-                    # Compute the distance between each feature vector of the examples of classse c and the mean feature vector of classse c
+                    # Compute the distance between each feature vector of the examples of class c and the mean feature vector of class c
                     dist_memf_c = torch.cdist(memf_c, mean_memf_c)
                     dist_memf_c = dist_memf_c.view(dist_memf_c.size(0))
 
-                    # Find the indices the self.num_exemplars features vectors closest to the mean feature vector of classse c
+                    # Find the indices the self.num_exemplars features vectors closest to the mean feature vector of class c
                     indices = torch.sort(dist_memf_c)[1][:self.num_exemplars]
 
-                    # Save the self.num_exemplars examples of class c with the closest feature vector to the mean feature vector of classse c
+                    # Save the self.num_exemplars examples of class c with the closest feature vector to the mean feature vector of class c
                     self.mem_class_x[c] = torch.index_select(mem_x_c, 0, indices)
                 else:
                     means = []
@@ -255,7 +254,7 @@ class icarl_agent(Agent):
                         fs[i], _ = self.model(x)
                         means.append(fs[i].sum(0))
 
-                    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.num_features)
+                    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.model.num_features)
 
                     dist_memf_c = None
                     tmp_mem_x = None
@@ -271,7 +270,7 @@ class icarl_agent(Agent):
                             indices = torch.sort(dist)[1][:self.num_exemplars]
                             dist_memf_c = torch.index_select(dist, 0, indices)
                             tmp_mem_x = torch.index_select(x, 0, indices)
-                        else :
+                        else:
                             x = torch.cat((x, tmp_mem_x))
                             dist = torch.cat((dist, dist_memf_c))
                             indices = torch.sort(dist)[1][:self.num_exemplars]
@@ -312,25 +311,5 @@ class icarl_agent(Agent):
         self.mem_y = None
 
 
-def icarl(agent_config, model_config, model, optimizer, criterion, cuda, log_interval):
-    model_name = agent_config['model']
-    depth = model_config.get('depth', 18)
-
-    if model_name == 'resnet':
-        agent_config.setdefault('num_features', 20 if depth <= 18 else 64)
-        agent_config.setdefault('num_representatives', 0)
-        agent_config['num_features'] = agent_config['num_features'] * (8 if depth < 50 else 32)
-        return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
-
-    elif model_name == 'mnistnet':
-        agent_config.setdefault('num_features', 50)
-        agent_config.setdefault('num_representatives', 0)
-        return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
-
-    elif model_name == 'candlenet':
-        agent_config.setdefault('num_features', 50)
-        agent_config.setdefault('num_representatives', 0)
-        return icarl_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
-
-    else:
-        raise ValueError('Unknown model')
+def icarl(model, config, optimizer, criterion, cuda, log_interval):
+    return icarl_agent(model, config, optimizer, criterion, cuda, log_interval)
