@@ -1,7 +1,9 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
+
+__all__ = ['resnet']
 
 def conv3x3(in_channels, out_channels, stride=1, groups=1, bias=False):
     "3x3 convolution with padding"

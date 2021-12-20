@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+__all__ = ['mnistnet']
+
 class mnistnet_model(nn.Module):
     def __init__(self, num_features=50):
         super(mnistnet_model, self).__init__()
