@@ -1,16 +1,15 @@
 import horovod.torch as hvd
 import mlflow
+import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 
 from continuum.tasks import split_train_val
 
 from agents.base import Agent
-from utils.utils import move_cuda
 from meters import AverageMeter, accuracy
-from models import *
+from utils.utils import move_cuda
 
 
 def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_batches):
@@ -18,10 +17,8 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
         lock_make.acquire()
 
         selection = torch.randperm(len(mem_x))[n].clone()
-
         nx = mem_x[selection].clone() - cand_x
         ny = mem_y[selection].clone() - cand_y
-
         cand_x += nx
         cand_y += ny
 
@@ -84,11 +81,14 @@ class icarl_agent(Agent):
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.training_steps)
 
-        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
-                                                 target_batch.chunk(chunk_batch, dim=0))):
-            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
+        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch,
+                                                                    dim=0),
+                                                 target_batch.chunk(chunk_batch,
+                                                                    dim=0))):
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target,
+                                                                     self.cuda)
 
-            if self.epoch + 1 == self.num_epochs:
+            if self.epoch+1 == self.num_epochs:
                 if self.mem_x is None:
                     self.mem_x = inputs.detach()
                     self.mem_y = target.detach()
@@ -99,7 +99,7 @@ class icarl_agent(Agent):
             # Distillation
             if self.mem_class_x != {}:
                 self.lock_made.acquire()
-                inputs = torch.cat(inputs, move_cuda(self.cand_x, self.cuda))
+                inputs = torch.cat((inputs, move_cuda(self.cand_x, self.cuda)))
                 dist_y = move_cuda(self.cand_y, self.cuda)
                 self.lock_make.release()
 
@@ -140,7 +140,11 @@ class icarl_agent(Agent):
             self.lock_made = mp.Lock()
             self.lock_made.acquire()
 
-            self.p = mp.Process(target=make_candidates, args=(self.num_candidates, self.mem_x, self.mem_y, cand_x, cand_y, lock_make, lock_made, len(self.train_data.get_loader())))
+            self.p = mp.Process(target=make_candidates,
+                                args=(self.num_candidates, self.mem_x,
+                                      self.mem_y, self.cand_x, self.cand_y,
+                                      self.lock_make, self.lock_made,
+                                      len(data_loader)))
             self.p.start()
 
         for i_batch, item in enumerate(data_loader):
