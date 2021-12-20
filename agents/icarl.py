@@ -73,7 +73,8 @@ class icarl_agent(Agent):
         self.update_examplars(self.nc)
 
 
-    def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
+    def _step(self, i_batch, inputs_batch, target_batch, training=False,
+              distill=False, average_output=False, chunk_batch=1):
         outputs = []
         total_loss = 0
 
@@ -97,7 +98,7 @@ class icarl_agent(Agent):
                     self.mem_y = torch.cat((self.mem_y, target.detach()))
 
             # Distillation
-            if self.mem_class_x != {}:
+            if distill:
                 self.lock_made.acquire()
                 inputs = torch.cat((inputs, move_cuda(self.cand_x, self.cuda)))
                 dist_y = move_cuda(self.cand_y, self.cuda)
@@ -107,7 +108,7 @@ class icarl_agent(Agent):
             loss = self.criterion(output[:target.size(0)], target)
 
             # Compute distillation loss
-            if self.mem_class_x != {}:
+            if distill:
                 loss += self.kl(self.lsm(output[target.size(0):]), self.sm(dist_y))
 
             if training:
@@ -130,9 +131,10 @@ class icarl_agent(Agent):
     def loop(self, data_loader, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
+        distill = self.mem_class_x != {} and training
 
         # Distillation
-        if self.mem_class_x != {}:
+        if distill:
             self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
             self.cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
 
@@ -155,6 +157,7 @@ class icarl_agent(Agent):
                                       inputs,
                                       target,
                                       training=training,
+                                      distill=distill,
                                       average_output=average_output)
 
             # measure accuracy and record loss
@@ -221,10 +224,10 @@ class icarl_agent(Agent):
                 self.mem_class_y[c] = self.mem_class_y[c][:self.num_exemplars]
 
             for c in self.nc:
-                # Find indices of examples of classse c
+                # Find indices of examples of class c
                 indxs = (self.mem_y == c).nonzero(as_tuple=False).squeeze()
 
-                # Select examples of classse c
+                # Select examples of class c
                 mem_x_c = torch.index_select(self.mem_x, 0, indxs)
 
                 # Not the CANDLE dataset
