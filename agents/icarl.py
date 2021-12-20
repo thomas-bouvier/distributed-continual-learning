@@ -35,7 +35,7 @@ class icarl_agent(Agent):
 
         # Modified parameters
         self.num_exemplars = 0
-        self.num_memories = config.get('num_representatives', 0) * model.num_classes
+        self.num_memories = config.get('num_representatives', 6000) * model.num_classes
         self.num_candidates = config.get('num_candidates', 20)
 
         # memory
