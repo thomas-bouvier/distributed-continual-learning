@@ -39,8 +39,8 @@ class icarl_agent(Agent):
         self.num_candidates = config.get('num_candidates', 20)
 
         # memory
-        self.mem_x = None  # stores raw inputs, PxD
-        self.mem_y = None
+        self.buf_x = None  # stores raw inputs, PxD
+        self.buf_y = None
         self.mem_class_x = {}  # stores exemplars class by class
         self.mem_class_y = {} 
         self.mem_class_means = {}
@@ -68,10 +68,8 @@ class icarl_agent(Agent):
             self.mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
             self.mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
 
-
     def after_every_task(self):
         self.update_examplars(self.nc)
-
 
     def _step(self, i_batch, inputs_batch, target_batch, training=False,
               distill=False, average_output=False, chunk_batch=1):
@@ -90,12 +88,12 @@ class icarl_agent(Agent):
                                                                      self.cuda)
 
             if self.epoch+1 == self.num_epochs:
-                if self.mem_x is None:
-                    self.mem_x = inputs.detach()
-                    self.mem_y = target.detach()
+                if self.buf_x is None:
+                    self.buf_x = inputs.detach()
+                    self.buf_y = target.detach()
                 else:
-                    self.mem_x = torch.cat((self.mem_x, inputs.detach()))
-                    self.mem_y = torch.cat((self.mem_y, target.detach()))
+                    self.buf_x = torch.cat((self.buf_x, inputs.detach()))
+                    self.buf_y = torch.cat((self.buf_y, target.detach()))
 
             # Distillation
             if distill:
@@ -183,7 +181,7 @@ class icarl_agent(Agent):
                                  meters=meters))
 
         # Distillation
-        if self.mem_class_x != {}:
+        if distill:
             self.p.join()
 
         meters = {name: meter.avg for name, meter in meters.items()}
@@ -225,10 +223,10 @@ class icarl_agent(Agent):
 
             for c in self.nc:
                 # Find indices of examples of class c
-                indxs = (self.mem_y == c).nonzero(as_tuple=False).squeeze()
+                indxs = (self.buf_y == c).nonzero(as_tuple=False).squeeze()
 
                 # Select examples of class c
-                mem_x_c = torch.index_select(self.mem_x, 0, indxs)
+                mem_x_c = torch.index_select(self.buf_x, 0, indxs)
 
                 # Not the CANDLE dataset
                 if self.model.num_classes != 2:
@@ -320,8 +318,8 @@ class icarl_agent(Agent):
 
         del tmp_features
         torch.cuda.empty_cache()
-        self.mem_x = None
-        self.mem_y = None
+        self.buf_x = None
+        self.buf_y = None
 
 
 def icarl(model, config, optimizer, criterion, cuda, log_interval):

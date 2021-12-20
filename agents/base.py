@@ -6,7 +6,8 @@ from meters import AverageMeter, accuracy
 from utils.utils import move_cuda
 
 class Agent():
-    def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
+    def __init__(self, model, config, optimizer, criterion, cuda, log_interval,
+                 state_dict=None):
         super(Agent, self).__init__()
         self.model = model
         self.config = config
@@ -26,7 +27,8 @@ class Agent():
         else:
             self.model_snapshot = copy.deepcopy(self.model.state_dict())
 
-    def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
+    def _step(self, i_batch, inputs_batch, target_batch, training=False,
+              average_output=False, chunk_batch=1):
         outputs = []
         total_loss = 0
 
