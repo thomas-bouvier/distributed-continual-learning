@@ -126,6 +126,7 @@ class Bottleneck(nn.Module):
 class resnet_model(nn.Module):
     def __init__(self):
         super(resnet_model, self).__init__()
+        self.feature_vector = None
 
     def _make_layer(self, block, planes, blocks, expansion=1, stride=1,
                     groups=1, residual_block=None, dropout=None):
@@ -168,6 +169,7 @@ class resnet_model(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
+        self.feature_vector = x
         x = self.fc(x)
         return x
 

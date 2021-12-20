@@ -1,5 +1,6 @@
 import horovod.torch as hvd
 import mlflow
+import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -102,7 +103,7 @@ class icarl_agent(Agent):
                 dist_y = move_cuda(self.cand_y, self.cuda)
                 self.lock_make.release()
 
-            _, output = self.model(inputs)
+            output = self.model(inputs)
             loss = self.criterion(output[:target.size(0)], target)
 
             # Compute distillation loss
@@ -191,7 +192,8 @@ class icarl_agent(Agent):
 
         with torch.no_grad():
             classpred = torch.LongTensor(ns)
-            preds = move_cuda(self.model(x)[0].detach().clone(), self.cuda)
+            self.model(x)
+            preds = move_cuda(self.model.feature_vector.detach().clone(), self.cuda)
             dist = torch.cdist(preds.view(1, *preds.size()), self.mean_features.view(1, *self.mean_features.size())).view(ns, len(self.mem_class_means.keys()))
 
             for ss in range(ns):
@@ -224,7 +226,8 @@ class icarl_agent(Agent):
                 # Not the CANDLE dataset
                 if self.model.num_classes != 2:
                     # Compute feature vectors of examples of class c
-                    memf_c, _ = self.model(mem_x_c)
+                    self.model(mem_x_c)
+                    memf_c = self.model.feature_vector
 
                     # Compute the mean feature vector of class
                     nb_samples = torch.tensor(memf_c.size(0))
@@ -251,7 +254,8 @@ class icarl_agent(Agent):
 
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                        fs[i], _ = self.model(x)
+                        self.model(x)
+                        fs[i] = self.model.feature_vector
                         means.append(fs[i].sum(0))
 
                     mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.model.num_features)
@@ -288,13 +292,15 @@ class icarl_agent(Agent):
                     outs = []
                     feats = []
                     for i in range(0, len(self.mem_class_x[cc]), 40):
-                        f, o = self.model(self.mem_class_x[cc][i:min(i + 40, len(self.mem_class_x[cc]))])
+                        o = self.model(self.mem_class_x[cc][i:min(i + 40, len(self.mem_class_x[cc]))])
+                        f = self.model.feature_vector
                         outs.append(o)
                         feats.append(f)
                     tmp_features = torch.cat(feats)
                     self.mem_class_y[cc] = torch.cat(outs)
                 else:
-                    tmp_features, self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
+                    self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
+                    tmp_features = self.model.feature_vector
 
                 nb_samples = torch.tensor(tmp_features.size(0))
                 sum_memf_c = tmp_features.sum(0)
