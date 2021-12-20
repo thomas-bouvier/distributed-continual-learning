@@ -130,5 +130,5 @@ class Agent():
         return self.model.state_dict()
 
 
-def base(agent_config, model_config, model, optimizer, criterion, cuda, log_interval):
+def base(model, agent_config, optimizer, criterion, cuda, log_interval):
     return Agent(model, agent_config, optimizer, criterion, cuda, log_interval)
