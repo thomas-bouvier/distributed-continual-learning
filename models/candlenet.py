@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class icarl_candlenet_model(nn.Module):
+class candlenet_model(nn.Module):
     def __init__(self):
-        super(icarl_candlenet_model, self).__init__()
+        super(candlenet_model, self).__init__()
         self.feature_vector = None
 
         self.conv1 = nn.Conv1d(1, 128, kernel_size=20, stride=1, padding=0)
@@ -34,5 +34,5 @@ class icarl_candlenet_model(nn.Module):
         return x
 
 
-def candlenet(**config):
+def candlenet(config):
     return candle_model()
