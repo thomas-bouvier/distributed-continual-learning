@@ -114,10 +114,6 @@ _CONTINUAL_ARGS = {'scenario', 'increment', 'initial_increment', 'num_tasks',
 _TRANSFORM_ARGS = {'transform_name'}
 _OTHER_ARGS = {'distributed', 'shard'}
 
-
-"""
-Inspired by https://github.com/eladhoffer/convNet.pytorch/blob/master/data.py
-"""
 class DataRegime(object):
     def __init__(self, hvd, regime, defaults={}):
         self.regime = Regime(regime, deepcopy(defaults))
@@ -157,7 +153,7 @@ class DataRegime(object):
         if config['data'].get('continual', False):
             if self.tasksets is None:
                 self.prepare_tasksets(config)
-            
+
             current_taskset = self.tasksets[self.current_task_id]
             if config['continual'].get('concatenate_tasksets', False):
                 if self.concat_taskset is None:
@@ -192,24 +188,20 @@ class DataRegime(object):
                 nb_tasks = continual_config.get('num_tasks')
             )
 
-
     def set_epoch(self, epoch):
         self.epoch = epoch
         if self._sampler is not None and hasattr(self._sampler, 'set_epoch'):
             self._sampler.set_epoch(epoch)
 
-
     def set_task_id(self, task_id):
         self.task_id = task_id
-
+        self.get_loader(True)
 
     def __len__(self):
         return len(self._data) or 1
 
-
     def __repr__(self):
         return str(self.regime)
-
 
     def get_config(self):
         config = self.regime.config
@@ -233,7 +225,6 @@ class DataRegime(object):
             'transform': transform_config,
             'others': other_config
         }
-
 
     def get(self, key, default=None):
         return self.regime.config.get(key, default)
