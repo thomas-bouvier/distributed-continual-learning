@@ -12,6 +12,7 @@ from continuum.tasks import split_train_val
 from agents.base import Agent
 from agents.nil_v1 import nil_v1_agent
 from agents.nil_v2 import nil_v2_agent
+from agents.nil_v3 import nil_v3_agent
 from agents.nil_v4 import nil_v4_agent
 from utils.utils import move_cuda
 from meters import AverageMeter, accuracy
@@ -254,8 +255,10 @@ def nil(model, config, optimizer, criterion, cuda, log_interval):
     implementation = config.get('implementation', '')
     if implementation == 'v1':
         return nil_v1_agent(model, config, optimizer, criterion, cuda, log_interval)
-    if implementation == 'v2':
+    elif implementation == 'v2':
         return nil_v2_agent(model, config, optimizer, criterion, cuda, log_interval)
+    elif implementation == 'v3':
+        return nil_v3_agent(model, config, optimizer, criterion, cuda, log_interval)
     elif implementation == 'v4':
         return nil_v4_agent(model, config, optimizer, criterion, cuda, log_interval)
     return nil_agent(model, config, optimizer, criterion, cuda, log_interval)
