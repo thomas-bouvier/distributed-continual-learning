@@ -87,7 +87,7 @@ class icarl_agent(Agent):
             inputs, target = move_cuda(inputs, self.cuda), move_cuda(target,
                                                                      self.cuda)
 
-            if self.epoch+1 == self.num_epochs:
+            if self.epoch+1 == self.num_epochs and training:
                 if self.buf_x is None:
                     self.buf_x = inputs.detach()
                     self.buf_y = target.detach()
