@@ -1,3 +1,3 @@
 from .base import *
-from .icarl_v1 import *
+from .icarl import *
 from .nil import *

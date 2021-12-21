@@ -8,6 +8,7 @@ import torch.optim as optim
 from continuum.tasks import split_train_val
 
 from agents.base import Agent
+from agents.icarl_v1 import icarl_v1_agent
 from meters import AverageMeter, accuracy
 from utils.utils import move_cuda
 
@@ -25,13 +26,13 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
         lock_made.release()
 
 
-class icarl_v1_agent(Agent):
+class icarl_agent(Agent):
     # Re-implementation of
     # S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert.
     # iCaRL: Incremental classifier and representation learning.
     # CVPR, 2017.
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(icarl_v1_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+        super(icarl_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
         # Modified parameters
         self.num_exemplars = 0
@@ -320,3 +321,10 @@ class icarl_v1_agent(Agent):
         torch.cuda.empty_cache()
         self.buf_x = None
         self.buf_y = None
+
+
+def icarl(model, config, optimizer, criterion, cuda, log_interval):
+    implementation = config.get('implementation', '')
+    if implementation == 'v1':
+        return icarl_v1_agent(model, config, optimizer, criterion, cuda, log_interval)
+    return icarl_agent(model, config, optimizer, criterion, cuda, log_interval)
