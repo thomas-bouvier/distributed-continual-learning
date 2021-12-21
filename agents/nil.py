@@ -10,6 +10,8 @@ import torch.optim as optim
 from continuum.tasks import split_train_val
 
 from agents.base import Agent
+from agents.nil_v1 import nil_v1_agent
+from agents.nil_v4 import nil_v4_agent
 from utils.utils import move_cuda
 from meters import AverageMeter, accuracy
 
@@ -201,7 +203,7 @@ class nil_agent(Agent):
             dw = w / total_weight
 
             if training:
-                # Faster to provide the derivative of L wrt {l}^n than letting 
+                # Faster to provide the derivative of L wrt {l}^n than letting pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
                 self.optimizer.step()
@@ -249,6 +251,8 @@ class Representative(object):
 
 def nil(model, config, optimizer, criterion, cuda, log_interval):
     implementation = config.get('implementation', '')
-    if implementation == 'v4':
-        return icarl_v4_agent(model, config, optimizer, criterion, cuda, log_interval)
+    if implementation == 'v1':
+        return nil_v1_agent(model, config, optimizer, criterion, cuda, log_interval)
+    elif implementation == 'v4':
+        return nil_v4_agent(model, config, optimizer, criterion, cuda, log_interval)
     return nil_agent(model, config, optimizer, criterion, cuda, log_interval)
