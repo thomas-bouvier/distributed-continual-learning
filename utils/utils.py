@@ -1,6 +1,6 @@
 import torch
 
-def move_cuda(item, use_cuda=True, **kw):
+def move_cuda(item, use_cuda=True, cuda_device=-1):
     """
     Moves the given item to CUDA and returns it, if `use_cuda` is available.
 
@@ -12,5 +12,8 @@ def move_cuda(item, use_cuda=True, **kw):
     """
 
     if use_cuda and torch.cuda.is_available():
-        item = item.cuda()
+        if cuda_device != -1:
+            item = item.to(torch.device(f"cuda:{cuda_device}"))
+        else:
+            item = item.cuda()
     return item
