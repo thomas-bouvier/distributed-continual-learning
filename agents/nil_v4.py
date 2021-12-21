@@ -101,9 +101,9 @@ def memory_manager(dataset, q, lock, lock_make, lock_made, num_classes, num_cand
             epoch +=1
 
 
-class nil_agent(Agent):
+class nil_v4_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(nil_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+        super(nil_v4_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
         self.class_count = [0 for _ in range(model.num_classes)]
 
@@ -116,7 +116,6 @@ class nil_agent(Agent):
         self.mask = torch.as_tensor([False for _ in range(model.num_classes)])
         self.buffer_size = 1 # frequency of representatives updtate (not used)
         self.val_set = None
-
 
     def before_all_tasks(self, taskets):
         self.x_dim = list(taskets[0][0][0].size())
@@ -135,12 +134,10 @@ class nil_agent(Agent):
         self.p.start()
         self.q.put((self.reps_x, self.reps_y, self.reps_w))
 
-
     def after_all_tasks(self):
         self.q.put(-2)
         self.p.join()
         self.q.close()
-
 
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
@@ -154,40 +151,8 @@ class nil_agent(Agent):
         self.y = move_cuda(torch.zeros([self.num_candidates + self.batch_size], dtype=torch.long), self.cuda)
         self.w = move_cuda(torch.zeros([self.num_candidates + self.batch_size]), self.cuda)
 
-
     def after_every_task(self):
         self.q.put(-1)
-
-
-    def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
-        outputs = []
-        total_loss = 0
-
-        if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.training_steps)
-
-        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
-                                                 target_batch.chunk(chunk_batch, dim=0))):
-            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
-
-            output = self.model(inputs)
-            loss = self.criterion(output, target)
-            dw = w / torch.sum(w)
-
-            if training:
-                # Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
-                loss.backward(dw)
-                # SGD step
-                self.optimizer.step()
-                self.training_steps += 1
-
-            outputs.append(output.detach())
-            total_loss += float(loss)
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
-
 
     """
     Forward pass for the current epoch
@@ -241,6 +206,35 @@ class nil_agent(Agent):
 
         return meters
 
+    def _step(self, i_batch, inputs_batch, target_batch, training=False, average_output=False, chunk_batch=1):
+        outputs = []
+        total_loss = 0
+
+        if training:
+            self.optimizer.zero_grad()
+            self.optimizer.update(self.epoch, self.training_steps)
+
+        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
+                                                 target_batch.chunk(chunk_batch, dim=0))):
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
+
+            output = self.model(inputs)
+            loss = self.criterion(output, target)
+            dw = w / torch.sum(w)
+
+            if training:
+                # Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
+                loss.backward(dw)
+                # SGD step
+                self.optimizer.step()
+                self.training_steps += 1
+
+            outputs.append(output.detach())
+            total_loss += float(loss)
+
+        outputs = torch.cat(outputs, dim=0)
+        return outputs, total_loss
+
 
 class Representative(object):
     """
@@ -265,7 +259,3 @@ class Representative(object):
         if isinstance(other, Representative.__class__):
             return self.value.__eq__(other.value)
         return False
-
-
-def nil(model, config, optimizer, criterion, cuda, log_interval):
-    return nil_agent(model, config, optimizer, criterion, cuda, log_interval)

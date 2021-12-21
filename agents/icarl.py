@@ -53,7 +53,6 @@ class icarl_agent(Agent):
         self.lsm = nn.LogSoftmax(dim=1)
         self.sm = nn.Softmax(dim=1)
 
-
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
         self.nc = set([data[1] for data in train_taskset])
@@ -105,7 +104,6 @@ class icarl_agent(Agent):
 
             output = self.model(inputs)
             loss = self.criterion(output[:target.size(0)], target)
-
             # Compute distillation loss
             if distill:
                 loss += self.kl(self.lsm(output[target.size(0):]), self.sm(dist_y))
