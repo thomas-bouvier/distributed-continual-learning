@@ -251,7 +251,7 @@ class Experiment():
         results = ResultsLog(results_path,
                         title='Training Results - %s' % self.args.save_dir)
 
-        #self.agent.before_all_tasks(self.train_data.tasksets)
+        self.agent.before_all_tasks(self.train_data.tasksets)
 
         for task_id in range(0, len(self.train_data.tasksets) if self.train_data.tasksets else 1):
             if hvd.rank() == 0:

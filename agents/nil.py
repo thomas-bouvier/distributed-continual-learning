@@ -1,16 +1,14 @@
-from meters import AverageMeter, accuracy
-
 import horovod.torch as hvd
+import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 
 from continuum.tasks import split_train_val
 
 from agents.base import Agent
 from utils.utils import move_cuda
-from models import *
+from meters import AverageMeter, accuracy
 
 
 def memory_manager(dataset, q, lock, lock_make, lock_made, num_classes, num_candidates, num_representatives, batch_size, size, rank):
@@ -107,16 +105,15 @@ class nil_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(nil_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
-        self.num_classes = config.get('num_classes')
-        self.class_count = [0 for _ in range(config.get('num_classes'))]
+        self.class_count = [0 for _ in range(model.num_classes)]
 
         self.memory_size = config.get('num_representatives') # number of stored examples per class
-        self.num_candidates = config.get('num_candidates') # number of representatives used to increment batches and to update representatives
+        self.num_candidates = config.get('num_candidates', 20) # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
         self.epochs = config.get('max_epochs') # Maximum number of epochs
         self.is_early_stop = config.get('is_early_stop')
 
-        self.mask = torch.as_tensor([False for _ in range(config.get('num_classes'))])
+        self.mask = torch.as_tensor([False for _ in range(model.num_classes)])
         self.buffer_size = 1 # frequency of representatives updtate (not used)
         self.val_set = None
 
@@ -134,7 +131,7 @@ class nil_agent(Agent):
         self.lock_made = mp.Lock()
         self.lock_made.acquire()
 
-        self.p = mp.Process(target=memory_manager, args=[taskets, self.q, self.lock, self.lock_make, self.lock_made, self.num_classes, self.num_candidates, self.memory_size, self.batch_size, hvd.size(), hvd.rank()])
+        self.p = mp.Process(target=memory_manager, args=[taskets, self.q, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, hvd.size(), hvd.rank()])
         self.p.start()
         self.q.put((self.reps_x, self.reps_y, self.reps_w))
 
@@ -148,7 +145,7 @@ class nil_agent(Agent):
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
         nc = set([data[1] for data in train_taskset])
-        mask = torch.tensor([False for _ in range(self.num_classes)])
+        mask = torch.tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
             mask[y] = True
         self.mask = move_cuda(mask.float(), self.cuda)
@@ -270,25 +267,5 @@ class Representative(object):
         return False
 
 
-def nil(agent_config, model_config, model, optimizer, criterion, cuda, log_interval):
-    model_name = model_config.pop('model', 'resnet')
-    depth = model_config.get('depth', 18)
-
-    agent_config.setdefault('num_classes', 200)
-    agent_config.setdefault('num_representatives', 0)
-    agent_config.setdefault('num_features', 50)
-    agent_config.setdefault('num_candidates', 10)
-
-    if model_name == 'resnet':
-        agent_config['num_features'] = agent_config['num_features'] * (8 if depth < 50 else 32)
-        return nil_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
-
-    elif model_name == 'mnistnet':
-        return nil_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
-
-    elif model_name == 'candlenet':
-        agent_config.setdefault('num_classes', 20)
-        return nil_agent(model, agent_config, optimizer, criterion, cuda, log_interval)
-
-    else:
-        raise ValueError('Unknown model')
+def nil(model, config, optimizer, criterion, cuda, log_interval):
+    return nil_agent(model, config, optimizer, criterion, cuda, log_interval)
