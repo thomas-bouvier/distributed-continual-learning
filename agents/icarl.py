@@ -1,38 +1,22 @@
 import horovod.torch as hvd
 import mlflow
+import numpy as np
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
-
-from continuum.tasks import split_train_val
 
 from agents.base import Agent
 from agents.icarl_v1 import icarl_v1_agent
 from meters import AverageMeter, accuracy
 from utils.utils import move_cuda
 
-
-def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_batches):
-    for i in range(num_batches):
-        lock_make.acquire()
-
-        selection = torch.randperm(len(mem_x))[n].clone()
-        nx = mem_x[selection].clone() - cand_x
-        ny = mem_y[selection].clone() - cand_y
-        cand_x += nx
-        cand_y += ny
-
-        lock_made.release()
-
-
 class icarl_agent(Agent):
-    # Re-implementation of
-    # S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert.
-    # iCaRL: Incremental classifier and representation learning.
-    # CVPR, 2017.
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(icarl_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+
+        if state_dict is not None:
+            self.model.load_state_dict(state_dict)
 
         # Modified parameters
         self.num_exemplars = 0
@@ -45,8 +29,6 @@ class icarl_agent(Agent):
         self.mem_class_x = {}  # stores exemplars class by class
         self.mem_class_y = {} 
         self.mem_class_means = {}
-
-        self.val_set = None
 
         # setup distillation losses
         self.kl = nn.KLDivLoss(reduction='batchmean')
@@ -63,64 +45,12 @@ class icarl_agent(Agent):
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask)
 
-        # Distillation
         if self.mem_class_x != {}:
-            self.mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
-            self.mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
+            self.mem_x = torch.cat([samples.clone() for samples in self.mem_class_x.values()])
+            self.mem_y = torch.cat([targets.clone() for targets in self.mem_class_y.values()])
 
     def after_every_task(self):
         self.update_examplars(self.nc)
-
-    def _step(self, i_batch, inputs_batch, target_batch, training=False,
-              distill=False, average_output=False, chunk_batch=1):
-        outputs = []
-        total_loss = 0
-
-        if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.training_steps)
-
-        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch,
-                                                                    dim=0),
-                                                 target_batch.chunk(chunk_batch,
-                                                                    dim=0))):
-            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target,
-                                                                     self.cuda)
-
-            if self.epoch+1 == self.num_epochs and training:
-                if self.buf_x is None:
-                    self.buf_x = inputs.detach()
-                    self.buf_y = target.detach()
-                else:
-                    self.buf_x = torch.cat((self.buf_x, inputs.detach()))
-                    self.buf_y = torch.cat((self.buf_y, target.detach()))
-
-            # Distillation
-            if distill:
-                self.lock_made.acquire()
-                inputs = torch.cat((inputs, move_cuda(self.cand_x, self.cuda)))
-                dist_y = move_cuda(self.cand_y, self.cuda)
-                self.lock_make.release()
-
-            output = self.model(inputs)
-            loss = self.criterion(output[:target.size(0)], target)
-            # Compute distillation loss
-            if distill:
-                loss += self.kl(self.lsm(output[target.size(0):]), self.sm(dist_y))
-
-            if training:
-                # accumulate gradient
-                loss.backward()
-                # SGD step
-                self.optimizer.step()
-                self.training_steps += 1
-
-            outputs.append(output.detach())
-            total_loss += float(loss)
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
-
 
     """
     Forward pass for the current epoch
@@ -130,21 +60,10 @@ class icarl_agent(Agent):
                   for metric in ['loss', 'prec1', 'prec5']}
         distill = self.mem_class_x != {} and training
 
-        # Distillation
+        # Distillation, increment taskset
+        set_x, set_y = None, None
         if distill:
-            self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
-            self.cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
-
-            self.lock_make = mp.Lock()
-            self.lock_made = mp.Lock()
-            self.lock_made.acquire()
-
-            self.p = mp.Process(target=make_candidates,
-                                args=(self.num_candidates, self.mem_x,
-                                      self.mem_y, self.cand_x, self.cand_y,
-                                      self.lock_make, self.lock_made,
-                                      len(data_loader)))
-            self.p.start()
+            set_x, set_y = self.increment_taskset(len(data_loader), self.mem_x, self.mem_y)
 
         for i_batch, item in enumerate(data_loader):
             inputs = item[0] # x
@@ -153,6 +72,8 @@ class icarl_agent(Agent):
             output, loss = self._step(i_batch,
                                       inputs,
                                       target,
+                                      set_x,
+                                      set_y,
                                       training=training,
                                       distill=distill,
                                       average_output=average_output)
@@ -179,16 +100,74 @@ class icarl_agent(Agent):
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
 
-        # Distillation
-        if distill:
-            self.p.join()
-
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
         meters['error5'] = 100. - meters['prec5']
 
         return meters
 
+    def increment_taskset(self, nb_batches, mem_x, mem_y):
+        if self.mem_class_x == {}:
+            return None, None
+
+        nb_mem = mem_x.size(0)
+        perm = np.random.permutation(nb_mem)
+        while len(perm) < self.num_candidates * nb_batches:
+            perm = np.concatenate([perm, np.random.permutation(nb_mem)])
+
+        perms = []
+        for i in range(nb_batches):
+            perms.append(perm[:self.num_candidates])
+            perm = perm[self.num_candidates:] 
+
+        set_x = torch.stack([torch.stack([mem_x[index] for index in perm]) for perm in perms])
+        set_y = torch.stack([torch.stack([mem_y[index] for index in perm]) for perm in perms])
+
+        return set_x, set_y
+
+    def _step(self, i_batch, inputs_batch, target_batch, set_x, set_y,
+              training=False, distill=False, average_output=False, chunk_batch=1):
+        outputs = []
+        total_loss = 0
+
+        if training:
+            self.optimizer.zero_grad()
+            self.optimizer.update(self.epoch, self.training_steps)
+
+        for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
+                                       target_batch.chunk(chunk_batch, dim=0))):
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+    
+            if self.epoch+1 == self.num_epochs and training:
+                if self.buf_x is None:
+                    self.buf_x = x.detach()
+                    self.buf_y = y.detach()
+                else:
+                    self.buf_x = torch.cat((self.buf_x, x.detach()))
+                    self.buf_y = torch.cat((self.buf_y, y.detach()))
+                
+            if distill:
+                x = torch.cat((x, set_x[i_batch]))
+
+            output = self.model(x)
+            loss = self.criterion(output[:y.size(0)], y)
+
+            # Compute distillation loss
+            if distill:
+                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(set_y[i_batch]))
+            
+            if training:
+                # accumulate gradient
+                loss.backward()
+                # SGD step
+                self.optimizer.step()
+                self.training_steps += 1
+
+            outputs.append(output.detach())
+            total_loss += float(loss)
+
+        outputs = torch.cat(outputs, dim=0)
+        return outputs, total_loss
 
     def forward(self, x):
         self.model.eval()
@@ -206,9 +185,7 @@ class icarl_agent(Agent):
             out = move_cuda(torch.zeros(ns, self.model.num_classes), self.cuda)
             for ss in range(ns):
                 out[ss, classpred[ss]] = 1
-
             return out
-
 
     def update_examplars(self, nc):
         self.model.eval()
@@ -220,23 +197,31 @@ class icarl_agent(Agent):
                 self.mem_class_x[c] = self.mem_class_x[c][:self.num_exemplars]
                 self.mem_class_y[c] = self.mem_class_y[c][:self.num_exemplars]
 
-            for c in self.nc:
+            for c in nc:
                 # Find indices of examples of class c
                 indxs = (self.buf_y == c).nonzero(as_tuple=False).squeeze()
-
+                
                 # Select examples of class c
                 mem_x_c = torch.index_select(self.buf_x, 0, indxs)
 
                 # Not the CANDLE dataset
                 if self.model.num_classes != 2:
                     # Compute feature vectors of examples of class c
-                    self.model(mem_x_c)
-                    memf_c = self.model.feature_vector
+                    if hvd.size() == 1:
+                        self.model(mem_x_c[:100])
+                        memf_c = self.model.feature_vector
+                        for part in range(100, len(mem_x_c), 100):
+                            self.model(mem_x_c[part:part+100])
+                            f = self.model.feature_vector
+                            memf_c = torch.cat((memf_c, f))
+                    else:
+                        self.model(mem_x_c)
+                        memf_c = self.model.feature_vector
 
-                    # Compute the mean feature vector of class
+                    # Compute the mean feature vector of class              
                     nb_samples = torch.tensor(memf_c.size(0))
                     sum_memf_c = memf_c.sum(0)
-
+    
                     sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
                     sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
 
@@ -270,7 +255,7 @@ class icarl_agent(Agent):
 
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-
+                        
                         dist = torch.cdist(fs[i], mean_memf_c)
                         dist = dist.view(dist.size(0))
 
@@ -296,9 +281,9 @@ class icarl_agent(Agent):
                     outs = []
                     feats = []
                     for i in range(0, len(self.mem_class_x[cc]), 40):
-                        o = self.model(self.mem_class_x[cc][i:min(i + 40, len(self.mem_class_x[cc]))])
-                        f = self.model.feature_vector
+                        o = self.model(self.mem_class_x[cc][i:min(i+40, len(self.mem_class_x[cc]))])
                         outs.append(o)
+                        f = self.model.feature_vector
                         feats.append(f)
                     tmp_features = torch.cat(feats)
                     self.mem_class_y[cc] = torch.cat(outs)
