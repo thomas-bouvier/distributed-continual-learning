@@ -5,8 +5,6 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
 
-from continuum.tasks import split_train_val
-
 from agents.base import Agent
 from meters import AverageMeter, accuracy
 from utils.utils import move_cuda
@@ -26,12 +24,11 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
 
 
 class icarl_v1_agent(Agent):
-    # Re-implementation of
-    # S.-A. Rebuffi, A. Kolesnikov, G. Sperl, and C. H. Lampert.
-    # iCaRL: Incremental classifier and representation learning.
-    # CVPR, 2017.
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(icarl_v1_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+
+        if state_dict is not None:
+            self.model.load_state_dict(state_dict)
 
         # Modified parameters
         self.num_exemplars = 0
@@ -45,13 +42,10 @@ class icarl_v1_agent(Agent):
         self.mem_class_y = {} 
         self.mem_class_means = {}
 
-        self.val_set = None
-
         # setup distillation losses
         self.kl = nn.KLDivLoss(reduction='batchmean')
         self.lsm = nn.LogSoftmax(dim=1)
         self.sm = nn.Softmax(dim=1)
-
 
     def before_every_task(self, task_id, train_taskset):
         # Create mask so the loss is only used for classes learnt during this task
@@ -71,58 +65,6 @@ class icarl_v1_agent(Agent):
     def after_every_task(self):
         self.update_examplars(self.nc)
 
-    def _step(self, i_batch, inputs_batch, target_batch, training=False,
-              distill=False, average_output=False, chunk_batch=1):
-        outputs = []
-        total_loss = 0
-
-        if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.training_steps)
-
-        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch,
-                                                                    dim=0),
-                                                 target_batch.chunk(chunk_batch,
-                                                                    dim=0))):
-            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target,
-                                                                     self.cuda)
-
-            if self.epoch+1 == self.num_epochs and training:
-                if self.buf_x is None:
-                    self.buf_x = inputs.detach()
-                    self.buf_y = target.detach()
-                else:
-                    self.buf_x = torch.cat((self.buf_x, inputs.detach()))
-                    self.buf_y = torch.cat((self.buf_y, target.detach()))
-
-            # Distillation
-            if distill:
-                self.lock_made.acquire()
-                inputs = torch.cat((inputs, move_cuda(self.cand_x, self.cuda)))
-                dist_y = move_cuda(self.cand_y, self.cuda)
-                self.lock_make.release()
-
-            output = self.model(inputs)
-            loss = self.criterion(output[:target.size(0)], target)
-
-            # Compute distillation loss
-            if distill:
-                loss += self.kl(self.lsm(output[target.size(0):]), self.sm(dist_y))
-
-            if training:
-                # accumulate gradient
-                loss.backward()
-                # SGD step
-                self.optimizer.step()
-                self.training_steps += 1
-
-            outputs.append(output.detach())
-            total_loss += float(loss)
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
-
-
     """
     Forward pass for the current epoch
     """
@@ -131,7 +73,7 @@ class icarl_v1_agent(Agent):
                   for metric in ['loss', 'prec1', 'prec5']}
         distill = self.mem_class_x != {} and training
 
-        # Distillation
+        # Distillation, increment taskset
         if distill:
             self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
             self.cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
@@ -190,6 +132,53 @@ class icarl_v1_agent(Agent):
 
         return meters
 
+    def _step(self, i_batch, inputs_batch, target_batch, training=False,
+              distill=False, average_output=False, chunk_batch=1):
+        outputs = []
+        total_loss = 0
+
+        if training:
+            self.optimizer.zero_grad()
+            self.optimizer.update(self.epoch, self.training_steps)
+
+        for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
+                                       target_batch.chunk(chunk_batch, dim=0))):
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+
+            if self.epoch+1 == self.num_epochs and training:
+                if self.buf_x is None:
+                    self.buf_x = x.detach()
+                    self.buf_y = y.detach()
+                else:
+                    self.buf_x = torch.cat((self.buf_x, x.detach()))
+                    self.buf_y = torch.cat((self.buf_y, y.detach()))
+
+            # Distillation
+            if distill:
+                self.lock_made.acquire()
+                x = torch.cat((x, move_cuda(self.cand_x, self.cuda)))
+                dist_y = move_cuda(self.cand_y, self.cuda)
+                self.lock_make.release()
+
+            output = self.model(x)
+            loss = self.criterion(output[:y.size(0)], y)
+
+            # Compute distillation loss
+            if distill:
+                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+
+            if training:
+                # accumulate gradient
+                loss.backward()
+                # SGD step
+                self.optimizer.step()
+                self.training_steps += 1
+
+            outputs.append(output.detach())
+            total_loss += float(loss)
+
+        outputs = torch.cat(outputs, dim=0)
+        return outputs, total_loss
 
     def forward(self, x):
         self.model.eval()
@@ -207,9 +196,7 @@ class icarl_v1_agent(Agent):
             out = move_cuda(torch.zeros(ns, self.model.num_classes), self.cuda)
             for ss in range(ns):
                 out[ss, classpred[ss]] = 1
-
             return out
-
 
     def update_examplars(self, nc):
         self.model.eval()
@@ -221,7 +208,7 @@ class icarl_v1_agent(Agent):
                 self.mem_class_x[c] = self.mem_class_x[c][:self.num_exemplars]
                 self.mem_class_y[c] = self.mem_class_y[c][:self.num_exemplars]
 
-            for c in self.nc:
+            for c in nc:
                 # Find indices of examples of class c
                 indxs = (self.buf_y == c).nonzero(as_tuple=False).squeeze()
 
