@@ -120,42 +120,40 @@ class DataRegime(object):
         self.hvd = hvd
         self.epoch = 0
         self.task_id = 0
-        self.current_task_id = 0
         self.steps = None
         self.tasksets = None
         self.concat_taskset = None
-        self.get_loader(True)
+        self.sampler = None
+        self.loader = None
+        self.config = self.get_config()
+        self.get_data(True)
 
+    def get_data(self, force_update=False):
+        if force_update or self.regime.update(self.epoch, self.steps):
+            self._transform = get_transform(**self.config['transform'])
+            self.config['data'].setdefault('transform', self._transform)
+            self._data = self.get_taskset()
+
+        return self._data
 
     def get_loader(self, force_update=False):
-        if force_update or self.regime.update(self.epoch, self.steps) or self.task_id > self.current_task_id:
-            self.current_task_id = self.task_id
-            config = self.get_config()
-
-            self._transform = get_transform(**config['transform'])
-            config['data'].setdefault('transform', self._transform)
-            self._data = self.get_taskset(config)
-
-            if config['others'].get('distributed', False):
-                config['loader']['sampler'] = DistributedSampler(
+        if self.loader is None or force_update:
+            if self.config['others'].get('distributed', False):
+                self.sampler = DistributedSampler(
                     self._data, num_replicas=hvd.size(), rank=hvd.rank()
                 )
 
-            config['loader']['shuffle'] = None
+            self.loader = DataLoader(self._data, **self.config['loader'])
 
-            self._sampler = config['loader'].get('sampler', None)
-            self._loader = DataLoader(self._data, **config['loader'])
+        return self.loader
 
-        return self._loader
-    
-
-    def get_taskset(self, config):
-        if config['data'].get('continual', False):
+    def get_taskset(self):
+        if self.config['data'].get('continual', False):
             if self.tasksets is None:
-                self.prepare_tasksets(config)
+                self.prepare_tasksets()
 
-            current_taskset = self.tasksets[self.current_task_id]
-            if config['continual'].get('concatenate_tasksets', False):
+            current_taskset = self.tasksets[self.task_id]
+            if self.config['continual'].get('concatenate_tasksets', False):
                 if self.concat_taskset is None:
                     self.concat_taskset = current_taskset
                 else:
@@ -169,16 +167,16 @@ class DataRegime(object):
 
             return current_taskset
 
-        return get_dataset(**config['data'])
+        return get_dataset(**self.config['data'])
 
-
-    def prepare_tasksets(self, config):
-        if config['continual'].get('scenario') == 'class':
-            ii = config['continual'].get('initial_increment')
-            i = config['continual'].get('increment')
+    def prepare_tasksets(self):
+        continual_config = self.config['continual']
+        if continual_config.get('scenario') == 'class':
+            ii = continual_config.get('initial_increment')
+            i = continual_config.get('increment')
 
             self.tasksets = ClassIncremental(
-                get_dataset(**config['data']),
+                get_dataset(**self.config['data']),
                 initial_increment = ii,
                 increment = i
             )
@@ -190,12 +188,12 @@ class DataRegime(object):
 
     def set_epoch(self, epoch):
         self.epoch = epoch
-        if self._sampler is not None and hasattr(self._sampler, 'set_epoch'):
-            self._sampler.set_epoch(epoch)
+        if self.sampler is not None and hasattr(self.sampler, 'set_epoch'):
+            self.sampler.set_epoch(epoch)
 
     def set_task_id(self, task_id):
         self.task_id = task_id
-        self.get_loader(True)
+        self.get_data(True)
 
     def __len__(self):
         return len(self._data) or 1
@@ -216,6 +214,7 @@ class DataRegime(object):
         other_config = {
             k: v for k, v in config.items() if k in _OTHER_ARGS}
 
+        loader_config.setdefault('shuffle', None)
         transform_config.setdefault('transform_name', data_config['dataset'])
 
         return {

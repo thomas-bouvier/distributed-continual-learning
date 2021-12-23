@@ -55,7 +55,7 @@ class icarl_agent(Agent):
     """
     Forward pass for the current epoch
     """
-    def loop(self, data_loader, average_output=False, training=False):
+    def loop(self, data_regime, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
         distill = self.mem_class_x != {} and training
@@ -63,9 +63,9 @@ class icarl_agent(Agent):
         # Distillation, increment taskset
         set_x, set_y = None, None
         if distill:
-            set_x, set_y = self.increment_taskset(len(data_loader), self.mem_x, self.mem_y)
+            set_x, set_y = self.increment_taskset(len(data_regime.get_loader()), self.mem_x, self.mem_y)
 
-        for i_batch, item in enumerate(data_loader):
+        for i_batch, item in enumerate(data_regime.get_loader()):
             inputs = item[0] # x
             target = item[1] # y
 
@@ -90,13 +90,13 @@ class icarl_agent(Agent):
                 'prec5': float(prec5)
             }, step=self.epoch)
 
-            if i_batch % self.log_interval == 0 or i_batch == len(data_loader) - 1:
+            if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
                 print('{phase}: epoch: {0} [{1}/{2}]\t'
                              'Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t'
                              'Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t'
                              'Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t'
                              .format(
-                                 self.epoch+1, i_batch, len(data_loader),
+                                 self.epoch+1, i_batch, len(data_regime.get_loader()),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
 

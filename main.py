@@ -211,7 +211,7 @@ class Experiment():
         }
 
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
-        self.train_data = DataRegime(
+        self.train_data_regime = DataRegime(
             hvd,
             getattr(self.agent, 'data_regime', None),
             defaults={
@@ -221,7 +221,7 @@ class Experiment():
             }
         )
 
-        self.validate_data = DataRegime(
+        self.validate_data_regime = DataRegime(
             hvd,
             getattr(self.agent, 'data_eval_regime', None),
             defaults={
@@ -251,33 +251,36 @@ class Experiment():
         results = ResultsLog(results_path,
                         title='Training Results - %s' % self.args.save_dir)
 
-        self.agent.before_all_tasks(self.train_data.tasksets)
+        self.agent.before_all_tasks(self.train_data_regime)
 
-        for task_id in range(0, len(self.train_data.tasksets) if self.train_data.tasksets else 1):
+        for task_id in range(0, len(self.train_data_regime.tasksets) if self.train_data_regime.tasksets else 1):
             if hvd.rank() == 0:
                 print('===========================================================')
                 print('Task: {0}'.format(task_id))
                 print('===========================================================\n')
 
-            self.train_data.set_task_id(task_id)
-            self.validate_data.set_task_id(task_id)
+            self.train_data_regime.set_task_id(task_id)
+            self.validate_data_regime.set_task_id(task_id)
 
-            self.agent.before_every_task(task_id, self.train_data._data)
+            self.agent.before_every_task(task_id, self.train_data_regime.get_data())
+
+            # Distribute the data
+            self.train_data_regime.get_loader(True)
+            self.validate_data_regime.get_loader(True)
 
             start_epoch = max(self.args.start_epoch, 0)
-            self.agent.steps = start_epoch * len(self.train_data)
+            self.agent.steps = start_epoch * len(self.train_data_regime)
             for i_epoch in range(start_epoch, self.args.epochs):
                 self.agent.epoch = i_epoch
 
-                # Horovod: set epoch to sampler for shuffling.
-                self.train_data.set_epoch(i_epoch)
-                self.validate_data.set_epoch(i_epoch)
+                # Horovod: set epoch to sampler for shuffling
+                self.train_data_regime.set_epoch(i_epoch)
+                self.validate_data_regime.set_epoch(i_epoch)
 
                 # train for one epoch
-                train_results = self.agent.train(self.train_data.get_loader())
-
+                train_results = self.agent.train(self.train_data_regime)
                 # evaluate on validation set
-                validate_results = self.agent.validate(self.validate_data.get_loader())
+                validate_results = self.agent.validate(self.validate_data_regime)
 
                 if hvd.rank() == 0:
                     print('\nResults: epoch: {0}\n'
@@ -310,8 +313,8 @@ class Experiment():
                     results.save()
 
             self.agent.after_every_task()
-        self.agent.after_all_tasks()
 
+        self.agent.after_all_tasks()
         return train_results
 
 
