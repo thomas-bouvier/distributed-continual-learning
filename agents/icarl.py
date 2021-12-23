@@ -35,9 +35,13 @@ class icarl_agent(Agent):
         self.lsm = nn.LogSoftmax(dim=1)
         self.sm = nn.Softmax(dim=1)
 
-    def before_every_task(self, task_id, train_taskset):
+    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+        # Distribute the data
+        train_data_regime.get_loader(True)
+        validate_data_regime.get_loader(True)
+
         # Create mask so the loss is only used for classes learnt during this task
-        self.nc = set([data[1] for data in train_taskset])
+        self.nc = set([data[1] for data in train_data_regime.get_data()])
         mask = torch.tensor([False for _ in range(self.model.num_classes)])
         for y in self.nc:
             mask[y] = True

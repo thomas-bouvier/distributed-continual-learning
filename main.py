@@ -262,11 +262,8 @@ class Experiment():
             self.train_data_regime.set_task_id(task_id)
             self.validate_data_regime.set_task_id(task_id)
 
-            self.agent.before_every_task(task_id, self.train_data_regime.get_data())
-
-            # Distribute the data
-            self.train_data_regime.get_loader(True)
-            self.validate_data_regime.get_loader(True)
+            self.agent.before_every_task(task_id, self.train_data_regime,
+                                         self.validate_data_regime)
 
             start_epoch = max(self.args.start_epoch, 0)
             self.agent.steps = start_epoch * len(self.train_data_regime)

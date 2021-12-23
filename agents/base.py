@@ -118,7 +118,11 @@ class Agent():
     def after_all_tasks(self):
         pass
 
-    def before_every_task(self, task_id, train_taskset):
+    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+        # Distribute the data
+        train_data_regime.get_loader(True)
+        validate_data_regime.get_loader(True)
+
         if task_id > 0:
             if self.config.get('reset_state_dict', False):
                 self.model.load_state_dict(copy.deepcopy(self.model_snapshot))

@@ -95,7 +95,7 @@ class nil_v3_agent(Agent):
         super(nil_v3_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
         if state_dict != None:
-            self.net.load_state_dict(state_dict)
+            self.model.load_state_dict(state_dict)
 
         self.class_count = [0 for _ in range(model.num_classes)]
         self.buffer_size = 1     # frequency of representatives updtate (not used)
@@ -130,10 +130,13 @@ class nil_v3_agent(Agent):
         self.q_new_batch.close()
         self.p.join()
 
-    #def train_for_task(self, train_taskset, x_dim, task_id):
-    def before_every_task(self, task_id, train_taskset):
+    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+        # Distribute the data
+        train_data_regime.get_loader(True)
+        validate_data_regime.get_loader(True)
+
         # Add the new classes to the mask
-        nc = set([data[1] for data in train_taskset])
+        nc = set([data[1] for data in train_data_regime.get_data()])
         mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
             mask[y] = True
