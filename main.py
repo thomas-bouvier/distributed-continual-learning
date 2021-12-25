@@ -256,9 +256,9 @@ class Experiment():
 
         for task_id in range(0, len(self.train_data_regime.tasksets) if self.train_data_regime.tasksets else 1):
             if hvd.rank() == 0:
-                print('===========================================================')
+                print('======================================================================================================')
                 print('Task: {0}'.format(task_id))
-                print('===========================================================\n')
+                print('======================================================================================================\n')
 
             self.train_data_regime.set_task_id(task_id)
             self.validate_data_regime.set_task_id(task_id)
