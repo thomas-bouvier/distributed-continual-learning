@@ -40,6 +40,8 @@ parser.add_argument('--dataset-dir', default='./datasets',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
 parser.add_argument('--tasksets-config', default='',
                     help='additional taskset configuration (useful for continual learning)')
+parser.add_argument('--shard', action='store_true', default=False,
+                    help='sample data from a same subset of the dataset at each epoch')
 parser.add_argument('--agent', metavar='AGENT', default=None,
                     choices=agent_names,
                     help='model agent: ' + ' | '.join(agent_names))
@@ -202,6 +204,7 @@ class Experiment():
             'dataset_dir': self.args.dataset_dir,
             'shuffle': False,
             'distributed': True,
+            'shard': self.args.shard,
             'continual': tasksets_config.get('continual'),
             'scenario': tasksets_config.get('scenario', 'class'),
             'initial_increment': tasksets_config.get('initial_increment', 0),

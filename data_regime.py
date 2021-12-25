@@ -139,9 +139,14 @@ class DataRegime(object):
     def get_loader(self, force_update=False):
         if self.loader is None or force_update:
             if self.config['others'].get('distributed', False):
-                self.sampler = DistributedSampler(
-                    self._data, num_replicas=hvd.size(), rank=hvd.rank()
-                )
+                if self.config['others'].get('shard', False):
+                    self.sampler = MyDistributedSampler(
+                        self._data, num_replicas=hvd.size(), rank=hvd.rank()
+                    )
+                else:
+                    self.sampler = DistributedSampler(
+                        self._data, num_replicas=hvd.size(), rank=hvd.rank()
+                    )
 
             self.loader = DataLoader(self._data, **self.config['loader'])
 
