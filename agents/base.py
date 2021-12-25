@@ -112,7 +112,7 @@ class Agent():
         with torch.no_grad():
             return self.loop(data_regime, average_output=average_output, training=False)
 
-    def before_all_tasks(self, taskets):
+    def before_all_tasks(self, train_data_regime, validate_data_regime):
         pass
 
     def after_all_tasks(self):

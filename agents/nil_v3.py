@@ -98,7 +98,6 @@ class nil_v3_agent(Agent):
             self.model.load_state_dict(state_dict)
 
         self.class_count = [0 for _ in range(model.num_classes)]
-        self.buffer_size = 1     # frequency of representatives updtate (not used)
 
         self.memory_size = config.get('num_representatives', 6000)   # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
@@ -107,8 +106,8 @@ class nil_v3_agent(Agent):
 
         self.val_set = None
 
-    def before_all_tasks(self, data_regime):
-        self.x_dim = list(data_regime.tasksets[0][0][0].size())
+    def before_all_tasks(self, train_data_regime, validate_data_regime):
+        self.x_dim = list(train_data_regime.tasksets[0][0][0].size())
 
         self.reps_x = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size] + self.x_dim), self.cuda).share_memory_()
         self.reps_y = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size], dtype=torch.long), self.cuda).share_memory_()

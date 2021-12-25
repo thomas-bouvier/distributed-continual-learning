@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from continuum.tasks import split_train_val
-
 from agents.base import Agent
 from agents.nil_v1 import nil_v1_agent
 from agents.nil_v2 import nil_v2_agent
@@ -27,7 +25,6 @@ class nil_agent(Agent):
         self.representatives = [[] for _ in range(model.num_classes)]
         self.class_count = [0 for _ in range(model.num_classes)]
         self.buffer_sizeed_reps = []
-        self.buffer_size = 1     # frequency of representatives updtate (not used)
 
         self.memory_size = config.get('num_representatives', 6000)   # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
