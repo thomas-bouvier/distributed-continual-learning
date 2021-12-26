@@ -54,8 +54,8 @@ parser.add_argument('--model-config', default='',
                     help='additional model architecture configuration')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
-parser.add_argument('--eval-batch-size', type=int, default=64, metavar='N',
-                    help='input batch size for testing (default: 1000)')
+parser.add_argument('--eval-batch-size', type=int, default=-1, metavar='N',
+                    help='input batch size for testing (default: same as training)')
 parser.add_argument('--batches-per-allreduce', type=int, default=1,
                     help='number of batches processed locally before '
                          'executing allreduce across workers; it multiplies '
@@ -230,7 +230,7 @@ class Experiment():
             defaults={
                 **defaults,
                 'split': 'validate',
-                'batch_size': self.args.eval_batch_size
+                'batch_size': self.args.eval_batch_size if self.args.eval_batch_size > 0 else self.args.batch_size
             }
         )
 
