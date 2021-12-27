@@ -61,8 +61,6 @@ parser.add_argument('--batches-per-allreduce', type=int, default=1,
                          'total batch size.')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
-parser.add_argument('--start-epoch', default=-1, type=int, metavar='N',
-                    help='start epoch number, -1 to unset (will start at 0)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
@@ -87,6 +85,10 @@ parser.add_argument('--results-dir', metavar='RESULTS_DIR', default='./results',
                     help='results dir')
 parser.add_argument('--save-dir', metavar='SAVE_DIR', default='',
                     help='saved folder')
+parser.add_argument('--tensorwatch', action='store_true', default=False,
+                    help='set tensorwatch logging')
+parser.add_argument('--tensorwatch-port', default=0, type=int,
+                    help='set tensorwatch port')
 
 def main():
     args = parser.parse_args()
@@ -198,7 +200,10 @@ class Experiment():
 
         self.agent = agent(model, agent_config, optimizer,
                            self.criterion, self.args.cuda, self.args.log_interval)
-        self.agent.num_epochs = self.args.epochs
+        self.agent.epochs = self.args.epochs
+        if self.args.tensorwatch:
+            self.agent.set_watcher(filename=path.abspath(path.join(self.save_path, 'tensorwatch.log')),
+                            port=self.args.tensorwatch_port, dummy=hvd.local_rank() > 0)
         logging.info("Created agent with configuration: %s", agent_config)
 
     def _prepare_dataset(self):
@@ -260,9 +265,7 @@ class Experiment():
             self.agent.before_every_task(task_id, self.train_data_regime,
                                          self.validate_data_regime)
 
-            start_epoch = max(self.args.start_epoch, 0)
-            self.agent.steps = start_epoch * len(self.train_data_regime)
-            for i_epoch in range(start_epoch, self.args.epochs):
+            for i_epoch in range(0, self.args.epochs):
                 logging.info('Starting epoch: {0}'.format(i_epoch + 1))
                 self.agent.epoch = i_epoch
 

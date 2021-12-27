@@ -1,5 +1,6 @@
 import copy
 import logging
+import tensorwatch
 import torch
 
 from meters import AverageMeter, accuracy
@@ -17,6 +18,8 @@ class Agent():
         self.log_interval = log_interval
         self.epoch = 0
         self.training_steps = 0
+        self.watcher = None
+        self.streams = {}
 
         # Move model to GPU.
         move_cuda(self.model, cuda)
@@ -26,35 +29,6 @@ class Agent():
             self.model_snapshot = copy.deepcopy(state_dict)
         else:
             self.model_snapshot = copy.deepcopy(self.model.state_dict())
-
-    def _step(self, i_batch, inputs_batch, target_batch, training=False,
-              average_output=False, chunk_batch=1):
-        outputs = []
-        total_loss = 0
-
-        if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.training_steps)
-
-        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
-                                                 target_batch.chunk(chunk_batch, dim=0))):
-            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
-
-            output = self.model(inputs)
-            loss = self.criterion(output, target)
-
-            if training:
-                # accumulate gradient
-                loss.backward()
-                # SGD step
-                self.optimizer.step()
-                self.training_steps += 1
-
-            outputs.append(output.detach())
-            total_loss += float(loss)
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
 
     """
     Forward pass for the current epoch
@@ -88,6 +62,15 @@ class Agent():
                                  self.epoch+1, i_batch, len(data_regime.get_loader()),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
+                self.observe(trainer=self,
+                             model=self.model,
+                             optimizer=self.optimizer,
+                             data=(inputs, target))
+                self.stream_meters(meters,
+                                   prefix='train' if training else 'eval')
+                if training:
+                    self.write_stream('lr',
+                                      (self.training_steps, self.optimizer.get_lr()[0]))
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
@@ -95,9 +78,39 @@ class Agent():
 
         return meters
 
+    def _step(self, i_batch, inputs_batch, target_batch, training=False,
+              average_output=False, chunk_batch=1):
+        outputs = []
+        total_loss = 0
+
+        if training:
+            self.optimizer.zero_grad()
+            self.optimizer.update(self.epoch, self.training_steps)
+
+        for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
+                                                 target_batch.chunk(chunk_batch, dim=0))):
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
+
+            output = self.model(inputs)
+            loss = self.criterion(output, target)
+
+            if training:
+                # accumulate gradient
+                loss.backward()
+                # SGD step
+                self.optimizer.step()
+                self.training_steps += 1
+
+            outputs.append(output.detach())
+            total_loss += float(loss)
+
+        outputs = torch.cat(outputs, dim=0)
+        return outputs, total_loss
+
     def train(self, data_regime, average_output=False):
         # switch to train mode
         self.model.train()
+        self.write_stream('epoch', (self.training_steps, self.epoch))
         return self.loop(data_regime, average_output=average_output, training=True)
 
     def validate(self, data_regime, average_output=False):
@@ -125,8 +138,51 @@ class Agent():
     def after_every_task(self):
         pass
 
+    def set_watcher(self, filename, port=0, dummy=False):
+        if dummy:
+            return False
+        self.watcher = tensorwatch.Watcher(filename=filename, port=port)
+        self.get_stream('train_loss')
+        self.get_stream('eval_loss')
+        self.get_stream('train_prec1')
+        self.get_stream('eval_prec1')
+        self.get_stream('lr')
+        self.watcher.make_notebook()
+        return True
+
     def get_state_dict(self):
         return self.model.state_dict()
+
+    def get_stream(self, name, **kwargs):
+        if self.watcher is None:
+            return None
+        if name not in self.streams.keys():
+            self.streams[name] = self.watcher.create_stream(name=name, **kwargs)
+        return self.streams[name]
+
+    def observe(self, **kwargs):
+        if self.watcher is None:
+            return False
+        self.watcher.observe(**kwargs)
+        return True
+
+    def stream_meters(self, meters_dict, prefix=None):
+        if self.watcher is None:
+            return False
+        for name, value in meters_dict.items():
+            if prefix is not None:
+                name = '_'.join([prefix, name])
+            value = value.val
+            stream = self.get_stream(name)
+            if stream is None:
+                continue
+            stream.write((self.training_steps, value))
+        return True
+
+    def write_stream(self, name, values):
+        stream = self.get_stream(name)
+        if stream is not None:
+            stream.write(values)
 
 
 def base(model, agent_config, optimizer, criterion, cuda, log_interval):

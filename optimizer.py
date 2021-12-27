@@ -18,7 +18,6 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
         self.optimizer = self._create_optimizer()
 
-
     def _create_optimizer(self):
         optimizer = torch.optim.SGD(self.parameters, lr=0)
 
@@ -33,13 +32,11 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
                                     backward_passes_per_step=self.batches_per_allreduce,
                                     gradient_predivide_factor=self.gradient_predivide_factor)
 
-
     def update(self, epoch=None, steps=None):
         """Adjust optimizer according to current epoch or steps and training regime.
         """
         if super(OptimizerRegime, self).update(epoch, steps):
             self.adjust_from_config(self.config)
-
 
     def adjust_from_config(self, config):
         for param_group in self.optimizer.param_groups:
@@ -50,11 +47,9 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
                         logging.info(f"OPTIMIZER REGIME - updating {key}: {new_val}")
                         param_group[key] = config[key]
 
-
     def zero_grad(self):
         """Clears the gradients of all optimized :class:`Variable` s."""
         self.optimizer.zero_grad()
-
 
     def step(self, *args, **kwargs):
         """Performs a single optimization step (parameter update)."""
@@ -62,24 +57,20 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         self.optimizer.step(*args, **kwargs)
         self.regularizer.post_step()
 
-
     def __getstate__(self):
         return {
             'optimizer_state': self.optimizer.__getstate__(),
             'regime': self.regime,
         }
 
-
     def __setstate__(self, state):
         self.regime = state.get('regime')
         self.optimizer.__setstate__(state.get('optimizer_state'))
-
 
     def state_dict(self):
         """Returns the state of the optimizer as a :class:`dict`.
         """
         return self.optimizer.state_dict()
-
 
     def load_state_dict(self, state_dict):
         """Loads the optimizer state.
@@ -90,7 +81,12 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         # deepcopy, to be consistent with module API
         self.optimizer.load_state_dict(state_dict)
 
-
     def reset(self):
         logging.info("OPTIMIZER REGIME - resetting state..")
         self.load_state_dict(self._create_optimizer().state_dict())
+
+    def get_value(self, key):
+        return [group[key] for group in self.optimizer.param_groups]
+
+    def get_lr(self):
+        return self.get_value('lr')

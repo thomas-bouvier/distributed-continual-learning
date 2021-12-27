@@ -97,6 +97,15 @@ class icarl_agent(Agent):
                                  self.epoch+1, i_batch, len(data_regime.get_loader()),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
+                self.observe(trainer=self,
+                             model=self.model,
+                             optimizer=self.optimizer,
+                             data=(inputs, target))
+                self.stream_meters(meters,
+                                   prefix='train' if training else 'eval')
+                if training:
+                    self.write_stream('lr',
+                                      (self.training_steps, self.optimizer.get_lr()[0]))
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
@@ -136,7 +145,7 @@ class icarl_agent(Agent):
                                        target_batch.chunk(chunk_batch, dim=0))):
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
     
-            if self.epoch+1 == self.num_epochs and training:
+            if self.epoch+1 == self.epochs and training:
                 if self.buf_x is None:
                     self.buf_x = x.detach()
                     self.buf_y = y.detach()
