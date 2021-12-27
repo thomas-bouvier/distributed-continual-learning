@@ -22,6 +22,7 @@ from cross_entropy import CrossEntropyLoss
 from data_regime import DataRegime
 from log import ResultsLog
 from optimizer import OptimizerRegime
+from utils.logging import setup_logging
 
 from torchsummary import summary
 
@@ -105,15 +106,6 @@ def main():
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
-    # TODO: check the number of workers
-    # https://github.com/horovod/horovod/issues/2053
-    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
-    # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
-    # issues with Infiniband implementations that are not fork-safe
-    if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
-            mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
-        kwargs['multiprocessing_context'] = 'forkserver'
-
     time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     if args.save_dir == '':
         args.save_dir = time_stamp
@@ -122,6 +114,22 @@ def main():
     if hvd.local_rank() == 0:
         if not path.exists(save_path):
             makedirs(save_path)
+    
+    setup_logging(path.join(save_path, 'log.txt'),
+                  dummy=hvd.local_rank() > 0)
+
+    logging.info("Saving to %s", save_path)
+    logging.info("Run arguments: %s", args)
+
+    # TODO: check the number of workers
+    # https://github.com/horovod/horovod/issues/2053
+    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
+    # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
+    # issues with Infiniband implementations that are not fork-safe
+    if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
+            mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
+        kwargs['multiprocessing_context'] = 'forkserver'
+    logging.debug("Multiprocessing arguments: %s", kwargs)
 
     xp = Experiment(save_path, args, kwargs)
     xp.run()
@@ -164,6 +172,7 @@ class Experiment():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
         model = model(model_config)
+        logging.info("Created model with configuration: %s", model_config)
         # Horovod: broadcast parameters.
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 
@@ -177,6 +186,7 @@ class Experiment():
                 'weight_decay': self.args.weight_decay
             }
         ])
+        logging.info("Optim regime: %s", optim_regime)
 
         # Distributed training parameters.
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
@@ -192,6 +202,7 @@ class Experiment():
         self.agent = agent(model, agent_config, optimizer,
                            self.criterion, self.args.cuda, self.args.log_interval)
         self.agent.num_epochs = self.args.epochs
+        logging.info("Created agent with configuration: %s", agent_config)
 
 
     def _prepare_dataset(self):
@@ -223,6 +234,7 @@ class Experiment():
                 'batch_size': self.args.batch_size
             }
         )
+        logging.info("Created train data regime: %s", repr(self.train_data_regime))
 
         self.validate_data_regime = DataRegime(
             hvd,
@@ -233,6 +245,7 @@ class Experiment():
                 'batch_size': self.args.eval_batch_size if self.args.eval_batch_size > 0 else self.args.batch_size
             }
         )
+        logging.info("Created validate data regime: %s", repr(self.validate_data_regime))
 
 
     def run(self):
@@ -258,11 +271,7 @@ class Experiment():
                                     self.validate_data_regime)
 
         for task_id in range(0, len(self.train_data_regime.tasksets) if self.train_data_regime.tasksets else 1):
-            if hvd.rank() == 0:
-                print('======================================================================================================')
-                print('Task: {0}'.format(task_id))
-                print('======================================================================================================\n')
-
+            logging.info('\nStarting task %s', task_id)
             self.train_data_regime.set_task_id(task_id)
             self.validate_data_regime.set_task_id(task_id)
 
@@ -272,6 +281,7 @@ class Experiment():
             start_epoch = max(self.args.start_epoch, 0)
             self.agent.steps = start_epoch * len(self.train_data_regime)
             for i_epoch in range(start_epoch, self.args.epochs):
+                logging.info('Starting epoch: {0}'.format(i_epoch + 1))
                 self.agent.epoch = i_epoch
 
                 # Horovod: set epoch to sampler for shuffling
@@ -284,11 +294,11 @@ class Experiment():
                 validate_results = self.agent.validate(self.validate_data_regime)
 
                 if hvd.rank() == 0:
-                    print('\nResults: epoch: {0}\n'
-                            'Training Loss {train[loss]:.4f} \t\n'
-                            'Validation Loss {validate[loss]:.4f} \t\n'
-                            .format(i_epoch+1, train=train_results,
-                            validate=validate_results))
+                    logging.info('\nResults: epoch: {0}\n'
+                                 'Training Loss {train[loss]:.4f} \t\n'
+                                 'Validation Loss {validate[loss]:.4f} \t\n'
+                                 .format(i_epoch+1, train=train_results,
+                                 validate=validate_results))
 
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
                     values = dict(epoch=draw_epoch, steps=self.agent.training_steps)

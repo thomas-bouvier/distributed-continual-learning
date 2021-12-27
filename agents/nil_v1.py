@@ -2,6 +2,7 @@ import horovod.torch as hvd
 import math
 import mlflow
 import numpy as np
+import logging
 import random
 import torch
 import torch.multiprocessing as mp
@@ -174,7 +175,7 @@ class nil_v1_agent(Agent):
             }, step=self.epoch)
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
-                print('{phase}: epoch: {0} [{1}/{2}]\t'
+                logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
                              'Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t'
                              'Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t'
                              'Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t'

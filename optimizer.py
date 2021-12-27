@@ -1,5 +1,6 @@
-import torch
 import horovod.torch as hvd
+import logging
+import torch
 
 from regime import Regime
 from regularizer import Regularizer
@@ -46,7 +47,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
                 if key in config:
                     new_val = config[key]
                     if new_val != param_group[key]:
-                        print(f"Updating {key}: {new_val}")
+                        logging.info(f"OPTIMIZER REGIME - updating {key}: {new_val}")
                         param_group[key] = config[key]
 
 
@@ -91,4 +92,5 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
 
     def reset(self):
+        logging.info("OPTIMIZER REGIME - resetting state..")
         self.load_state_dict(self._create_optimizer().state_dict())

@@ -1,4 +1,5 @@
 import horovod.torch as hvd
+import logging
 import numpy as np
 import os
 import torch
@@ -133,6 +134,7 @@ class DataRegime(object):
             self._transform = get_transform(**self.config['transform'])
             self.config['data'].setdefault('transform', self._transform)
             self._data = self.get_taskset()
+            logging.info("Updated data")
 
         return self._data
 
@@ -149,6 +151,7 @@ class DataRegime(object):
                     )
 
             self.loader = DataLoader(self._data, **self.config['loader'])
+            logging.info("Distributed data")
 
         return self.loader
 
@@ -162,6 +165,7 @@ class DataRegime(object):
                 if self.concat_taskset is None:
                     self.concat_taskset = current_taskset
                 else:
+                    logging.info('Concatenating taskset with all previous ones..')
                     x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
                     nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
                     x = np.concatenate((x, nx))
@@ -192,19 +196,24 @@ class DataRegime(object):
             )
 
     def set_epoch(self, epoch):
+        logging.debug("DATA REGIME - set epoch: %s", epoch)
         self.epoch = epoch
         if self.sampler is not None and hasattr(self.sampler, 'set_epoch'):
             self.sampler.set_epoch(epoch)
 
     def set_task_id(self, task_id):
+        logging.debug("DATA REGIME - set task id: %s", task_id)
         self.task_id = task_id
         self.get_data(True)
 
     def __len__(self):
         return len(self._data) or 1
 
-    def __repr__(self):
+    def __str__(self):
         return str(self.regime)
+
+    def __repr__(self):
+        return str(self.config)
 
     def get_config(self):
         config = self.regime.config
