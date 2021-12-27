@@ -1,8 +1,6 @@
 import argparse
 import horovod.torch as hvd
 import json
-import mlflow
-import mlflow.pytorch
 import logging
 import os
 import pickle
@@ -144,7 +142,6 @@ class Experiment():
         self._create_agent()
         self._prepare_dataset()
 
-
     def _create_agent(self):
         agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base
         model = models.__dict__[self.args.model]
@@ -204,7 +201,6 @@ class Experiment():
         self.agent.num_epochs = self.args.epochs
         logging.info("Created agent with configuration: %s", agent_config)
 
-
     def _prepare_dataset(self):
         tasksets_config = {'continual': bool(self.args.tasksets_config)}
         if self.args.tasksets_config != '':
@@ -247,22 +243,8 @@ class Experiment():
         )
         logging.info("Created validate data regime: %s", repr(self.validate_data_regime))
 
-
     def run(self):
-        with mlflow.start_run():
-            # Log our parameters into mlflow
-            for key, value in vars(self.args).items():
-                mlflow.log_param(key, value)
-            mlflow.log_param('gpus', hvd.size())
-
-            self.run_workload()
-        
-            # Log the model as an artifact of the MLflow run.
-            print("Logging the trained model as a run artifact...")
-            mlflow.pytorch.log_model(self.agent.model, artifact_path=f"pytorch-{self.args.model}", pickle_module=pickle)
-
-
-    def run_workload(self):
+        logging.info('GPUs: %s', hvd.size())
         results_path = path.join(self.save_path, 'results')
         results = ResultsLog(results_path,
                         title='Training Results - %s' % self.args.save_dir)

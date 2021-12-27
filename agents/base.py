@@ -1,5 +1,4 @@
 import copy
-import mlflow
 import logging
 import torch
 
@@ -79,12 +78,6 @@ class Agent():
             meters['loss'].update(float(loss), inputs.size(0))
             meters['prec1'].update(float(prec1), inputs.size(0))
             meters['prec5'].update(float(prec5), inputs.size(0))
-
-            mlflow.log_metrics({
-                'loss': float(loss),
-                'prec1': float(prec1),
-                'prec5': float(prec5)
-            }, step=self.epoch)
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
                 logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
