@@ -248,12 +248,13 @@ class Representative(object):
 
 def nil(model, config, optimizer, criterion, cuda, log_interval):
     implementation = config.get('implementation', '')
+    agent = nil_agent
     if implementation == 'v1':
-        return nil_v1_agent(model, config, optimizer, criterion, cuda, log_interval)
+        agent = nil_v1_agent
     elif implementation == 'v2':
-        return nil_v2_agent(model, config, optimizer, criterion, cuda, log_interval)
+        agent = nil_v2_agent
     elif implementation == 'v3':
-        return nil_v3_agent(model, config, optimizer, criterion, cuda, log_interval)
+        agent = nil_v3_agent
     elif implementation == 'v4':
-        return nil_v4_agent(model, config, optimizer, criterion, cuda, log_interval)
-    return nil_agent(model, config, optimizer, criterion, cuda, log_interval)
+        agent = nil_v4_agent
+    return agent(model, config, optimizer, criterion, cuda, log_interval)
