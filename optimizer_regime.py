@@ -5,6 +5,8 @@ import torch
 from regime import Regime
 from regularizer import Regularizer
 
+_OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
+
 class OptimizerRegime(Regime, torch.optim.Optimizer):
     def __init__(self, model, compression, reduction, batches_per_allreduce, gradient_predivide_factor, regime, defaults={}):
         super(OptimizerRegime, self).__init__(regime, defaults)
@@ -39,12 +41,18 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
             self.adjust_from_config(self.config)
 
     def adjust_from_config(self, config):
+        if 'optimizer' in config:
+            optim_method = _OPTIMIZERS[config.get('optimizer', 'SGD')]
+            if not isinstance(self.optimizer, optim_method):
+                self.optimizer = optim_method(self.optimizer.param_groups)
+                logging.info('OPTIMIZER REGIME - setting method = %s' %
+                                  config['optimizer'])
         for param_group in self.optimizer.param_groups:
             for key in param_group.keys():
                 if key in config:
                     new_val = config[key]
                     if new_val != param_group[key]:
-                        logging.info(f"OPTIMIZER REGIME - updating {key}: {new_val}")
+                        logging.info(f"OPTIMIZER REGIME - updating {key} = {new_val}")
                         param_group[key] = config[key]
 
     def zero_grad(self):
@@ -83,7 +91,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
     def reset(self):
         logging.info("OPTIMIZER REGIME - resetting state..")
-        self.load_state_dict(self._create_optimizer().state_dict())
+        self.optimizer = self._create_optimizer()
         self.config = self.defaults
         self.current_regime_phase = None
 
