@@ -19,7 +19,7 @@ import agents
 from cross_entropy import CrossEntropyLoss
 from data_regime import DataRegime
 from log import ResultsLog
-from optimizer import OptimizerRegime
+from optimizer_regime import OptimizerRegime
 from utils.logging import setup_logging
 
 from torchsummary import summary
