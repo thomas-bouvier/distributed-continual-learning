@@ -214,7 +214,7 @@ class Experiment():
         defaults={
             'dataset': self.args.dataset,
             'dataset_dir': self.args.dataset_dir,
-            'shuffle': False,
+            'shuffle': True,
             'distributed': True,
             'shard': self.args.shard,
             'continual': tasksets_config.get('continual'),
