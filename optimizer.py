@@ -84,6 +84,8 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
     def reset(self):
         logging.info("OPTIMIZER REGIME - resetting state..")
         self.load_state_dict(self._create_optimizer().state_dict())
+        self.config = self.defaults
+        self.current_regime_phase = None
 
     def get_value(self, key):
         return [group[key] for group in self.optimizer.param_groups]
