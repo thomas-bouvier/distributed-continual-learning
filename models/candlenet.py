@@ -36,4 +36,4 @@ class candlenet_model(nn.Module):
 
 
 def candlenet(config):
-    return candle_model()
+    return candlenet_model()
