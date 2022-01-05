@@ -1,108 +1,18 @@
 import horovod.torch as hvd
 import logging
 import numpy as np
-import os
 import torch
 
 from copy import deepcopy
-from continuum import datasets as datasets_c
 from continuum import ClassIncremental, InstanceIncremental
 from continuum.tasks import TaskSet
-from filelock import FileLock
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torchvision import datasets
 
+from data import get_dataset
 from preprocess import get_transform
 from regime import Regime      
 from sampler import MyDistributedSampler
-
-
-def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
-        target_transform=None, download=False, dataset_dir='./data'):
-    train = (split == 'train')
-    root = os.path.expanduser(dataset_dir)
-
-    if dataset == 'mnist':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.MNIST(data_path=root,
-                                train=train,
-                                download=download)
-        else:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.MNIST(root=root,
-                                train=train,
-                                transform=transform,
-                                target_transform=target_transform,
-                                download=download)
-
-    elif dataset == 'cifar10':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.CIFAR10(data_path=os.path.join(root, 'CIFAR10'),
-                                train=train,
-                                download=download)
-        else:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.CIFAR10(root=os.path.join(root, 'CIFAR10'),
-                                        train=train,
-                                        transform=transform,
-                                        target_transform=target_transform,
-                                        download=download)
-
-    elif dataset == 'cifar100':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.CIFAR100(data_path=os.path.join(root, 'CIFAR100'),
-                                train=train,
-                                download=download)
-        else:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.CIFAR100(root=os.path.join(root, 'CIFAR100'),
-                                        train=train,
-                                        transform=transform,
-                                        target_transform=target_transform,
-                                        download=download)
-
-    elif dataset == 'tinyimagenet':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.TinyImageNet200(data_path=os.path.join(root, 'TinyImageNet'),
-                                train=train,
-                                download=download)
-        else:
-            root = os.path.join(root, 'TinyImageNet')
-            if train:
-                root = os.path.join(root, 'tiny-imagenet-200/train')
-            else:
-                root = os.path.join(root, 'tiny-imagenet-200/val')
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.ImageFolder(root=root,
-                                            transform=transform,
-                                            target_transform=target_transform)
-
-    elif dataset == 'imagenet':
-        root = os.path.join(root, 'ImageNet')
-        if train:
-            root = os.path.join(root, 'train')
-        else:
-            root = os.path.join(root, 'val')
-        with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.ImageFolder(root=root,
-                                        transform=transform,
-                                        target_transform=target_transform)
-
-    elif dataset == 'imagenet_blurred':
-        root = os.path.join(root, 'ImageNet_blurred')
-        if train:
-            root = os.path.join(root, 'train_blurred')
-        else:
-            root = os.path.join(root, 'val_blurred')
-        with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.ImageFolder(root=root,
-                                        transform=transform,
-                                        target_transform=target_transform)
 
 
 _DATA_ARGS = {'dataset', 'split', 'transform', 'target_transform', 'download',
@@ -191,12 +101,12 @@ class DataRegime(object):
             )
         else:
             self.tasksets = InstanceIncremental(
-                get_dataset(**config['data']),
+                get_dataset(**self.config['data']),
                 nb_tasks = continual_config.get('num_tasks')
             )
 
     def set_epoch(self, epoch):
-        logging.debug("DATA REGIME - set epoch: %s", epoch)
+        logging.debug("DATA REGIME - set epoch: %s", epoch+1)
         self.epoch = epoch
         if self.sampler is not None and hasattr(self.sampler, 'set_epoch'):
             self.sampler.set_epoch(epoch)
