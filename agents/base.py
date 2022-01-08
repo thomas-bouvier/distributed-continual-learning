@@ -48,7 +48,7 @@ class Agent():
                                       average_output=average_output)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output, target, topk=(1, 5))
+            prec1, prec5 = accuracy(output, target, topk=(1, min(self.model.num_classes, 5)))
             meters['loss'].update(float(loss), inputs.size(0))
             meters['prec1'].update(float(prec1), inputs.size(0))
             meters['prec5'].update(float(prec5), inputs.size(0))
