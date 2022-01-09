@@ -2,7 +2,7 @@
 
 Distributed deep/continual learning with Horovod + PyTorch.
 
-## Usage
+## Installation
 
 ```
 # In your conda env:
@@ -17,6 +17,10 @@ Datasets should be added in `datasets/`, or using the following:
 ```
 ln -s /home/tbouvier/Documents/datasets/ datasets
 ```
+
+## Usage
+
+Parameters defined in the `config.yaml` override CLI parameters.
 
 ## Examples
 

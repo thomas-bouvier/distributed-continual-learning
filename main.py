@@ -16,11 +16,13 @@ from os import path, makedirs
 import models
 import agents
 
+from argparse import Namespace
 from cross_entropy import CrossEntropyLoss
 from data_regime import DataRegime
 from log import ResultsLog
 from optimizer_regime import OptimizerRegime
 from utils.logging import setup_logging
+from utils.yaml_params import YParams
 
 from torchsummary import summary
 
@@ -33,6 +35,10 @@ agent_names = sorted(name for name in agents.__dict__
                      and callable(agents.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='Distributed deep/continual learning with Horovod + PyTorch')
+parser.add_argument('--yaml_config', default='config.yaml', type=str,
+                    help='path to yaml file containing training configs')
+parser.add_argument('--config', default='base', type=str,
+                    help='name of desired config in yaml file')
 parser.add_argument('--dataset', required=True,
                     help="dataset name")
 parser.add_argument('--dataset-dir', default='./datasets',
@@ -94,6 +100,18 @@ def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+    time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+    if args.save_dir == '':
+        args.save_dir = time_stamp
+
+    params = vars(args)
+    yparams = YParams(os.path.abspath(args.yaml_config), args.config)
+    for k, v in params.items():
+        yparam = yparams[k]
+        if yparam:
+            params[k] = yparam
+    args = Namespace(**params)
+
     # Horovod: initialize library.
     hvd.init()
     torch.manual_seed(args.seed)
@@ -106,11 +124,7 @@ def main():
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
-    time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-    if args.save_dir == '':
-        args.save_dir = time_stamp
     save_path = path.join(args.results_dir, args.save_dir)
-
     if hvd.local_rank() == 0:
         if not path.exists(save_path):
             makedirs(save_path)
