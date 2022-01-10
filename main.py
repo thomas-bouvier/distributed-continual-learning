@@ -39,7 +39,7 @@ parser.add_argument('--yaml_config', default='config.yaml', type=str,
                     help='path to yaml file containing training configs')
 parser.add_argument('--config', default='base', type=str,
                     help='name of desired config in yaml file')
-parser.add_argument('--dataset', required=True,
+parser.add_argument('--dataset', metavar='DATASET', default='mnist',
                     help="dataset name")
 parser.add_argument('--dataset-dir', default='./datasets',
                     help='location of the training dataset in the local filesystem (will be downloaded if needed)')
@@ -52,7 +52,7 @@ parser.add_argument('--agent', metavar='AGENT', default=None,
                     help='model agent: ' + ' | '.join(agent_names))
 parser.add_argument('--agent-config', default='',
                     help='additional agent configuration')
-parser.add_argument('--model', metavar='MODEL', required=True,
+parser.add_argument('--model', metavar='MODEL', default='mnistnet',
                     choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--model-config', default='',
@@ -111,6 +111,8 @@ def main():
         if yparam:
             params[k] = yparam
     args = Namespace(**params)
+
+    print(args)
 
     # Horovod: initialize library.
     hvd.init()
