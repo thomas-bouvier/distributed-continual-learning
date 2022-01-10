@@ -14,7 +14,7 @@ from utils.utils import move_cuda
 from meters import AverageMeter, accuracy
 
 
-def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_candidates, nb_representatives, batch_size, cuda, rank):
+def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_candidates, num_representatives, batch_size, cuda, rank):
         representatives = [[] for _ in range(num_classes)]
         class_count = [0 for _ in range(num_classes)]
         buffer_sizeed_reps = []
@@ -51,7 +51,7 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
             for i in range(len(representatives)):
                 rand_indices = np.random.permutation(len(representatives[i]))
                 representatives[i] = [representatives[i][j] for j in rand_indices]
-                representatives[i] = representatives[i][:nb_representatives]
+                representatives[i] = representatives[i][:num_representatives]
 
             # Update weights of reps
             total_count = sum(class_count)
@@ -166,7 +166,7 @@ class nil_v3_agent(Agent):
                                       average_output=average_output)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output[:target.size(0)], target, topk=(1, 5))
+            prec1, prec5 = accuracy(output[:target.size(0)], target, topk=(1, min(self.model.num_classes, 5)))
             meters['loss'].update(float(loss), inputs.size(0))
             meters['prec1'].update(float(prec1), inputs.size(0))
             meters['prec5'].update(float(prec5), inputs.size(0))
