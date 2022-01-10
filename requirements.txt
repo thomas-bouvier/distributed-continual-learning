@@ -3,6 +3,7 @@ continuum
 filelock
 horovod[pytorch]
 ruamel.yaml
+tensorboardx
 tensorwatch
 torch
 torchvision

@@ -4,6 +4,7 @@ import tensorwatch
 import torch
 
 from meters import AverageMeter, accuracy
+from torch.utils.tensorboard import SummaryWriter
 from utils.utils import move_cuda
 
 class Agent():
@@ -18,6 +19,7 @@ class Agent():
         self.log_interval = log_interval
         self.epoch = 0
         self.training_steps = 0
+        self.writer = None
         self.watcher = None
         self.streams = {}
 
@@ -62,15 +64,23 @@ class Agent():
                                  self.epoch+1, i_batch, len(data_regime.get_loader()),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
-                self.observe(trainer=self,
-                             model=self.model,
-                             optimizer=self.optimizer,
-                             data=(inputs, target))
-                self.stream_meters(meters,
-                                   prefix='train' if training else 'eval')
-                if training:
-                    self.write_stream('lr',
-                                      (self.training_steps, self.optimizer.get_lr()[0]))
+
+                prefix='train' if training else 'val'
+                if self.writer is not None:
+                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
+                    self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
+                    if training:
+                        self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.training_steps)
+                    self.writer.flush()
+                if self.watcher is not None:
+                    self.observe(trainer=self,
+                                model=self.model,
+                                optimizer=self.optimizer,
+                                data=(inputs, target))
+                    self.stream_meters(meters, prefix=prefix)
+                    if training:
+                        self.write_stream('lr',
+                                         (self.training_steps, self.optimizer.get_lr()[0]))
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
@@ -138,14 +148,20 @@ class Agent():
     def after_every_task(self):
         pass
 
-    def set_watcher(self, filename, port=0, dummy=False):
+    def set_tensorboard_writer(self, save_path, dummy=False):
+        if dummy:
+            return False
+        self.writer = SummaryWriter(log_dir=save_path)
+        return True
+
+    def set_tensorwatch_watcher(self, filename, port=0, dummy=False):
         if dummy:
             return False
         self.watcher = tensorwatch.Watcher(filename=filename, port=port)
         self.get_stream('train_loss')
-        self.get_stream('eval_loss')
+        self.get_stream('val_loss')
         self.get_stream('train_prec1')
-        self.get_stream('eval_prec1')
+        self.get_stream('val_prec1')
         self.get_stream('lr')
         self.watcher.make_notebook()
         return True

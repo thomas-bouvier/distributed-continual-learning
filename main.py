@@ -91,6 +91,8 @@ parser.add_argument('--results-dir', metavar='RESULTS_DIR', default='./results',
                     help='results dir')
 parser.add_argument('--save-dir', metavar='SAVE_DIR', default='',
                     help='saved folder')
+parser.add_argument('--tensorboard', action='store_true', default=False,
+                    help='set tensorboard logging')
 parser.add_argument('--tensorwatch', action='store_true', default=False,
                     help='set tensorwatch logging')
 parser.add_argument('--tensorwatch-port', default=0, type=int,
@@ -111,8 +113,6 @@ def main():
         if yparam:
             params[k] = yparam
     args = Namespace(**params)
-
-    print(args)
 
     # Horovod: initialize library.
     hvd.init()
@@ -217,8 +217,11 @@ class Experiment():
         self.agent = agent(model, agent_config, optimizer,
                            self.criterion, self.args.cuda, self.args.log_interval)
         self.agent.epochs = self.args.epochs
+        if self.args.tensorboard:
+            self.agent.set_tensorboard_writer(save_path=self.save_path,
+                                              dummy=hvd.local_rank() > 0)
         if self.args.tensorwatch:
-            self.agent.set_watcher(filename=path.abspath(path.join(self.save_path, 'tensorwatch.log')),
+            self.agent.set_tensorwatch_watcher(filename=path.abspath(path.join(self.save_path, 'tensorwatch.log')),
                             port=self.args.tensorwatch_port, dummy=hvd.local_rank() > 0)
         logging.info("Created agent with configuration: %s", agent_config)
 
@@ -301,6 +304,7 @@ class Experiment():
                                  .format(i_epoch+1, train=train_results,
                                  validate=validate_results))
 
+                    """
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
                     values = dict(epoch=draw_epoch, steps=self.agent.training_steps)
                     values.update({'training ' + k: v for k, v in train_results.items()})
@@ -323,6 +327,7 @@ class Experiment():
                                 legend=['training', 'validation'],
                                 title='Error@5', ylabel='error %')
                     results.save()
+                    """
 
             self.agent.after_every_task()
 
