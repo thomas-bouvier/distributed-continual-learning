@@ -96,7 +96,6 @@ class ResultsLog(object):
         self.title = title
         self.data_format = data_format
 
-
     def add(self, **kwargs):
         """Add a new row to the dataframe
         example:
@@ -118,7 +117,6 @@ class ResultsLog(object):
         """
         f = plot_figure(self.results, *kargs, **kwargs)
         self.figures.append(f)
-
 
     def save(self, title=None):
         """save the json file.

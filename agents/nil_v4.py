@@ -181,12 +181,14 @@ class nil_v4_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(nil_v4_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
+        if state_dict is not None:
+            self.model.load_state_dict(state_dict)
+
         self.class_count = [0 for _ in range(model.num_classes)]
 
         self.memory_size = config.get('num_representatives') # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20) # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
-        self.epochs = config.get('epochs') # Maximum number of epochs
 
     def before_all_tasks(self, train_data_regime, validate_data_regime):
         self.x_dim = list(train_data_regime.tasksets[0][0][0].size())
@@ -212,11 +214,13 @@ class nil_v4_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime, validate_data_regime):
         # Create mask so the loss is only used for classes learnt during this task
+        torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
         mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
             mask[y] = True
         self.mask = move_cuda(mask.float(), self.cuda)
+        torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
@@ -237,15 +241,8 @@ class nil_v4_agent(Agent):
         parallel_batch_size = hvd.size() * self.batch_size
         data_size = len(data_regime.get_data())
         for i_batch in range(math.ceil(data_size / parallel_batch_size)):
+            torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             self.q.put(i_batch)
-
-            self.lock_made.acquire()
-            self.lock.acquire()
-            self.x.copy_(self.reps_x[0])
-            self.y.copy_(self.reps_y[0])
-            self.w.copy_(self.reps_w[0])
-            self.lock.release()
-            self.lock_make.release()
 
             output, loss = self._step(i_batch,
                             None,
@@ -285,6 +282,7 @@ class nil_v4_agent(Agent):
                     if training:
                         self.write_stream('lr',
                                          (self.training_steps, self.optimizer.get_lr()[0]))
+            torch.cuda.nvtx.range_pop()
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
@@ -304,19 +302,38 @@ class nil_v4_agent(Agent):
         #                                         target_batch.chunk(chunk_batch, dim=0))):
         #    inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
 
+        torch.cuda.nvtx.range_push(f"Wait for representatives")
+        self.lock_made.acquire()
+        torch.cuda.nvtx.range_pop()
+
+        torch.cuda.nvtx.range_push(f"Get representatives")
+        self.lock.acquire()
+        self.x.copy_(self.reps_x[0])
+        self.y.copy_(self.reps_y[0])
+        self.w.copy_(self.reps_w[0])
+        self.lock.release()
+        self.lock_make.release()
+        torch.cuda.nvtx.range_pop()
+
+        torch.cuda.nvtx.range_push("Forward pass")
         output = self.model(self.x)
         loss = self.criterion(output, self.y)
+        torch.cuda.nvtx.range_pop()
         dw = self.w / torch.sum(self.w)
 
         if training:
             # Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
             loss.backward(dw)
             # SGD step
+            torch.cuda.nvtx.range_push("Optimizer step")
             self.optimizer.step()
+            torch.cuda.nvtx.range_pop()
             self.training_steps += 1
 
         outputs.append(output.detach())
         total_loss += float(torch.mean(loss))
+
+        torch.cuda.nvtx.range_pop()
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss

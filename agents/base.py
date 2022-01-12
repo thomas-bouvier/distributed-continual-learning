@@ -40,6 +40,7 @@ class Agent():
                   for metric in ['loss', 'prec1', 'prec5']}
 
         for i_batch, item in enumerate(data_regime.get_loader()):
+            torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             inputs = item[0] # x
             target = item[1] # y
 
@@ -81,6 +82,7 @@ class Agent():
                     if training:
                         self.write_stream('lr',
                                          (self.training_steps, self.optimizer.get_lr()[0]))
+            torch.cuda.nvtx.range_pop()
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
@@ -99,20 +101,30 @@ class Agent():
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
-            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
+            torch.cuda.nvtx.range_push(f"Chunk {i}")
 
+            torch.cuda.nvtx.range_push("Copy to device")
+            inputs, target = move_cuda(inputs, self.cuda), move_cuda(target, self.cuda)
+            torch.cuda.nvtx.range_pop()
+
+            torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(inputs)
             loss = self.criterion(output, target)
+            torch.cuda.nvtx.range_pop()
 
             if training:
                 # accumulate gradient
                 loss.backward()
                 # SGD step
+                torch.cuda.nvtx.range_push("Optimizer step")
                 self.optimizer.step()
+                torch.cuda.nvtx.range_pop()
                 self.training_steps += 1
 
             outputs.append(output.detach())
             total_loss += float(loss)
+
+            torch.cuda.nvtx.range_pop()
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
@@ -137,8 +149,10 @@ class Agent():
 
     def before_every_task(self, task_id, train_data_regime, validate_data_regime):
         # Distribute the data
+        torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
         validate_data_regime.get_loader(True)
+        torch.cuda.nvtx.range_pop()
 
         if task_id > 0:
             if self.config.get('reset_state_dict', False):

@@ -2,6 +2,7 @@ import argparse
 import horovod.torch as hvd
 import json
 import logging
+import nvtx
 import os
 import pickle
 import time
@@ -136,6 +137,7 @@ def main():
 
     logging.info("Saving to %s", save_path)
     logging.info("Run arguments: %s", args)
+    logging.info('GPUs: %s', hvd.size())
 
     # TODO: check the number of workers
     # https://github.com/horovod/horovod/issues/2053
@@ -267,8 +269,8 @@ class Experiment():
         )
         logging.info("Created validate data regime: %s", repr(self.validate_data_regime))
 
+    @nvtx.annotate("run")
     def run(self):
-        logging.info('GPUs: %s', hvd.size())
         results_path = path.join(self.save_path, 'results')
         results = ResultsLog(results_path,
                         title='Training Results - %s' % self.args.save_dir)
@@ -277,7 +279,9 @@ class Experiment():
                                     self.validate_data_regime)
 
         for task_id in range(0, len(self.train_data_regime.tasksets) if self.train_data_regime.tasksets else 1):
+            torch.cuda.nvtx.range_push(f"Task {task_id}")
             logging.info('\nStarting task %s', task_id)
+
             self.train_data_regime.set_task_id(task_id)
             self.validate_data_regime.set_task_id(task_id)
 
@@ -285,6 +289,7 @@ class Experiment():
                                          self.validate_data_regime)
 
             for i_epoch in range(0, self.args.epochs):
+                torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
                 logging.info('Starting epoch: {0}'.format(i_epoch + 1))
                 self.agent.epoch = i_epoch
 
@@ -293,9 +298,13 @@ class Experiment():
                 self.validate_data_regime.set_epoch(i_epoch)
 
                 # train for one epoch
+                torch.cuda.nvtx.range_push("Train")
                 train_results = self.agent.train(self.train_data_regime)
+                torch.cuda.nvtx.range_pop()
                 # evaluate on validation set
+                torch.cuda.nvtx.range_push("Validate")
                 validate_results = self.agent.validate(self.validate_data_regime)
+                torch.cuda.nvtx.range_pop()
 
                 if hvd.rank() == 0:
                     logging.info('\nResults: epoch: {0}\n'
@@ -304,7 +313,6 @@ class Experiment():
                                  .format(i_epoch+1, train=train_results,
                                  validate=validate_results))
 
-                    """
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
                     values = dict(epoch=draw_epoch, steps=self.agent.training_steps)
                     values.update({'training ' + k: v for k, v in train_results.items()})
@@ -327,9 +335,10 @@ class Experiment():
                                 legend=['training', 'validation'],
                                 title='Error@5', ylabel='error %')
                     results.save()
-                    """
+                torch.cuda.nvtx.range_pop()
 
             self.agent.after_every_task()
+            torch.cuda.nvtx.range_pop()
 
         self.agent.after_all_tasks()
         return train_results

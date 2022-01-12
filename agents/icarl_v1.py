@@ -11,6 +11,7 @@ from utils.utils import move_cuda
 
 
 def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_batches):
+    torch.cuda.nvtx.range_push("Make candidates")
     for i in range(num_batches):
         lock_make.acquire()
 
@@ -21,6 +22,7 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
         cand_y += ny
 
         lock_made.release()
+    torch.cuda.nvtx.range_pop()
 
 
 class icarl_v1_agent(Agent):
@@ -49,15 +51,19 @@ class icarl_v1_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime, validate_data_regime):
         # Distribute the data
+        torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
         validate_data_regime.get_loader(True)
+        torch.cuda.nvtx.range_pop()
 
         # Create mask so the loss is only used for classes learnt during this task
+        torch.cuda.nvtx.range_push("Create mask")
         self.nc = set([data[1] for data in train_data_regime.get_data()])
         mask = torch.tensor([False for _ in range(self.model.num_classes)])
         for y in self.nc:
             mask[y] = True
         self.mask = move_cuda(mask.float(), self.cuda)
+        torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask)
 
@@ -67,7 +73,9 @@ class icarl_v1_agent(Agent):
             self.mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
 
     def after_every_task(self):
+        torch.cuda.nvtx.range_push("Update examplars")
         self.update_examplars(self.nc)
+        torch.cuda.nvtx.range_pop()
 
     """
     Forward pass for the current epoch
@@ -94,6 +102,7 @@ class icarl_v1_agent(Agent):
             self.p.start()
 
         for i_batch, item in enumerate(data_regime.get_loader()):
+            torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             inputs = item[0] # x
             target = item[1] # y
 
@@ -136,6 +145,7 @@ class icarl_v1_agent(Agent):
                     if training:
                         self.write_stream('lr',
                                          (self.training_steps, self.optimizer.get_lr()[0]))
+            torch.cuda.nvtx.range_pop()
 
         # Distillation
         if distill:
@@ -158,15 +168,21 @@ class icarl_v1_agent(Agent):
 
         for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                        target_batch.chunk(chunk_batch, dim=0))):
+            torch.cuda.nvtx.range_push(f"Chunk {i}")
+
+            torch.cuda.nvtx.range_push("Copy to device")
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            torch.cuda.nvtx.range_pop()
 
             if self.epoch+1 == self.epochs and training:
+                torch.cuda.nvtx.range_push("Store batch")
                 if self.buf_x is None:
                     self.buf_x = x.detach()
                     self.buf_y = y.detach()
                 else:
                     self.buf_x = torch.cat((self.buf_x, x.detach()))
                     self.buf_y = torch.cat((self.buf_y, y.detach()))
+                torch.cuda.nvtx.range_pop()
 
             # Distillation
             if distill:
@@ -175,22 +191,30 @@ class icarl_v1_agent(Agent):
                 dist_y = move_cuda(self.cand_y, self.cuda)
                 self.lock_make.release()
 
+            torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
             loss = self.criterion(output[:y.size(0)], y)
+            torch.cuda.nvtx.range_pop()
 
             # Compute distillation loss
             if distill:
+                torch.cuda.nvtx.range_push("Compute distillation loss")
                 loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+                torch.cuda.nvtx.range_pop()
 
             if training:
                 # accumulate gradient
                 loss.backward()
                 # SGD step
+                torch.cuda.nvtx.range_push("Optimizer step")
                 self.optimizer.step()
+                torch.cuda.nvtx.range_pop()
                 self.training_steps += 1
 
             outputs.append(output.detach())
             total_loss += float(loss)
+
+            torch.cuda.nvtx.range_pop()
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss

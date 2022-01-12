@@ -98,7 +98,7 @@ class nil_v1_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
         super(nil_v1_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
-        if state_dict != None:
+        if state_dict is not None:
             self.model.load_state_dict(state_dict)
 
         self.class_count = [0 for _ in range(model.num_classes)]
@@ -106,7 +106,6 @@ class nil_v1_agent(Agent):
         self.memory_size = config.get('num_representatives', 6000)   # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
-        self.epochs = config.get('epochs') # Maximum number of epochs
 
         self.val_set = None
 
@@ -133,15 +132,19 @@ class nil_v1_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime, validate_data_regime):
         # Distribute the data
+        torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
         validate_data_regime.get_loader(True)
+        torch.cuda.nvtx.range_pop()
 
         # Add the new classes to the mask
+        torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
         mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
             mask[y] = True
         self.mask = move_cuda(mask.float(), self.cuda)
+        torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
@@ -153,6 +156,7 @@ class nil_v1_agent(Agent):
                   for metric in ['loss', 'prec1', 'prec5']}
 
         for i_batch, item in enumerate(data_regime.get_loader()):
+            torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             inputs = item[0] # x
             target = item[1] # y
 
@@ -194,6 +198,7 @@ class nil_v1_agent(Agent):
                     if training:
                         self.write_stream('lr',
                                          (self.training_steps, self.optimizer.get_lr()[0]))
+            torch.cuda.nvtx.range_pop()
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
@@ -212,8 +217,13 @@ class nil_v1_agent(Agent):
 
         for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                        target_batch.chunk(chunk_batch, dim=0))):
-            self.lock_made.acquire() # wait for representatives update
+            torch.cuda.nvtx.range_push(f"Chunk {i}")
 
+            torch.cuda.nvtx.range_push(f"Wait for representatives")
+            self.lock_made.acquire() # wait for representatives update
+            torch.cuda.nvtx.range_pop()
+
+            torch.cuda.nvtx.range_push(f"Get representatives")
             self.lock.acquire()
             rep_values = self.reps_x.clone()
             rep_labels = self.reps_y.clone()
@@ -223,37 +233,50 @@ class nil_v1_agent(Agent):
                 n_reps = 0
             else:
                 n_reps = len(self.reps_x)
-            # select next samples to become representatives
-            rand_indices = torch.from_numpy(np.random.permutation(min(self.num_candidates, len(x))))
+            torch.cuda.nvtx.range_pop()
 
+            # select next samples to become representatives
+            torch.cuda.nvtx.range_push(f"Update representatives")
+            rand_indices = torch.from_numpy(np.random.permutation(min(self.num_candidates, len(x))))
             reps_x = x[rand_indices].clone().share_memory_()  # The data is ordered according to the indices
             reps_y = y[rand_indices].clone().share_memory_()
             self.q_new_batch.put((reps_x, reps_y))
             self.lock_make.release()
+            torch.cuda.nvtx.range_pop()
 
             # Create batch weights
             w = torch.ones(len(x))
+            torch.cuda.nvtx.range_push("Copy to device")
             x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
+            torch.cuda.nvtx.range_pop()
 
             if n_reps > 0:
                 # Concatenates the training samples with the representatives
+                torch.cuda.nvtx.range_push("Combine batches")
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
+                torch.cuda.nvtx.range_pop()
 
+            torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
             loss = self.criterion(output, y)
+            torch.cuda.nvtx.range_pop()
             dw = w / torch.sum(w)
 
             if training:
                 # Faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
+                torch.cuda.nvtx.range_push("Optimizer step")
                 self.optimizer.step()
+                torch.cuda.nvtx.range_pop()
                 self.training_steps += 1
 
             outputs.append(output.detach())
             total_loss += float(torch.mean(loss))
+
+            torch.cuda.nvtx.range_pop()
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
