@@ -21,8 +21,7 @@ from argparse import Namespace
 from cross_entropy import CrossEntropyLoss
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
-from utils.log import ResultsLog
-from utils.logging import setup_logging
+from utils.log import setup_logging, ResultsLog
 from utils.yaml_params import YParams
 
 from torchsummary import summary
