@@ -14,7 +14,7 @@ from agents.nil_v3 import nil_v3_agent
 from agents.nil_v4 import nil_v4_agent
 from utils.cl import Representative
 from utils.utils import move_cuda
-from meters import AverageMeter, accuracy
+from utils.meters import AverageMeter, accuracy
 
 class nil_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):

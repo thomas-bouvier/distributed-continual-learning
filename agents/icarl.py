@@ -8,8 +8,8 @@ import torch.optim as optim
 
 from agents.base import Agent
 from agents.icarl_v1 import icarl_v1_agent
-from meters import AverageMeter, accuracy
 from utils.utils import move_cuda
+from utils.meters import AverageMeter, accuracy
 
 class icarl_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):

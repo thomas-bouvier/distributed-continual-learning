@@ -6,8 +6,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 from agents.base import Agent
-from meters import AverageMeter, accuracy
 from utils.utils import move_cuda
+from utils.meters import AverageMeter, accuracy
 
 
 def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_batches):

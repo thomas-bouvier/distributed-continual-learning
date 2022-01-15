@@ -11,7 +11,7 @@ import torch.optim as optim
 from agents.base import Agent
 from utils.cl import Representative
 from utils.utils import move_cuda
-from meters import AverageMeter, accuracy
+from utils.meters import AverageMeter, accuracy
 
 
 def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_candidates, nb_representatives, batch_size, cuda, rank):

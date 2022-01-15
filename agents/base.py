@@ -3,8 +3,8 @@ import logging
 import tensorwatch
 import torch
 
-from meters import AverageMeter, accuracy
 from torch.utils.tensorboard import SummaryWriter
+from utils.meters import AverageMeter, accuracy
 from utils.utils import move_cuda
 
 class Agent():
