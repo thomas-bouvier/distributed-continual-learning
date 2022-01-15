@@ -66,6 +66,8 @@ parser.add_argument('--batches-per-allreduce', type=int, default=1,
                     help='number of batches processed locally before '
                          'executing allreduce across workers; it multiplies '
                          'total batch size.')
+parser.add_argument('--dataloader-workers', type=int, default=0,
+                    help='number of dataloaders workers to spawn')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
@@ -139,9 +141,8 @@ def main():
     logging.info("Run arguments: %s", args)
     logging.info('GPUs: %s', hvd.size())
 
-    # TODO: check the number of workers
     # https://github.com/horovod/horovod/issues/2053
-    kwargs = {'num_workers': 0, 'pin_memory': True} if args.cuda else {}
+    kwargs = {'num_workers': args.dataloader_workers, 'pin_memory': True} if args.cuda else {}
     # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
     # issues with Infiniband implementations that are not fork-safe
     if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and

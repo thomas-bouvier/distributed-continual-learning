@@ -10,6 +10,7 @@ base:
   batch_size:
   eval_batch_size:
   batches_per_allreduce:
+  dataloader_workers:
   epochs:
   lr:
   momentum:
