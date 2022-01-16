@@ -118,6 +118,7 @@ def main():
 
     # Horovod: initialize library.
     hvd.init()
+    args.gpus = hvd.size()
     torch.manual_seed(args.seed)
 
     if args.cuda:
@@ -138,7 +139,9 @@ def main():
 
     logging.info("Saving to %s", save_path)
     logging.info("Run arguments: %s", args)
-    logging.info('GPUs: %s', hvd.size())
+
+    with open('args.json', 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
 
     # https://github.com/horovod/horovod/issues/2053
     kwargs = {'num_workers': args.dataloader_workers, 'pin_memory': True} if args.cuda else {}
