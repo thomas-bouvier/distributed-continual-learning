@@ -157,6 +157,6 @@ class ResultsLog(object):
             self.clear()
 
         if self.data_format == 'json':
-            self.results.to_json(self.data_path, orient='records', lines=True)
+            self.results.to_json(self.data_path, orient='records')
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
