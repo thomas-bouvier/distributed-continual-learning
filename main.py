@@ -140,7 +140,7 @@ def main():
     logging.info("Saving to %s", save_path)
     logging.info("Run arguments: %s", args)
 
-    with open('args.json', 'w') as f:
+    with open(path.join(save_path, 'args.json'), 'w') as f:
         json.dump(args.__dict__, f, indent=2)
 
     # https://github.com/horovod/horovod/issues/2053
