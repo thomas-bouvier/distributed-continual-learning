@@ -317,7 +317,7 @@ class Experiment():
                                  validate=validate_results))
 
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
-                    values = dict(epoch=draw_epoch, steps=self.agent.training_steps)
+                    values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
                     values.update({'training ' + k: v for k, v in train_results.items()})
                     values.update({'validation ' + k: v for k, v in validate_results.items()})
 
