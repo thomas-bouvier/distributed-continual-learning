@@ -1,6 +1,7 @@
 import copy
 import logging
 import tensorwatch
+import time
 import torch
 
 from torch.utils.tensorboard import SummaryWriter
@@ -38,6 +39,8 @@ class Agent():
     def loop(self, data_regime, average_output=False, training=False):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
+        start = time.time()
+        step_count = 0
 
         for i_batch, item in enumerate(data_regime.get_loader()):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
@@ -84,9 +87,14 @@ class Agent():
                                          (self.training_steps, self.optimizer.get_lr()[0]))
             torch.cuda.nvtx.range_pop()
 
+            step_count += 1
+        end = time.time()
+
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
         meters['error5'] = 100. - meters['prec5']
+        meters['time'] = end - start
+        meters['step_count'] = step_count
 
         return meters
 

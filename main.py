@@ -2,6 +2,7 @@ import argparse
 import horovod.torch as hvd
 import json
 import logging
+import numpy as np
 import nvtx
 import os
 import pickle
@@ -277,6 +278,7 @@ class Experiment():
         results_path = path.join(self.save_path, 'results')
         results = ResultsLog(results_path,
                         title='Training Results - %s' % self.args.save_dir)
+        img_secs = []
 
         self.agent.before_all_tasks(self.train_data_regime,
                                     self.validate_data_regime)
@@ -310,11 +312,16 @@ class Experiment():
                 torch.cuda.nvtx.range_pop()
 
                 if hvd.rank() == 0:
-                    logging.info('\nResults: epoch: {0}\n'
-                                 'Training Loss {train[loss]:.4f} \t\n'
-                                 'Validation Loss {validate[loss]:.4f} \t\n'
-                                 .format(i_epoch+1, train=train_results,
-                                 validate=validate_results))
+                    img_sec = train_results['step_count'] * self.args.batch_size / train_results['time']
+                    img_secs.append(img_sec)
+                    logging.info('\nRESULTS: Time taken for epoch {} on {} device(s) is {} sec\n'
+                                 'Average: {} samples/sec per device\n'
+                                 'Average on {} device(s): {} samples/sec\n'
+                                 'Training loss: {train[loss]:.4f}\n'
+                                 'Validation loss: {validate[loss]:.4f}\n'
+                                 .format(i_epoch+1, hvd.size(), train_results['time'],
+                                 img_sec, hvd.size(), img_sec * hvd.size(),
+                                 train=train_results, validate=validate_results))
 
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
                     values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
@@ -342,6 +349,13 @@ class Experiment():
 
             self.agent.after_every_task()
             torch.cuda.nvtx.range_pop()
+
+        img_sec_mean = np.mean(img_secs)
+        img_sec_conf = 1.96 * np.std(img_secs)
+        logging.info('FINAL RESULTS:')
+        logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
+        logging.info('Average on %d device(s): %.1f +-%.1f' %
+            (hvd.size(), hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
 
         self.agent.after_all_tasks()
         return train_results

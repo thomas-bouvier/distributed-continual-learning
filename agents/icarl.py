@@ -1,6 +1,7 @@
 import horovod.torch as hvd
 import numpy as np
 import logging
+import time
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
@@ -70,6 +71,8 @@ class icarl_agent(Agent):
         meters = {metric: AverageMeter()
                   for metric in ['loss', 'prec1', 'prec5']}
         distill = self.mem_class_x != {} and training
+        start = time.time()
+        step_count = 0
 
         # Distillation, increment taskset
         set_x, set_y = None, None
@@ -125,10 +128,14 @@ class icarl_agent(Agent):
                         self.write_stream('lr',
                                          (self.training_steps, self.optimizer.get_lr()[0]))
             torch.cuda.nvtx.range_pop()
+            step_count += 1
+        end = time.time()
 
         meters = {name: meter.avg for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
         meters['error5'] = 100. - meters['prec5']
+        meters['time'] = end - start
+        meters['step_count'] = step_count
 
         return meters
 
