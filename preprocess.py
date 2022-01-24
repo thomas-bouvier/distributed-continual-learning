@@ -1,27 +1,38 @@
 from torchvision import datasets, transforms
 
-def get_transform(transform_name='mnist'):
+_IMAGENET_NORMALIZE_STATS = {'mean': [0.485, 0.456, 0.406],
+                             'std': [0.229, 0.224, 0.225]}
+
+def scale_crop(input_size, scale_size=None, normalize=_IMAGENET_NORMALIZE_STATS):
+    convert_tensor = transforms.Compose([transforms.ToTensor(),
+                                         transforms.Normalize(**normalize)])
+    t_list = [
+        transforms.CenterCrop(input_size),
+        convert_tensor
+    ]
+    if scale_size != input_size:
+        t_list = [transforms.Resize(scale_size)] + t_list
+
+    return transforms.Compose(t_list)
+
+def get_transform(transform_name='imagenet', input_size=None, scale_size=None,
+                  normalize=None):
+    normalize = normalize or _IMAGENET_NORMALIZE_STATS
     if transform_name == 'mnist':
-        return transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
-        ])
+        normalize = {'mean': [0.5], 'std': [0.5]}
+        input_size = input_size or 28
+        scale_size = scale_size or 32
+        return scale_crop(input_size=input_size, scale_size=scale_size,
+                          normalize=normalize)
 
-    elif transform_name == 'cifar10':
-        return transforms.Compose([
-            transforms.ToTensor()
-        ])
-
-    elif transform_name == 'cifar100':
-        return transforms.Compose([
-            transforms.ToTensor()
-        ])
-
-    elif transform_name == 'tinyimagenet' or transform_name == 'imagenet' or transform_name == 'imagenet_blurred':
-        return transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                std=[0.229, 0.224, 0.225])
-        ])
+    elif 'cifar10' in transform_name:
+        input_size = input_size or 32
+        scale_size = scale_size or 32
+        return scale_crop(input_size=input_size, scale_size=scale_size,
+                          normalize=normalize)
+    
+    elif 'imagenet' in transform_name:
+        input_size = input_size or 224
+        scale_size = scale_size or int(input_size * 8 / 7)
+        return scale_crop(input_size=input_size, scale_size=scale_size,
+                          normalize=normalize)

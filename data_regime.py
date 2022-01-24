@@ -97,12 +97,14 @@ class DataRegime(object):
             self.tasksets = ClassIncremental(
                 get_dataset(**self.config['data']),
                 initial_increment = ii,
-                increment = i
+                increment = i,
+                transformations=[self.config['data']['transform']]
             )
         else:
             self.tasksets = InstanceIncremental(
                 get_dataset(**self.config['data']),
-                nb_tasks = continual_config.get('num_tasks')
+                nb_tasks = continual_config.get('num_tasks'),
+                transformations=[self.config['data']['transform']]
             )
 
     def set_epoch(self, epoch):
