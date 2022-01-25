@@ -327,6 +327,8 @@ class Experiment():
                     values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
                     values.update({'training ' + k: v for k, v in train_results.items()})
                     values.update({'validation ' + k: v for k, v in validate_results.items()})
+                    values.update({'training img_sec': img_sec})
+                    values.update({'training total_img_sec': img_sec * hvd.size()})
 
                     results.add(**values)
                     results.plot(x='epoch', y=['training loss', 'validation loss'],
