@@ -275,16 +275,24 @@ class Experiment():
 
     @nvtx.annotate("run")
     def run(self):
-        results_path = path.join(self.save_path, 'results')
-        results = ResultsLog(results_path,
-                        title='Training Results - %s' % self.args.save_dir)
+        dl_metrics_path = path.join(self.save_path, 'dl_metrics')
+        dl_metrics = ResultsLog(dl_metrics_path,
+                                title='DL metrics - %s' % self.args.save_dir)
+        tasks_metrics_path = path.join(self.save_path, 'tasks_metrics')
+        tasks_metrics = ResultsLog(tasks_metrics_path,
+                                   title='Tasks metrics - %s' % self.args.save_dir)
+        time_metrics_path = path.join(self.save_path, 'time_metrics')
+        time_metrics = ResultsLog(time_metrics_path,
+                                  title='Time metrics - %s' % self.args.save_dir)
         img_secs = []
 
+        total_start = time.time()
         self.agent.before_all_tasks(self.train_data_regime,
                                     self.validate_data_regime)
 
         for task_id in range(0, len(self.train_data_regime.tasksets) if self.train_data_regime.tasksets else 1):
             torch.cuda.nvtx.range_push(f"Task {task_id}")
+            start = time.time()
             logging.info('\nStarting task %s', task_id)
 
             self.train_data_regime.set_task_id(task_id)
@@ -329,37 +337,57 @@ class Experiment():
                     values.update({'validation ' + k: v for k, v in validate_results.items()})
                     values.update({'training img_sec': img_sec})
                     values.update({'training total_img_sec': img_sec * hvd.size()})
-
-                    results.add(**values)
-                    results.plot(x='epoch', y=['training loss', 'validation loss'],
-                            legend=['training', 'validation'],
-                            title='Loss', ylabel='loss')
-                    results.plot(x='epoch', y=['training prec1', 'validation prec1'],
-                            legend=['training', 'validation'],
-                            title='Prec@1', ylabel='prec %')
-                    results.plot(x='epoch', y=['training prec5', 'validation prec5'],
-                            legend=['training', 'validation'],
-                            title='Prec@5', ylabel='prec %')
-                    results.plot(x='epoch', y=['training error1', 'validation error1'],
-                                legend=['training', 'validation'],
-                                title='Error@1', ylabel='error %')
-                    results.plot(x='epoch', y=['training error5', 'validation error5'],
-                                legend=['training', 'validation'],
-                                title='Error@5', ylabel='error %')
-                    results.save()
+                    dl_metrics.add(**values)
+                    """
+                    dl_metrics.plot(x='epoch', y=['training loss', 'validation loss'],
+                                    legend=['training', 'validation'],
+                                    title='Loss', ylabel='loss')
+                    dl_metrics.plot(x='epoch', y=['training prec1', 'validation prec1'],
+                                    legend=['training', 'validation'],
+                                    title='Prec@1', ylabel='prec %')
+                    dl_metrics.plot(x='epoch', y=['training prec5', 'validation prec5'],
+                                    legend=['training', 'validation'],
+                                    title='Prec@5', ylabel='prec %')
+                    dl_metrics.plot(x='epoch', y=['training error1', 'validation error1'],
+                                    legend=['training', 'validation'],
+                                    title='Error@1', ylabel='error %')
+                    dl_metrics.plot(x='epoch', y=['training error5', 'validation error5'],
+                                    legend=['training', 'validation'],
+                                    title='Error@5', ylabel='error %')
+                    """
+                    dl_metrics.save()
                 torch.cuda.nvtx.range_pop()
+
+            end = time.time()
+            values = {
+                'task_id': task_id+1,
+                'time': end-start
+            }
+            tasks_metrics.add(**values)
+            tasks_metrics.save()
 
             self.agent.after_every_task()
             torch.cuda.nvtx.range_pop()
 
+        self.agent.after_all_tasks()
+        total_end = time.time()
+
         img_sec_mean = np.mean(img_secs)
         img_sec_conf = 1.96 * np.std(img_secs)
         logging.info('FINAL RESULTS:')
+        logging.info(f"Total time: {total_end - total_start}")
         logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
         logging.info('Average on %d device(s): %.1f +-%.1f' %
             (hvd.size(), hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
+        
+        values = {
+            'total_time': total_end-total_start,
+            'training img_sec': img_sec_mean,
+            'training total_img_sec': img_sec_mean * hvd.size()
+        }
+        time_metrics.add(**values)
+        time_metrics.save()
 
-        self.agent.after_all_tasks()
         return train_results
 
 
