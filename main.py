@@ -235,12 +235,12 @@ class Experiment():
         tasksets_config = {'continual': bool(self.args.tasksets_config)}
         if self.args.tasksets_config != '':
             tasksets_config = dict(tasksets_config, **literal_eval(self.args.tasksets_config))
-        
+
         defaults={
             'dataset': self.args.dataset,
             'dataset_dir': self.args.dataset_dir,
-            'shuffle': True,
             'distributed': True,
+            'pin_memory': True,
             'shard': self.args.shard,
             'continual': tasksets_config.get('continual'),
             'scenario': tasksets_config.get('scenario', 'class'),
@@ -379,7 +379,7 @@ class Experiment():
         logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
         logging.info('Average on %d device(s): %.1f +-%.1f' %
             (hvd.size(), hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
-        
+
         values = {
             'total_time': total_end-total_start,
             'training img_sec': img_sec_mean,
