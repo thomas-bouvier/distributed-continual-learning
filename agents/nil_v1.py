@@ -281,7 +281,7 @@ class nil_v1_agent(Agent):
                 self.training_steps += 1
 
             outputs.append(output.detach())
-            total_loss += float(torch.mean(loss))
+            total_loss += torch.mean(loss)
 
             torch.cuda.nvtx.range_pop()
 

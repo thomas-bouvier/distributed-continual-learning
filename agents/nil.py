@@ -257,7 +257,7 @@ class nil_agent(Agent):
                 self.__clear_buffer_size()
 
             outputs.append(output.detach())
-            total_loss += float(torch.mean(loss))
+            total_loss += torch.mean(loss)
 
             torch.cuda.nvtx.range_pop()
 

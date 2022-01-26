@@ -209,7 +209,7 @@ class icarl_agent(Agent):
                 self.training_steps += 1
 
             outputs.append(output.detach())
-            total_loss += float(loss)
+            total_loss += loss
 
             torch.cuda.nvtx.range_pop()
 
