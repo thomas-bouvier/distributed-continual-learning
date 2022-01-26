@@ -333,8 +333,8 @@ class Experiment():
 
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
                     values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
-                    values.update({'training ' + k: v for k, v in train_results.items()})
-                    values.update({'validation ' + k: v for k, v in validate_results.items()})
+                    values.update({'train_' + k: v for k, v in train_results.items()})
+                    values.update({'val_' + k: v for k, v in validate_results.items()})
                     values.update({'training img_sec': img_sec})
                     values.update({'training total_img_sec': img_sec * hvd.size()})
                     dl_metrics.add(**values)

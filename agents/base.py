@@ -37,7 +37,8 @@ class Agent():
     Forward pass for the current epoch
     """
     def loop(self, data_regime, average_output=False, training=False):
-        meters = {metric: AverageMeter()
+        prefix='train' if training else 'val'
+        meters = {metric: AverageMeter(f"{prefix}_{metric}")
                   for metric in ['loss', 'prec1', 'prec5']}
         start = time.time()
         step_count = 0
@@ -55,9 +56,9 @@ class Agent():
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, target, topk=(1, min(self.model.num_classes, 5)))
-            meters['loss'].update(float(loss), inputs.size(0))
-            meters['prec1'].update(float(prec1), inputs.size(0))
-            meters['prec5'].update(float(prec5), inputs.size(0))
+            meters['loss'].update(loss, inputs.size(0))
+            meters['prec1'].update(prec1, inputs.size(0))
+            meters['prec5'].update(prec5, inputs.size(0))
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
                 logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
@@ -69,7 +70,6 @@ class Agent():
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
 
-                prefix='train' if training else 'val'
                 if self.writer is not None:
                     self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
                     self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
@@ -90,7 +90,7 @@ class Agent():
             step_count += 1
         end = time.time()
 
-        meters = {name: meter.avg for name, meter in meters.items()}
+        meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
         meters['error5'] = 100. - meters['prec5']
         meters['time'] = end - start
@@ -130,7 +130,7 @@ class Agent():
                 self.training_steps += 1
 
             outputs.append(output.detach())
-            total_loss += float(loss)
+            total_loss += loss
 
             torch.cuda.nvtx.range_pop()
 

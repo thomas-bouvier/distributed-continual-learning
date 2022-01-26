@@ -1,26 +1,26 @@
+import horovod.torch as hvd
 import torch
 
-# TODO: use an Allreduce operation to compute the sum
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
-    def __init__(self):
+    def __init__(self, name):
+        self.name = name
         self.reset()
 
     def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
+        self.val = torch.tensor(0.)
+        self.avg = torch.tensor(0.)
+        self.sum = torch.tensor(0.)
+        self.count = torch.tensor(0.)
 
     def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
+        self.val = hvd.allreduce(val.detach().cpu(), name=self.name)
+        self.sum += self.val * n
         self.count += n
         self.avg = self.sum / self.count
 
 
-# TODO: check this function
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""
     maxk = max(topk)

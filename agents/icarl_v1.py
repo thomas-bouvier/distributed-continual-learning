@@ -82,7 +82,8 @@ class icarl_v1_agent(Agent):
     Forward pass for the current epoch
     """
     def loop(self, data_regime, average_output=False, training=False):
-        meters = {metric: AverageMeter()
+        prefix='train' if training else 'val'
+        meters = {metric: AverageMeter(f"{prefix}_{metric}")
                   for metric in ['loss', 'prec1', 'prec5']}
         distill = self.mem_class_x != {} and training
         start = time.time()
@@ -118,9 +119,9 @@ class icarl_v1_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[:target.size(0)], target, topk=(1, 5))
-            meters['loss'].update(float(loss), inputs.size(0))
-            meters['prec1'].update(float(prec1), inputs.size(0))
-            meters['prec5'].update(float(prec5), inputs.size(0))
+            meters['loss'].update(loss, inputs.size(0))
+            meters['prec1'].update(prec1, inputs.size(0))
+            meters['prec5'].update(prec5, inputs.size(0))
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
                 logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
@@ -132,7 +133,6 @@ class icarl_v1_agent(Agent):
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
 
-                prefix='train' if training else 'val'
                 if self.writer is not None:
                     self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
                     self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
@@ -156,7 +156,7 @@ class icarl_v1_agent(Agent):
             self.p.join()
         end = time.time()
 
-        meters = {name: meter.avg for name, meter in meters.items()}
+        meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters['error1'] = 100. - meters['prec1']
         meters['error5'] = 100. - meters['prec5']
         meters['time'] = end - start
