@@ -141,8 +141,9 @@ def main():
     logging.info("Saving to %s", save_path)
     logging.info("Run arguments: %s", args)
 
-    with open(path.join(save_path, 'args.json'), 'w') as f:
-        json.dump(args.__dict__, f, indent=2)
+    if hvd.rank() == 0:
+        with open(path.join(save_path, 'args.json'), 'w') as f:
+            json.dump(args.__dict__, f, indent=2)
 
     # https://github.com/horovod/horovod/issues/2053
     kwargs = {'num_workers': args.dataloader_workers, 'pin_memory': True} if args.cuda else {}
