@@ -67,46 +67,48 @@ class DataRegime(object):
         return self.loader
 
     def get_taskset(self):
-        if self.config['data'].get('continual', False):
-            if self.tasksets is None:
-                self.prepare_tasksets()
+        if self.tasksets is None:
+            self.prepare_tasksets()
 
-            current_taskset = self.tasksets[self.task_id]
-            if self.config['continual'].get('concatenate_tasksets', False):
-                if self.concat_taskset is None:
-                    self.concat_taskset = current_taskset
-                else:
-                    logging.info('Concatenating taskset with all previous ones..')
-                    x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
-                    nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
-                    x = np.concatenate((x, nx))
-                    y = np.concatenate((y, ny))
-                    t = np.concatenate((t, nt))
-                    self.concat_taskset = TaskSet(x, y, t, trsf=current_taskset.trsf, data_type=current_taskset.data_type)
-                return self.concat_taskset
+        current_taskset = self.tasksets[self.task_id]
+        if self.config['continual'].get('concatenate_tasksets', False):
+            if self.concat_taskset is None:
+                self.concat_taskset = current_taskset
+            else:
+                logging.info('Concatenating taskset with all previous ones..')
+                x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
+                nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
+                x = np.concatenate((x, nx))
+                y = np.concatenate((y, ny))
+                t = np.concatenate((t, nt))
+                self.concat_taskset = TaskSet(x, y, t, trsf=current_taskset.trsf, data_type=current_taskset.data_type)
+            return self.concat_taskset
 
-            return current_taskset
-
-        return get_dataset(**self.config['data'])
+        return current_taskset
 
     def prepare_tasksets(self):
-        continual_config = self.config['continual']
-        if continual_config.get('scenario') == 'class':
-            ii = continual_config.get('initial_increment')
-            i = continual_config.get('increment')
+        if self.config['data'].get('continual', False):
+            continual_config = self.config['continual']
+            if continual_config.get('scenario') == 'class':
+                ii = continual_config.get('initial_increment')
+                i = continual_config.get('increment')
 
-            self.tasksets = ClassIncremental(
-                get_dataset(**self.config['data']),
-                initial_increment = ii,
-                increment = i,
-                transformations=[self.config['data']['transform']]
-            )
+                self.tasksets = ClassIncremental(
+                    get_dataset(**self.config['data']),
+                    initial_increment = ii,
+                    increment = i,
+                    transformations=[self.config['data']['transform']]
+                )
+            else:
+                self.tasksets = InstanceIncremental(
+                    get_dataset(**self.config['data']),
+                    nb_tasks = continual_config.get('num_tasks'),
+                    transformations=[self.config['data']['transform']]
+                )
         else:
-            self.tasksets = InstanceIncremental(
-                get_dataset(**self.config['data']),
-                nb_tasks = continual_config.get('num_tasks'),
-                transformations=[self.config['data']['transform']]
-            )
+            self.tasksets = [get_dataset(**self.config['data']).to_taskset(
+                trsf=[self.config['data']['transform']]
+            )]
 
     def set_epoch(self, epoch):
         logging.debug("DATA REGIME - set epoch: %s", epoch+1)

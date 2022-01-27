@@ -3,12 +3,11 @@ import os
 import pandas as pd
 import torch
 
-from continuum import datasets as datasets_c
+from continuum import datasets
 from continuum.datasets.base import _ContinuumDataset
 from continuum.tasks import TaskType
 from filelock import FileLock
 from sklearn.preprocessing import MaxAbsScaler
-from torchvision import datasets
 from torchvision.datasets.vision import VisionDataset
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -18,84 +17,38 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
     root = os.path.expanduser(dataset_dir)
 
     if dataset == 'mnist':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.MNIST(data_path=root,
-                                train=train,
-                                download=False)
-        else:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.MNIST(root=root,
-                                train=train,
-                                transform=transform,
-                                download=False)
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.MNIST(data_path=root,
+                            train=train,
+                            download=False)
 
     elif dataset == 'cifar10':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.CIFAR10(data_path=os.path.join(root, 'CIFAR10'),
-                                train=train,
-                                download=False)
-        else:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.CIFAR10(root=os.path.join(root, 'CIFAR10'),
-                                        train=train,
-                                        transform=transform,
-                                        download=False)
+        root = os.path.join(root, 'CIFAR10')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.CIFAR10(data_path=root, train=train,
+                            download=False)
 
     elif dataset == 'cifar100':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.CIFAR100(data_path=os.path.join(root, 'CIFAR100'),
-                                train=train,
-                                download=False)
-        else:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.CIFAR100(root=os.path.join(root, 'CIFAR100'),
-                                        train=train,
-                                        transform=transform,
-                                        download=False)
+        root = os.path.join(root, 'CIFAR100')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.CIFAR100(data_path=root, train=train,
+                            download=False)
 
     elif dataset == 'tinyimagenet':
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.TinyImageNet200(data_path=os.path.join(root, 'TinyImageNet'),
-                                train=train,
-                                download=False)
-        else:
-            root = os.path.join(root, 'TinyImageNet')
-            if train:
-                root = os.path.join(root, 'tiny-imagenet-200/train')
-            else:
-                root = os.path.join(root, 'tiny-imagenet-200/val')
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.ImageFolder(root=root,
-                                            transform=transform)
+        root = os.path.join(root, 'TinyImageNet')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.TinyImageNet200(data_path=root, train=train,
+                            download=False)
 
     elif dataset == 'imagenet':
         root = os.path.join(root, 'ImageNet')
-        if train:
-            root = os.path.join(root, 'train')
-        else:
-            root = os.path.join(root, 'val')
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.ImageFolder(root=root,
-                                        transform=transform)
+            return datasets.ImageNet1000(root=root, train=train)
 
     elif dataset == 'imagenet_blurred':
         root = os.path.join(root, 'ImageNet_blurred')
-        if continual:
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets_c.ImageNet1000(data_path=root,
-                                               train=train)
-        else:
-            if train:
-                root = os.path.join(root, 'train')
-            else:
-                root = os.path.join(root, 'val')
-            with FileLock(os.path.expanduser("~/.horovod_lock")):
-                return datasets.ImageFolder(root=root,
-                                            transform=transform,)
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.ImageNet1000(data_path=root, train=train)
 
     elif dataset == 'candle':
         root = os.path.join(root, 'CANDLE')

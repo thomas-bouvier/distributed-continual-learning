@@ -291,7 +291,7 @@ class Experiment():
         self.agent.before_all_tasks(self.train_data_regime,
                                     self.validate_data_regime)
 
-        for task_id in range(0, len(self.train_data_regime.tasksets) if self.train_data_regime.tasksets else 1):
+        for task_id in range(0, len(self.train_data_regime.tasksets)):
             torch.cuda.nvtx.range_push(f"Task {task_id}")
             start = time.time()
             logging.info('\nStarting task %s', task_id)

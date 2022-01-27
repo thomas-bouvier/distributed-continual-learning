@@ -31,6 +31,7 @@ python main.py --model candlenet --dataset candle
 python main.py --model mnistnet --dataset mnist
 python main.py --model resnet --dataset cifar10
 python main.py --model resnet --model-config "{'depth': 50}" --dataset cifar100
+python main.py --model resnet --model-config "{'depth': 101}" --dataset tinyimagenet
 ```
 
 ### Continual learning
