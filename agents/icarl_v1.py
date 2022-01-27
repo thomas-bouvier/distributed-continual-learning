@@ -105,23 +105,18 @@ class icarl_v1_agent(Agent):
                                       len(data_regime.get_loader())))
             self.p.start()
 
-        for i_batch, item in enumerate(data_regime.get_loader()):
+        for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
-            inputs = item[0] # x
-            target = item[1] # y
 
-            output, loss = self._step(i_batch,
-                                      inputs,
-                                      target,
-                                      training=training,
+            output, loss = self._step(i_batch, x, y, training=training,
                                       distill=distill,
                                       average_output=average_output)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output[:target.size(0)], target, topk=(1, 5))
-            meters['loss'].update(loss, inputs.size(0))
-            meters['prec1'].update(prec1, inputs.size(0))
-            meters['prec5'].update(prec5, inputs.size(0))
+            prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, 5))
+            meters['loss'].update(loss, x.size(0))
+            meters['prec1'].update(prec1, x.size(0))
+            meters['prec5'].update(prec5, x.size(0))
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
                 logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
@@ -143,7 +138,7 @@ class icarl_v1_agent(Agent):
                     self.observe(trainer=self,
                                 model=self.model,
                                 optimizer=self.optimizer,
-                                data=(inputs, target))
+                                data=(x, y))
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream('lr',

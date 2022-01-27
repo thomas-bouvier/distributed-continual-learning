@@ -248,11 +248,8 @@ class nil_v4_agent(Agent):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             self.q.put(i_batch)
 
-            output, loss = self._step(i_batch,
-                            None,
-                            None,
-                            training=training,
-                            average_output=average_output)
+            output, loss = self._step(i_batch, None, None, training=training,
+                                      average_output=average_output)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, self.y, topk=(1, min(self.model.num_classes, 5)))
@@ -280,7 +277,7 @@ class nil_v4_agent(Agent):
                     self.observe(trainer=self,
                                 model=self.model,
                                 optimizer=self.optimizer,
-                                data=(inputs, target))
+                                data=(self.x, self.y))
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream('lr',

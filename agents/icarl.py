@@ -82,25 +82,19 @@ class icarl_agent(Agent):
             set_x, set_y = self.increment_taskset(len(data_regime.get_loader()), self.mem_x, self.mem_y)
             torch.cuda.nvtx.range_pop()
 
-        for i_batch, item in enumerate(data_regime.get_loader()):
+        for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
-            inputs = item[0] # x
-            target = item[1] # y
 
-            output, loss = self._step(i_batch,
-                                      inputs,
-                                      target,
-                                      set_x,
-                                      set_y,
+            output, loss = self._step(i_batch, x, y, set_x, set_y,
                                       training=training,
                                       distill=distill,
                                       average_output=average_output)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output[:target.size(0)], target, topk=(1, 5))
-            meters['loss'].update(loss, inputs.size(0))
-            meters['prec1'].update(prec1, inputs.size(0))
-            meters['prec5'].update(prec5, inputs.size(0))
+            prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, 5))
+            meters['loss'].update(loss, x.size(0))
+            meters['prec1'].update(prec1, x.size(0))
+            meters['prec5'].update(prec5, x.size(0))
 
             if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
                 logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
@@ -122,7 +116,7 @@ class icarl_agent(Agent):
                     self.observe(trainer=self,
                                 model=self.model,
                                 optimizer=self.optimizer,
-                                data=(inputs, target))
+                                data=(x, y))
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream('lr',
@@ -139,17 +133,17 @@ class icarl_agent(Agent):
 
         return meters
 
-    def increment_taskset(self, nb_batches, mem_x, mem_y):
+    def increment_taskset(self, num_batches, mem_x, mem_y):
         if self.mem_class_x == {}:
             return None, None
 
-        nb_mem = mem_x.size(0)
-        perm = np.random.permutation(nb_mem)
-        while len(perm) < self.num_candidates * nb_batches:
-            perm = np.concatenate([perm, np.random.permutation(nb_mem)])
+        num_mem = mem_x.size(0)
+        perm = np.random.permutation(num_mem)
+        while len(perm) < self.num_candidates * num_batches:
+            perm = np.concatenate([perm, np.random.permutation(num_mem)])
 
         perms = []
-        for i in range(nb_batches):
+        for i in range(num_batches):
             perms.append(perm[:self.num_candidates])
             perm = perm[self.num_candidates:] 
 
