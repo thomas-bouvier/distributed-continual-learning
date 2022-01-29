@@ -107,7 +107,7 @@ class nil_v3_agent(Agent):
 
         self.val_set = None
 
-    def before_all_tasks(self, train_data_regime, validate_data_regime):
+    def before_all_tasks(self, train_data_regime):
         self.x_dim = list(train_data_regime.tasksets[0][0][0].size())
 
         self.reps_x = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size] + self.x_dim), self.cuda).share_memory_()
@@ -130,11 +130,10 @@ class nil_v3_agent(Agent):
         self.q_new_batch.close()
         self.p.join()
 
-    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+    def before_every_task(self, task_id, train_data_regime):
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
-        validate_data_regime.get_loader(True)
         torch.cuda.nvtx.range_pop()
 
         # Add the new classes to the mask

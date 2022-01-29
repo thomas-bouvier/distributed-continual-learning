@@ -36,11 +36,10 @@ class icarl_agent(Agent):
         self.lsm = nn.LogSoftmax(dim=1)
         self.sm = nn.Softmax(dim=1)
 
-    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+    def before_every_task(self, task_id, train_data_regime):
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
-        validate_data_regime.get_loader(True)
         torch.cuda.nvtx.range_pop()
 
         # Create mask so the loss is only used for classes learnt during this task

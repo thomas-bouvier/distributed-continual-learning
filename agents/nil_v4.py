@@ -39,10 +39,7 @@ def memory_manager(train_data_regime, validate_data_regime, q, lock, lock_make,
             # Horovod: set epoch to sampler for shuffling
             train_data_regime.set_epoch(i_epoch)
 
-            for i_batch, item in enumerate(train_data_regime.get_loader()):
-                x = item[0] # x
-                y = item[1] # y
-
+            for i_batch, (x, y, t) in enumerate(train_data_regime.get_loader()):
                 samples = torch.randperm(min(num_candidates, len(x)))
                 inputs_batch = x[samples]
                 target_batch = y[samples]
@@ -109,10 +106,7 @@ def memory_manager(train_data_regime, validate_data_regime, q, lock, lock_make,
                 # Horovod: set epoch to sampler for shuffling
                 validate_data_regime.set_epoch(i_epoch)
 
-                for i_batch, item in enumerate(validate_data_regime.get_loader()):
-                    x = item[0] # x
-                    y = item[1] # y
-
+                for i_batch, (x, y, t) in enumerate(validate_data_regime.get_loader()):
                     samples = torch.randperm(min(num_candidates, len(x)))
                     inputs_batch = x[samples]
                     target_batch = y[samples]
@@ -213,7 +207,7 @@ class nil_v4_agent(Agent):
         self.p.join()
         self.q.close()
 
-    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+    def before_every_task(self, task_id, train_data_regime):
         # Create mask so the loss is only used for classes learnt during this task
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])

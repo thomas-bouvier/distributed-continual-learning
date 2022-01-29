@@ -144,17 +144,16 @@ class Agent():
         with torch.no_grad():
             return self.loop(data_regime, average_output=average_output, training=False)
 
-    def before_all_tasks(self, train_data_regime, validate_data_regime):
+    def before_all_tasks(self, train_data_regime):
         pass
 
     def after_all_tasks(self):
         pass
 
-    def before_every_task(self, task_id, train_data_regime, validate_data_regime):
+    def before_every_task(self, task_id, train_data_regime):
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
-        validate_data_regime.get_loader(True)
         torch.cuda.nvtx.range_pop()
 
         if task_id > 0:

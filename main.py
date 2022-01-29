@@ -1,4 +1,5 @@
 import argparse
+import copy
 import horovod.torch as hvd
 import json
 import logging
@@ -252,8 +253,7 @@ class Experiment():
         }
 
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
-        self.train_data_regime = DataRegime(
-            hvd,
+        self.train_data_regime = DataRegime(hvd,
             getattr(self.agent, 'data_regime', None),
             defaults={
                 **defaults,
@@ -263,8 +263,7 @@ class Experiment():
         )
         logging.info("Created train data regime: %s", repr(self.train_data_regime))
 
-        self.validate_data_regime = DataRegime(
-            hvd,
+        self.test_data_regime = DataRegime(hvd,
             getattr(self.agent, 'data_eval_regime', None),
             defaults={
                 **defaults,
@@ -272,7 +271,7 @@ class Experiment():
                 'batch_size': self.args.eval_batch_size if self.args.eval_batch_size > 0 else self.args.batch_size
             }
         )
-        logging.info("Created validate data regime: %s", repr(self.validate_data_regime))
+        logging.info("Created test data regime: %s", repr(self.test_data_regime))
 
     @nvtx.annotate("run")
     def run(self):
@@ -288,19 +287,20 @@ class Experiment():
         img_secs = []
 
         total_start = time.time()
-        self.agent.before_all_tasks(self.train_data_regime,
-                                    self.validate_data_regime)
+        self.agent.before_all_tasks(self.train_data_regime)
 
         for task_id in range(0, len(self.train_data_regime.tasksets)):
             torch.cuda.nvtx.range_push(f"Task {task_id}")
             start = time.time()
             logging.info('\nStarting task %s', task_id)
 
-            self.train_data_regime.set_task_id(task_id)
-            self.validate_data_regime.set_task_id(task_id)
+            task_metrics = {
+                'task_id': task_id+1,
+                'test_task_metrics': []
+            }
 
-            self.agent.before_every_task(task_id, self.train_data_regime,
-                                         self.validate_data_regime)
+            self.train_data_regime.set_task_id(task_id)
+            self.agent.before_every_task(task_id, self.train_data_regime)
 
             for i_epoch in range(0, self.args.epochs):
                 torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
@@ -309,36 +309,49 @@ class Experiment():
 
                 # Horovod: set epoch to sampler for shuffling
                 self.train_data_regime.set_epoch(i_epoch)
-                self.validate_data_regime.set_epoch(i_epoch)
 
                 # train for one epoch
                 torch.cuda.nvtx.range_push("Train")
                 train_results = self.agent.train(self.train_data_regime)
                 torch.cuda.nvtx.range_pop()
-                # evaluate on validation set
-                torch.cuda.nvtx.range_push("Validate")
-                validate_results = self.agent.validate(self.validate_data_regime)
+
+                # evaluate on test set
+                torch.cuda.nvtx.range_push("Test")
+                for test_task_id in range(0, task_id+1):
+                    self.test_data_regime.set_task_id(test_task_id)
+                    self.test_data_regime.get_loader(True)
+                    self.test_data_regime.set_epoch(i_epoch)
+
+                    validate_results = self.agent.validate(self.test_data_regime)
+
+                    if hvd.rank() == 0:
+                        logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
+                                        .format(validate=validate_results))
+
+                        task_metrics_values = dict(test_task_id=test_task_id+1, epoch=i_epoch)
+                        task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
+                        task_metrics['test_task_metrics'].append(task_metrics_values)
+                torch.cuda.nvtx.range_pop()
+                
                 torch.cuda.nvtx.range_pop()
 
                 if hvd.rank() == 0:
                     img_sec = train_results['step_count'] * self.args.batch_size / train_results['time']
                     img_secs.append(img_sec)
                     logging.info('\nRESULTS: Time taken for epoch {} on {} device(s) is {} sec\n'
-                                 'Average: {} samples/sec per device\n'
-                                 'Average on {} device(s): {} samples/sec\n'
-                                 'Training loss: {train[loss]:.4f}\n'
-                                 'Validation loss: {validate[loss]:.4f}\n'
-                                 .format(i_epoch+1, hvd.size(), train_results['time'],
-                                 img_sec, hvd.size(), img_sec * hvd.size(),
-                                 train=train_results, validate=validate_results))
+                                    'Average: {} samples/sec per device\n'
+                                    'Average on {} device(s): {} samples/sec\n'
+                                    'Training loss: {train[loss]:.4f}\n'
+                                    .format(i_epoch+1, hvd.size(), train_results['time'],
+                                    img_sec, hvd.size(), img_sec * hvd.size(),
+                                    train=train_results))
 
                     draw_epoch = i_epoch + 1 + task_id * self.args.epochs
-                    values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
-                    values.update({'train_' + k: v for k, v in train_results.items()})
-                    values.update({'val_' + k: v for k, v in validate_results.items()})
-                    values.update({'training img_sec': img_sec})
-                    values.update({'training total_img_sec': img_sec * hvd.size()})
-                    dl_metrics.add(**values)
+                    dl_metrics_values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
+                    dl_metrics_values.update({'train_' + k: v for k, v in train_results.items()})
+                    dl_metrics_values.update({'train_img_sec': img_sec})
+                    dl_metrics_values.update({'train_total_img_sec': img_sec * hvd.size()})
+                    dl_metrics.add(**dl_metrics_values)
                     """
                     dl_metrics.plot(x='epoch', y=['training loss', 'validation loss'],
                                     legend=['training', 'validation'],
@@ -357,14 +370,10 @@ class Experiment():
                                     title='Error@5', ylabel='error %')
                     """
                     dl_metrics.save()
-                torch.cuda.nvtx.range_pop()
 
             end = time.time()
-            values = {
-                'task_id': task_id+1,
-                'time': end-start
-            }
-            tasks_metrics.add(**values)
+            task_metrics.update({'time': end-start})
+            tasks_metrics.add(**task_metrics)
             tasks_metrics.save()
 
             self.agent.after_every_task()
@@ -375,7 +384,7 @@ class Experiment():
 
         img_sec_mean = np.mean(img_secs)
         img_sec_conf = 1.96 * np.std(img_secs)
-        logging.info('FINAL RESULTS:')
+        logging.info('\nFINAL RESULTS:')
         logging.info(f"Total time: {total_end - total_start}")
         logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
         logging.info('Average on %d device(s): %.1f +-%.1f' %

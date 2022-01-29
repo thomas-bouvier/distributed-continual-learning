@@ -34,6 +34,7 @@ class DataRegime(object):
         self.steps = None
         self.tasksets = None
         self.concat_taskset = None
+        self.continual_test_taskset =[]
         self.sampler = None
         self.loader = None
         self.config = self.get_config()
@@ -71,19 +72,25 @@ class DataRegime(object):
             self.prepare_tasksets()
 
         current_taskset = self.tasksets[self.task_id]
-        if self.config['continual'].get('concatenate_tasksets', False):
-            if self.concat_taskset is None:
-                self.concat_taskset = current_taskset
-            else:
-                logging.info('Concatenating taskset with all previous ones..')
-                x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
-                nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
-                x = np.concatenate((x, nx))
-                y = np.concatenate((y, ny))
-                t = np.concatenate((t, nt))
-                self.concat_taskset = TaskSet(x, y, t, trsf=current_taskset.trsf, data_type=current_taskset.data_type)
-            return self.concat_taskset
-
+        if self.config['data'].get('split') == 'train':
+            if self.config['continual'].get('concatenate_tasksets', False):
+                if self.concat_taskset is None:
+                    self.concat_taskset = current_taskset
+                else:
+                    logging.info('Concatenating taskset with all previous ones..')
+                    x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
+                    nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
+                    x = np.concatenate((x, nx))
+                    y = np.concatenate((y, ny))
+                    t = np.concatenate((t, nt))
+                    self.concat_taskset = TaskSet(x, y, t, trsf=current_taskset.trsf, data_type=current_taskset.data_type)
+                return self.concat_taskset
+        """
+        else:
+            if self.config['continual'].get('scenario', 'class'):
+                self.continual_test_taskset.append(current_taskset)
+                return self.continual_test_taskset
+        """
         return current_taskset
 
     def prepare_tasksets(self):
@@ -117,7 +124,7 @@ class DataRegime(object):
             self.sampler.set_epoch(epoch)
 
     def set_task_id(self, task_id):
-        logging.debug("DATA REGIME - set task id: %s", task_id)
+        logging.debug("DATA REGIME - set task id: %s", task_id+1)
         self.task_id = task_id
         self.get_data(True)
 
