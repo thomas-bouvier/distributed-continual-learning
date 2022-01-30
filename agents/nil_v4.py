@@ -208,6 +208,10 @@ class nil_v4_agent(Agent):
         self.q.close()
 
     def before_every_task(self, task_id, train_data_regime):
+        if self.best_model is not None:
+            logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
+            self.model.load_state_dict(self.best_model)
+
         # Create mask so the loss is only used for classes learnt during this task
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
