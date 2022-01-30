@@ -159,7 +159,7 @@ class Agent():
         torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
-            print("load best model")
+            logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
 
         if task_id > 0:

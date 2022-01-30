@@ -335,10 +335,9 @@ class Experiment():
                 self.train_data_regime.set_epoch(i_epoch)
 
                 # train for one epoch
-                if task_id == 0:
-                    torch.cuda.nvtx.range_push("Train")
-                    train_results = self.agent.train(self.train_data_regime)
-                    torch.cuda.nvtx.range_pop()
+                torch.cuda.nvtx.range_push("Train")
+                train_results = self.agent.train(self.train_data_regime)
+                torch.cuda.nvtx.range_pop()
 
                 # evaluate on test set
                 meters = {metric: AverageMeter(f"task_{metric}")
@@ -364,7 +363,6 @@ class Experiment():
                 torch.cuda.nvtx.range_pop()
 
                 if meters['loss'].avg < self.agent.minimal_eval_loss:
-                    print(meters['loss'].avg)
                     self.agent.minimal_eval_loss = meters['loss'].avg
                     self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
                 

@@ -45,14 +45,14 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
             optim_method = _OPTIMIZERS[config.get('optimizer', 'SGD')]
             if not isinstance(self.optimizer, optim_method):
                 self.optimizer = optim_method(self.optimizer.param_groups)
-                logging.info('OPTIMIZER REGIME - setting method = %s' %
+                logging.debug('OPTIMIZER REGIME - setting method = %s' %
                                   config['optimizer'])
         for param_group in self.optimizer.param_groups:
             for key in param_group.keys():
                 if key in config:
                     new_val = config[key]
                     if new_val != param_group[key]:
-                        logging.info(f"OPTIMIZER REGIME - updating {key} = {new_val}")
+                        logging.debug(f"OPTIMIZER REGIME - updating {key} = {new_val}")
                         param_group[key] = config[key]
 
     def zero_grad(self):
@@ -90,7 +90,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         self.optimizer.load_state_dict(state_dict)
 
     def reset(self, parameters):
-        logging.info("OPTIMIZER REGIME - resetting state..")
+        logging.debug("OPTIMIZER REGIME - resetting state..")
         self.optimizer.load_state_dict(torch.optim.SGD(parameters, lr=0).state_dict())
         self.config = self.defaults
         self.current_regime_phase = None

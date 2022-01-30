@@ -45,7 +45,7 @@ class DataRegime(object):
             self._transform = get_transform(**self.config['transform'])
             self.config['data'].setdefault('transform', self._transform)
             self._data = self.get_taskset()
-            logging.info("Updated data")
+            logging.debug(f"DATA REGIME {self.config['data']['split']} - taskset updated")
 
         return self._data
 
@@ -63,7 +63,7 @@ class DataRegime(object):
             self.sampler = self.config['loader'].get('sampler', None)
 
             self.loader = DataLoader(self._data, **self.config['loader'])
-            logging.info("Distributed data")
+            logging.debug(f"DATA REGIME {self.config['data']['split']} - distributed")
 
         return self.loader
 
@@ -118,13 +118,13 @@ class DataRegime(object):
             )]
 
     def set_epoch(self, epoch):
-        logging.debug("DATA REGIME - set epoch: %s", epoch+1)
+        logging.debug(f"DATA REGIME {self.config['data']['split']} - set epoch: {epoch+1}")
         self.epoch = epoch
         if self.sampler is not None and hasattr(self.sampler, 'set_epoch'):
             self.sampler.set_epoch(epoch)
 
     def set_task_id(self, task_id):
-        logging.debug("DATA REGIME - set task id: %s", task_id+1)
+        logging.debug(f"DATA REGIME {self.config['data']['split']} - set task id: {task_id+1}")
         self.task_id = task_id
         self.get_data(True)
 
