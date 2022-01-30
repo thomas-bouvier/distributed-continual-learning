@@ -15,7 +15,8 @@ class AverageMeter(object):
         self.count = torch.tensor(0.)
 
     def update(self, val, n=1):
-        self.val = hvd.allreduce(val.detach().cpu(), name=self.name)
+        val = val.detach().cpu() if isinstance(val, torch.Tensor) else torch.tensor(val)
+        self.val = hvd.allreduce(val, name=self.name)
         self.sum += self.val * n
         self.count += n
         self.avg = self.sum / self.count

@@ -20,6 +20,8 @@ class Agent():
         self.log_interval = log_interval
         self.epoch = 0
         self.training_steps = 0
+        self.minimal_eval_loss = float('inf')
+        self.best_model = None
         self.writer = None
         self.watcher = None
         self.streams = {}
@@ -29,9 +31,9 @@ class Agent():
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
-            self.model_snapshot = copy.deepcopy(state_dict)
+            self.initial_snapshot = copy.deepcopy(state_dict)
         else:
-            self.model_snapshot = copy.deepcopy(self.model.state_dict())
+            self.initial_snapshot = copy.deepcopy(self.model.state_dict())
 
     """
     Forward pass for the current epoch
@@ -156,10 +158,14 @@ class Agent():
         train_data_regime.get_loader(True)
         torch.cuda.nvtx.range_pop()
 
+        if self.best_model is not None:
+            print("load best model")
+            self.model.load_state_dict(self.best_model)
+
         if task_id > 0:
             if self.config.get('reset_state_dict', False):
-                self.model.load_state_dict(copy.deepcopy(self.model_snapshot))
-            self.optimizer.reset()
+                self.model.load_state_dict(copy.deepcopy(self.initial_snapshot))
+            self.optimizer.reset(self.model.parameters())
 
     def after_every_task(self):
         pass

@@ -89,9 +89,9 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         # deepcopy, to be consistent with module API
         self.optimizer.load_state_dict(state_dict)
 
-    def reset(self):
+    def reset(self, parameters):
         logging.info("OPTIMIZER REGIME - resetting state..")
-        self.optimizer.load_state_dict(torch.optim.SGD(self.parameters, lr=0).state_dict())
+        self.optimizer.load_state_dict(torch.optim.SGD(parameters, lr=0).state_dict())
         self.config = self.defaults
         self.current_regime_phase = None
 
