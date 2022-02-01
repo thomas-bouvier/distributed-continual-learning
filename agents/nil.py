@@ -33,9 +33,10 @@ class nil_agent(Agent):
         self.batch_size = config.get('batch_size')
         self.epochs = config.get('epochs') # Maximum number of epochs
 
-        self.val_set = None
+        mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
+        self.mask = move_cuda(mask.float(), self.cuda)
 
-    def __get_representatives(self):
+    def get_representatives(self):
         """
         Selects or retrieves the representatives from the data
 
@@ -48,7 +49,7 @@ class nil_agent(Agent):
         else:
             return []
 
-    def __random_buffer(self, image_batch, target_batch, outputs):
+    def random_buffer(self, image_batch, target_batch, outputs):
         """
         Creates a bufferbased in random sampling
 
@@ -65,7 +66,7 @@ class nil_agent(Agent):
         for i in range(min(self.num_candidates, len(image_batch))):
             self.buffer_sizeed_reps.append(Representative(image_batch[i], target_batch[i]))
 
-    def __random_modify_representatives(self, candidate_representatives):
+    def random_modify_representatives(self, candidate_representatives):
         """
             Modifies the representatives list according to the new data by selecting representatives randomly from the
             buffer_size and the current list of representatives
@@ -84,16 +85,16 @@ class nil_agent(Agent):
             self.representatives[i] = self.representatives[i][:self.memory_size]
 
         if self.memory_size > 0:
-            self.__recalculate_weights(self.representatives)
+            self.recalculate_weights(self.representatives)
 
-    def __clear_buffer_size(self):
+    def clear_buffer_size(self):
         """
         Clears the buffer_size
         :return: None
         """
         self.buffer_sizeed_reps = []
 
-    def __recalculate_weights(self, representatives):
+    def recalculate_weights(self, representatives):
         """
         Reassigns the weights of the representatives
         :param representatives: a list of representatives
@@ -126,10 +127,8 @@ class nil_agent(Agent):
         # Add the new classes to the mask
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
-        mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
-            mask[y] = True
-        self.mask = move_cuda(mask.float(), self.cuda)
+            self.mask[y] = True
         torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
@@ -206,9 +205,10 @@ class nil_agent(Agent):
                                        target_batch.chunk(chunk_batch, dim=0))):
             torch.cuda.nvtx.range_push(f"Chunk {i}")
 
-            # Gets the representatives
-            reps = self.__get_representatives()
-            n_reps = len(reps)
+            if training:
+                # Gets the representatives
+                reps = self.get_representatives()
+                n_reps = len(reps)
 
             # Create batch weights
             w = torch.ones(len(x))
@@ -216,7 +216,7 @@ class nil_agent(Agent):
             x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
             torch.cuda.nvtx.range_pop()
 
-            if n_reps > 0:
+            if training and n_reps > 0:
                 torch.cuda.nvtx.range_push("Combine batches")
                 rep_weights = torch.as_tensor([rep.weight for rep in reps])
                 rep_weights = move_cuda(rep_weights, self.cuda)
@@ -231,12 +231,15 @@ class nil_agent(Agent):
 
             torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
-            loss = self.criterion(output, y)
+            if training:
+                loss = self.criterion(output, y)
+            else:
+                loss = nn.CrossEntropyLoss()(output, y)
             torch.cuda.nvtx.range_pop()
-            total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
-            dw = w / total_weight
 
             if training:
+                total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
+                dw = w / total_weight
                 # Faster to provide the derivative of L wrt {l}^n than letting pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
@@ -245,14 +248,13 @@ class nil_agent(Agent):
                 torch.cuda.nvtx.range_pop()
                 self.training_steps += 1
 
-            # Modifies the list of representatives
-            if n_reps == 0:
-                self.__random_buffer(x, y, output)
-            else:
-                self.__random_buffer(x[:-n_reps], y[:-n_reps], output[:-n_reps])
-            if True:#total_it % self.buffer_size == 0:
-                self.__random_modify_representatives(self.buffer_sizeed_reps)
-                self.__clear_buffer_size()
+                # Modifies the list of representatives
+                if n_reps == 0:
+                    self.random_buffer(x, y, output)
+                else:
+                    self.random_buffer(x  [:-n_reps], y[:-n_reps], output[:-n_reps])
+                self.random_modify_representatives(self.buffer_sizeed_reps)
+                self.clear_buffer_size()
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss)

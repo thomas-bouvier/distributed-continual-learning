@@ -255,7 +255,7 @@ class nil_v1_agent(Agent):
             x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
             torch.cuda.nvtx.range_pop()
 
-            if n_reps > 0:
+            if training and n_reps > 0:
                 # Concatenates the training samples with the representatives
                 torch.cuda.nvtx.range_push("Combine batches")
                 w = torch.cat((w, rep_weights))
@@ -267,9 +267,9 @@ class nil_v1_agent(Agent):
             output = self.model(x)
             loss = self.criterion(output, y)
             torch.cuda.nvtx.range_pop()
-            dw = w / torch.sum(w)
 
             if training:
+                dw = w / torch.sum(w)
                 # Faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
