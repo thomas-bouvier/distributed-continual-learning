@@ -293,7 +293,7 @@ class Experiment():
         for task_id in range(0, len(self.train_data_regime.tasksets)):
             torch.cuda.nvtx.range_push(f"Task {task_id}")
             start = time.time()
-            logging.info('\nStarting task %s', task_id)
+            logging.info('\n==============================\nStarting task %s', task_id+1)
 
             task_metrics = {
                 'task_id': task_id+1,
@@ -328,7 +328,7 @@ class Experiment():
 
             for i_epoch in range(0, self.args.epochs):
                 torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
-                logging.info('Starting epoch: {0}'.format(i_epoch + 1))
+                logging.info(f"Starting task {task_id+1}, epoch: {i_epoch+1}")
                 self.agent.epoch = i_epoch
 
                 # Horovod: set epoch to sampler for shuffling
@@ -363,6 +363,7 @@ class Experiment():
                 torch.cuda.nvtx.range_pop()
 
                 if meters['loss'].avg < self.agent.minimal_eval_loss:
+                    logging.debug(f"Saving best model with minimal eval loss ({meters['loss'].avg})..")
                     self.agent.minimal_eval_loss = meters['loss'].avg
                     self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
                 
