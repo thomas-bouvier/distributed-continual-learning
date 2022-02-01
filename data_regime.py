@@ -45,7 +45,7 @@ class DataRegime(object):
             self._transform = get_transform(**self.config['transform'])
             self.config['data'].setdefault('transform', self._transform)
             self._data = self.get_taskset()
-            logging.debug(f"DATA REGIME {self.config['data']['split']} - taskset updated")
+            logging.debug(f"DATA REGIME {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(self._data)}")
 
         return self._data
 
@@ -77,7 +77,7 @@ class DataRegime(object):
                 if self.concat_taskset is None:
                     self.concat_taskset = current_taskset
                 else:
-                    logging.info('Concatenating taskset with all previous ones..')
+                    logging.debug(f"DATA REGIME {self.config['data']['split']} - concatenating taskset with all previous ones..")
                     x, y, t = self.concat_taskset.get_raw_samples(np.arange(len(self.concat_taskset)))
                     nx, ny, nt = current_taskset.get_raw_samples(np.arange(len(current_taskset)))
                     x = np.concatenate((x, nx))
