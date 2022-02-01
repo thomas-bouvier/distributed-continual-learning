@@ -92,6 +92,8 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
     def reset(self, parameters):
         logging.debug("OPTIMIZER REGIME - resetting state..")
         self.optimizer.load_state_dict(torch.optim.SGD(parameters, lr=0).state_dict())
+        # Horovod: broadcast optimizer state.
+        hvd.broadcast_optimizer_state(self.optimizer, root_rank=0)
         self.config = self.defaults
         self.current_regime_phase = None
 
