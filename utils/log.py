@@ -2,6 +2,8 @@ import json
 import os
 import logging
 import pandas as pd
+import shutil
+import torch
 
 from bokeh.io import output_file, save, show
 from bokeh.plotting import figure
@@ -160,3 +162,14 @@ class ResultsLog(object):
             self.results.to_json(self.data_path, orient='records')
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
+
+def save_checkpoint(state, filename='checkpoint.pth.tar', is_initial=False, is_best=False, save_all=False, path='.'):
+    filename = os.path.join(path, filename)
+    torch.save(state, filename)
+    if is_initial:
+        shutil.copyfile(filename, os.path.join(path, 'checkpoint_initial.pth.tar'))
+    if is_best:
+        shutil.copyfile(filename, os.path.join(path, 'checkpoint_best.pth.tar'))
+    if save_all:
+        shutil.copyfile(filename, os.path.join(
+            path, f"checkpoint_task_{state['task']}_epoch_{state['epoch']}.pth.tar"))

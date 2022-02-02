@@ -179,7 +179,7 @@ class resnet_model(nn.Module):
 class resnet_cifar_model(resnet_model):
     def __init__(self, num_classes=10, in_channels=16,
                  block=BasicBlock, residual_block=None, layers=[2, 2, 2],
-                 groups=[1, 1, 1] , regime='normal', dropout=None):
+                 groups=[1, 1, 1] , regime='normal', dropout=None, **kwargs):
         super(resnet_cifar_model, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
@@ -255,8 +255,8 @@ class resnet_imagenet_model(resnet_model):
 
 
 def resnet(config):
-    dataset = config.pop('dataset')
-    depth = config.pop('depth', 50)
+    dataset = config.get('dataset')
+    depth = config.get('depth', 50)
     if depth == 18:
         config.update(dict(block=BasicBlock, in_channels=20))
     elif depth == 34:

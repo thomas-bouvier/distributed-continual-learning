@@ -23,7 +23,7 @@ from argparse import Namespace
 from cross_entropy import CrossEntropyLoss
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
-from utils.log import setup_logging, ResultsLog
+from utils.log import save_checkpoint, setup_logging, ResultsLog
 from utils.meters import AverageMeter
 from utils.yaml_params import YParams
 
@@ -60,6 +60,8 @@ parser.add_argument('--model', metavar='MODEL', default='mnistnet',
                     help='model architecture: ' + ' | '.join(model_names))
 parser.add_argument('--model-config', default='',
                     help='additional model architecture configuration')
+parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
+                    help='path to latest checkpoint (default: none)')
 parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--eval-batch-size', type=int, default=-1, metavar='N',
@@ -170,21 +172,12 @@ class Experiment():
         self._prepare_dataset()
 
     def _create_agent(self):
-        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base
-        model = models.__dict__[self.args.model]
-
+        model_name = models.__dict__[self.args.model]
         model_config = {
             'dataset': self.args.dataset
         }
         if self.args.model_config != '':
             model_config = dict(model_config, **literal_eval(self.args.model_config))
-
-        agent_config = {
-            'model': self.args.model,
-            'batch_size': self.args.batch_size
-        }
-        if self.args.agent_config != '':
-            agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
 
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
@@ -195,26 +188,41 @@ class Experiment():
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
-        model = model(model_config)
-        logging.info("Created model with configuration: %s", model_config)
+        model = model_name(model_config)
+        if self.args.checkpoint:
+            if not path.isfile(self.args.checkpoint):
+                parser.error(f"Invalid checkpoint: {self.args.checkpoint}")
+            checkpoint = torch.load(self.args.checkpoint, map_location="cpu")
+            # Overrride configuration with checkpoint info
+            model_name = checkpoint.get('model', model_name)
+            model_config = checkpoint.get('config', model_config)
+            # Load checkpoint
+            logging.info(f"Loading model {self.args.checkpoint}..")
+            model.load_state_dict(checkpoint['state_dict'])
+        save_checkpoint({
+            'task': 0,
+            'epoch': 0,
+            'model': model_name,
+            'model_config': model_config,
+            'state_dict': model.state_dict()
+        }, is_initial=True, path=self.save_path)
+        logging.info(f"Created model {model_name} with configuration: {model_config}")
         # Horovod: broadcast parameters.
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
         num_parameters = sum([l.nelement() for l in model.parameters()])
         logging.info(f"Number of parameters: {num_parameters}")
 
         # Horovod: scale learning rate by lr_scaler.
-        optim_regime = getattr(model, 'regime', [
-            {
-                'epoch': 0,
-                'optimizer': self.args.optimizer,
-                'lr': self.args.lr * lr_scaler,
-                'momentum': self.args.momentum,
-                'weight_decay': self.args.weight_decay
-            }
-        ])
-        logging.info("Optim regime: %s", optim_regime)
+        optim_regime = getattr(model, 'regime', [{
+            'epoch': 0,
+            'optimizer': self.args.optimizer,
+            'lr': self.args.lr * lr_scaler,
+            'momentum': self.args.momentum,
+            'weight_decay': self.args.weight_decay
+        }])
+        logging.info("Optimizer regime: %s", optim_regime)
 
-        # Distributed training parameters.
+        # Distributed training parameters
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
         optimizer = OptimizerRegime(model, compression, reduction,
@@ -225,16 +233,24 @@ class Experiment():
         loss_params = {}
         self.criterion = getattr(model, 'criterion', CrossEntropyLoss)(**loss_params)
 
+        agent = agents.__dict__[self.args.agent] if self.args.agent is not None else agents.base
+        agent_config = {
+            'model': self.args.model,
+            'batch_size': self.args.batch_size
+        }
+        if self.args.agent_config != '':
+            agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
         self.agent = agent(model, agent_config, optimizer,
                            self.criterion, self.args.cuda, self.args.log_interval)
         self.agent.epochs = self.args.epochs
+        logging.info(f"Created agent with configuration: {agent_config}")
+
         if self.args.tensorboard:
             self.agent.set_tensorboard_writer(save_path=self.save_path,
                                               dummy=hvd.local_rank() > 0)
         if self.args.tensorwatch:
             self.agent.set_tensorwatch_watcher(filename=path.abspath(path.join(self.save_path, 'tensorwatch.log')),
                             port=self.args.tensorwatch_port, dummy=hvd.local_rank() > 0)
-        logging.info("Created agent with configuration: %s", agent_config)
 
     def _prepare_dataset(self):
         tasksets_config = {'continual': bool(self.args.tasksets_config)}
