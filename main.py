@@ -199,6 +199,8 @@ class Experiment():
         logging.info("Created model with configuration: %s", model_config)
         # Horovod: broadcast parameters.
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        num_parameters = sum([l.nelement() for l in model.parameters()])
+        logging.info(f"Number of parameters: {num_parameters}")
 
         # Horovod: scale learning rate by lr_scaler.
         optim_regime = getattr(model, 'regime', [
