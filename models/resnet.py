@@ -219,7 +219,7 @@ class resnet_cifar_model(resnet_model):
 class resnet_imagenet_model(resnet_model):
     def __init__(self, num_classes=1000, in_channels=64,
                  block=Bottleneck, residual_block=None, layers=[3, 4, 23, 3],
-                 expansion=4, groups=[1, 1, 1, 1], regime='normal', scale_lr=1):
+                 expansion=4, groups=[1, 1, 1, 1], regime='normal', lr=1):
         super(resnet_imagenet_model, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
@@ -240,17 +240,17 @@ class resnet_imagenet_model(resnet_model):
         self.fc = nn.Linear(width[-1] * expansion, num_classes)
 
         init_model(self)
-        self.regime = [
-            {
+        self.regime = [{
                 'epoch': 0,
                 'optimizer': 'SGD',
-                'lr': scale_lr * 1e-1,
+                'lr': lr * 1e-1,
                 'momentum': 0.9,
                 'regularizer': weight_decay_config(1e-4)
             },
-            {'epoch': 30, 'lr': scale_lr * 1e-2},
-            {'epoch': 60, 'lr': scale_lr * 1e-3},
-            {'epoch': 80, 'lr': scale_lr * 1e-4}
+            {'epoch': 5, 'lr': lr * 1.},
+            {'epoch': 30, 'lr': lr * 1e-1},
+            {'epoch': 60, 'lr': lr * 1e-2},
+            {'epoch': 80, 'lr': lr * 1e-3}
         ]
 
 

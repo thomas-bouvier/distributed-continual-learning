@@ -75,7 +75,7 @@ parser.add_argument('--dataloader-workers', type=int, default=0,
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
-                    help='learning rate (default: 0.01)')
+                    help='learning rate for a single GPU (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
                     help='SGD momentum (default: 0.5)')
 parser.add_argument('--optimizer', type=str, default='SGD', metavar='OPT',
@@ -172,23 +172,24 @@ class Experiment():
         self._prepare_dataset()
 
     def _create_agent(self):
-        model_name = models.__dict__[self.args.model]
-        model_config = {
-            'dataset': self.args.dataset
-        }
-        if self.args.model_config != '':
-            model_config = dict(model_config, **literal_eval(self.args.model_config))
-
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
         lr_scaler = self.args.batches_per_allreduce * hvd.size() if not self.args.use_adasum else 1
-
         if self.args.cuda:
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = args.batches_per_allreduce * hvd.local_size()
 
+        model_name = models.__dict__[self.args.model]
+        model_config = {
+            'dataset': self.args.dataset,
+            'lr': self.args.lr * lr_scaler
+        }
+        if self.args.model_config != '':
+            model_config = dict(model_config, **literal_eval(self.args.model_config))
+
         model = model_name(model_config)
+
         if self.args.checkpoint:
             if not path.isfile(self.args.checkpoint):
                 parser.error(f"Invalid checkpoint: {self.args.checkpoint}")
@@ -209,6 +210,7 @@ class Experiment():
         logging.info(f"Created model {model_name} with configuration: {model_config}")
         # Horovod: broadcast parameters.
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+
         num_parameters = sum([l.nelement() for l in model.parameters()])
         logging.info(f"Number of parameters: {num_parameters}")
 
