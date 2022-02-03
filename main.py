@@ -279,7 +279,7 @@ class Experiment():
             defaults={
                 **defaults,
                 'split': 'train',
-                'batch_size': self.args.batch_size
+                'batch_size': allreduce_batch_size
             }
         )
         logging.info("Created train data regime: %s", repr(self.train_data_regime))
