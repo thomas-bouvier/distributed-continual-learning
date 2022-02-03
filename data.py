@@ -120,6 +120,8 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
                           transform=transform,
                           target_transform=target_transform,
                           download=download)
+    else:
+        raise ValueError('Unknown dataset')
 
 
 class CANDLE(_ContinuumDataset):

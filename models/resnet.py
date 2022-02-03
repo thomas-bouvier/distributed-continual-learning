@@ -219,8 +219,13 @@ class resnet_cifar_model(resnet_model):
 class resnet_imagenet_model(resnet_model):
     def __init__(self, num_classes=1000, in_channels=64,
                  block=Bottleneck, residual_block=None, layers=[3, 4, 23, 3],
-                 expansion=4, groups=[1, 1, 1, 1], regime='normal', lr=1):
+                 expansion=4, groups=[1, 1, 1, 1], regime='normal', lr=1, **kwargs):
         super(resnet_imagenet_model, self).__init__()
+        print("===============================")
+        print("===============================")
+        print("===============================")
+        print("===============================")
+        print(num_classes)
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.conv1 = nn.Conv2d(3, self.in_channels, kernel_size=7, stride=2, padding=3,
@@ -283,6 +288,6 @@ def resnet(config):
             config.update(dict(layers=[3, 4, 23, 3]))
         elif depth == 152:
             config.update(dict(layers=[3, 8, 36, 3]))
-        return resnet_imagenet_model(num_classes=1000, **config)
+        return resnet_imagenet_model(num_classes=200 if dataset == 'tinyimagenet' else 1000, **config)
     else:
         raise ValueError('Unknown dataset')
