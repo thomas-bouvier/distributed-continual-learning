@@ -179,7 +179,7 @@ class resnet_model(nn.Module):
 class resnet_cifar_model(resnet_model):
     def __init__(self, num_classes=10, in_channels=16,
                  block=BasicBlock, residual_block=None, layers=[2, 2, 2],
-                 groups=[1, 1, 1] , regime='normal', dropout=None, **kwargs):
+                 groups=[1, 1, 1], dropout=None, **kwargs):
         super(resnet_cifar_model, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
@@ -202,8 +202,7 @@ class resnet_cifar_model(resnet_model):
         self.fc = nn.Linear(width[-1], num_classes)
 
         init_model(self)
-        self.regime = [
-            {
+        self.regime = [{
                 'epoch': 0,
                 'optimizer': 'SGD',
                 'lr': 1e-1,
@@ -219,13 +218,8 @@ class resnet_cifar_model(resnet_model):
 class resnet_imagenet_model(resnet_model):
     def __init__(self, num_classes=1000, in_channels=64,
                  block=Bottleneck, residual_block=None, layers=[3, 4, 23, 3],
-                 expansion=4, groups=[1, 1, 1, 1], regime='normal', lr=1, **kwargs):
+                 expansion=4, groups=[1, 1, 1, 1], lr=1, **kwargs):
         super(resnet_imagenet_model, self).__init__()
-        print("===============================")
-        print("===============================")
-        print("===============================")
-        print("===============================")
-        print(num_classes)
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.conv1 = nn.Conv2d(3, self.in_channels, kernel_size=7, stride=2, padding=3,
