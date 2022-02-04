@@ -163,11 +163,13 @@ class ResultsLog(object):
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
 
-def save_checkpoint(state, filename='checkpoint.pth.tar', is_initial=False, is_best=False, save_all=False, path='.'):
+def save_checkpoint(state, filename='checkpoint.pth.tar', is_initial=False, is_final=False, is_best=False, save_all=False, path='.'):
     filename = os.path.join(path, filename)
     torch.save(state, filename)
     if is_initial:
         shutil.copyfile(filename, os.path.join(path, 'checkpoint_initial.pth.tar'))
+    if is_final:
+        shutil.copyfile(filename, os.path.join(path, 'checkpoint_final.pth.tar'))
     if is_best:
         shutil.copyfile(filename, os.path.join(path, 'checkpoint_best.pth.tar'))
     if save_all:

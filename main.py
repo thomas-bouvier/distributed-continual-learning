@@ -203,8 +203,8 @@ class Experiment():
         save_checkpoint({
             'task': 0,
             'epoch': 0,
-            'model': model_name,
-            'model_config': model_config,
+            'model': self.args.model,
+            'model_config': self.args.model_config,
             'state_dict': model.state_dict()
         }, is_initial=True, path=self.save_path)
         logging.info(f"Created model {model_name} with configuration: {model_config}")
@@ -386,7 +386,7 @@ class Experiment():
                     logging.debug(f"Saving best model with minimal eval loss ({meters['loss'].avg})..")
                     self.agent.minimal_eval_loss = meters['loss'].avg
                     self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
-                
+
                 torch.cuda.nvtx.range_pop()
 
                 if hvd.rank() == 0:
@@ -443,6 +443,14 @@ class Experiment():
         logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
         logging.info('Average on %d device(s): %.1f +-%.1f' %
             (hvd.size(), hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
+
+        save_checkpoint({
+            'task': len(self.train_data_regime.tasksets),
+            'epoch': self.args.epochs,
+            'model': self.args.model,
+            'model_config': self.args.model_config,
+            'state_dict': self.agent.model.state_dict()
+        }, is_final=True, path=self.save_path)
 
         values = {
             'total_time': total_end-total_start,
