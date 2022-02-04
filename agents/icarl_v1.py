@@ -194,7 +194,10 @@ class icarl_v1_agent(Agent):
                 self.lock_make.release()
 
             torch.cuda.nvtx.range_push("Forward pass")
-            output = self.model(x)
+            if training:
+                output = self.model(x)
+            else:
+                output = self.forward(x)
             loss = self.criterion(output[:y.size(0)], y)
             torch.cuda.nvtx.range_pop()
 
