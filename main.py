@@ -400,8 +400,10 @@ class Experiment():
                                     img_sec, hvd.size(), img_sec * hvd.size(),
                                     train=train_results))
 
-                    draw_epoch = i_epoch + 1 + task_id * self.args.epochs
-                    dl_metrics_values = dict(task_id=task_id+1, epoch=draw_epoch, steps=self.agent.training_steps)
+                    global_epoch = i_epoch + 1 + task_id * self.args.epochs
+                    if self.agent.writer is not None:
+                        self.agent.writer.add_scalar('img_sec', img_sec * hvd.size(), global_epoch)
+                    dl_metrics_values = dict(task_id=task_id+1, epoch=global_epoch, steps=self.agent.training_steps)
                     dl_metrics_values.update({'train_' + k: v for k, v in train_results.items()})
                     dl_metrics_values.update({'train_img_sec': img_sec})
                     dl_metrics_values.update({'train_total_img_sec': img_sec * hvd.size()})
