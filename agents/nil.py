@@ -31,7 +31,6 @@ class nil_agent(Agent):
         self.memory_size = config.get('num_representatives', 6000)   # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
-        self.epochs = config.get('epochs') # Maximum number of epochs
 
         mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         self.mask = move_cuda(mask.float(), self.cuda)
@@ -168,6 +167,7 @@ class nil_agent(Agent):
                 if self.writer is not None:
                     self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
                     self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
+                    self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.training_steps)
                     if training:
                         self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.training_steps)
                     self.writer.flush()

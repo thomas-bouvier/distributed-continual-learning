@@ -179,6 +179,7 @@ class nil_v2_agent(Agent):
                 if self.writer is not None:
                     self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
                     self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
+                    self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.training_steps)
                     if training:
                         self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.training_steps)
                     self.writer.flush()
