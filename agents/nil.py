@@ -120,8 +120,8 @@ class nil_agent(Agent):
         torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
-            logging.debug(f"(not) Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
-            #self.model.load_state_dict(self.best_model)
+            logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
+            self.model.load_state_dict(self.best_model)
 
         # Add the new classes to the mask
         torch.cuda.nvtx.range_push("Create mask")

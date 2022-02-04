@@ -159,8 +159,8 @@ class Agent():
         torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
-            logging.debug(f"(not) Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
-            #self.model.load_state_dict(self.best_model)
+            logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
+            self.model.load_state_dict(self.best_model)
 
         if task_id > 0:
             if self.config.get('reset_state_dict', False):
@@ -169,7 +169,7 @@ class Agent():
             self.optimizer.reset(self.model.parameters())
 
     def after_every_task(self):
-        pass
+        self.minimal_eval_loss = float('inf')
 
     def set_tensorboard_writer(self, save_path, dummy=False):
         if dummy:
