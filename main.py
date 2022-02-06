@@ -142,8 +142,10 @@ def main():
     setup_logging(path.join(save_path, 'log.txt'),
                   dummy=hvd.local_rank() > 0)
 
-    logging.info("Saving to %s", save_path)
-    logging.info("Run arguments: %s", args)
+    device = 'GPU' if args.cuda else 'CPU'
+    logging.info(f"Number of {device}s: {hvd.size()}")
+    logging.info(f"Saving to {save_path}")
+    logging.info(f"Run arguments: {args}")
 
     if hvd.rank() == 0:
         with open(path.join(save_path, 'args.json'), 'w') as f:
