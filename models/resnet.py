@@ -270,8 +270,10 @@ def resnet(config):
 
     if dataset == 'cifar10':
         return resnet_cifar_model(num_classes=10, **config)
+
     elif dataset == 'cifar100':
         return resnet_cifar_model(num_classes=100, **config)
+
     elif 'imagenet' in dataset:
         if depth == 18:
             config.update(dict(layers=[2, 2, 2, 2], expansion=1))
@@ -284,5 +286,19 @@ def resnet(config):
         elif depth == 152:
             config.update(dict(layers=[3, 8, 36, 3]))
         return resnet_imagenet_model(num_classes=200 if dataset == 'tinyimagenet' else 1000, **config)
+
+    elif dataset == 'core50':
+        if depth == 18:
+            config.update(dict(layers=[2, 2, 2, 2], expansion=1))
+        elif depth == 34:
+            config.update(dict(layers=[3, 4, 6, 3], expansion=1))
+        elif depth == 50:
+            config.update(dict(layers=[3, 4, 6, 3]))
+        elif depth == 101:
+            config.update(dict(layers=[3, 4, 23, 3]))
+        elif depth == 152:
+            config.update(dict(layers=[3, 8, 36, 3]))
+        return resnet_imagenet_model(num_classes=50, **config)
+
     else:
         raise ValueError('Unknown dataset')

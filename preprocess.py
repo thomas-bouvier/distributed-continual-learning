@@ -60,3 +60,13 @@ def get_transform(transform_name='imagenet', augment=True, input_size=None,
         else:
             return scale_crop(input_size=input_size, scale_size=scale_size,
                               normalize=normalize)
+    
+    elif transform_name == 'core50':
+        input_size = input_size or 224
+        scale_size = scale_size or int(input_size * 8 / 7)
+        if augment:
+            return preprocess_imagenet(input_size=input_size,
+                                       normalize=normalize)
+        else:
+            return scale_crop(input_size=input_size, scale_size=scale_size,
+                              normalize=normalize)

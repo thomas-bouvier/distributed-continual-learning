@@ -221,8 +221,8 @@ class nil_agent(Agent):
                 rep_weights = torch.as_tensor([rep.weight for rep in reps])
                 rep_weights = move_cuda(rep_weights, self.cuda)
                 #hprint([rep.value for rep in reps])
-                rep_values  = torch.stack([rep.value for rep in reps])
-                rep_labels  = torch.stack([rep.label for rep in reps])
+                rep_values = torch.stack([rep.value for rep in reps])
+                rep_labels = torch.stack([rep.label for rep in reps])
                 # Concatenates the training samples with the representatives
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
@@ -252,7 +252,7 @@ class nil_agent(Agent):
                 if n_reps == 0:
                     self.random_buffer(x, y, output)
                 else:
-                    self.random_buffer(x  [:-n_reps], y[:-n_reps], output[:-n_reps])
+                    self.random_buffer(x[:-n_reps], y[:-n_reps], output[:-n_reps])
                 self.random_modify_representatives(self.buffer_sizeed_reps)
                 self.clear_buffer_size()
 

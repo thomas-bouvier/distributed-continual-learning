@@ -50,25 +50,25 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return datasets.ImageNet1000(data_path=root, train=train)
 
+    elif dataset == 'core50':
+        root = os.path.join(root, 'CORe50')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.Core50(data_path=root, train=train)
+
     elif dataset == 'candle':
         root = os.path.join(root, 'CANDLE')
 
-        # Load CANDLE data
         if not os.path.exists(os.path.join(root, 'train/x.pt')) or not os.path.exists(os.path.join(root, 'val/x.pt')):
             train_path = os.path.join(root, 'nt_train2.csv')
             test_path = os.path.join(root, 'nt_test2.csv')
-
             df_train = (pd.read_csv(train_path, header=None).values).astype('float32')
             df_test = (pd.read_csv(test_path, header=None).values).astype('float32')
 
             seqlen = df_train.shape[1]
-
             Y_train = df_train[:,0].astype('int')
             Y_test = df_test[:,0].astype('int')
-
             df_x_train = df_train[:, 1:seqlen].astype(np.float32)
             df_x_test = df_test[:, 1:seqlen].astype(np.float32)
-
             X_train = df_x_train
             X_test = df_x_test
 
@@ -78,10 +78,8 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
 
             X_train = mat[:X_train.shape[0], :]
             X_test = mat[X_train.shape[0]:, :]
-
             X_train = np.expand_dims(X_train, axis=1)
             X_test = np.expand_dims(X_test, axis=1)
-
             X_train = torch.as_tensor(X_train)
             X_test = torch.as_tensor(X_test)
             Y_train = torch.as_tensor(Y_train)
@@ -91,12 +89,10 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
             torch.save(Y_test, os.path.join(root, 'y_test.pt'))
             torch.save(X_train, os.path.join(root, 'x_train.pt'))
             torch.save(Y_train, os.path.join(root, 'y_train.pt'))
-
             data_train = torch.load(os.path.join(root, 'x_train.pt'))
             target_train = torch.load(os.path.join(root, 'y_train.pt'))
             data_test = torch.load(os.path.join(root, 'x_test.pt'))
             target_test = torch.load(os.path.join(root, 'y_test.pt'))
-
             torch.save(data_train, os.path.join(root, 'train/x.pt'))
             torch.save(target_train, os.path.join(root, 'train/y.pt'))
             torch.save(data_test, os.path.join(root, 'val/x.pt'))
