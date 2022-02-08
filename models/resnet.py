@@ -285,7 +285,13 @@ def resnet(config):
             config.update(dict(layers=[3, 4, 23, 3]))
         elif depth == 152:
             config.update(dict(layers=[3, 8, 36, 3]))
-        return resnet_imagenet_model(num_classes=200 if dataset == 'tinyimagenet' else 1000, **config)
+        if dataset == 'imagenet100':
+            num_classes = 100
+        elif dataset == 'tinyimagenet':
+            num_classes = 200
+        else:
+            num_classes = 1000
+        return resnet_imagenet_model(num_classes=num_classes, **config)
 
     elif dataset == 'core50':
         if depth == 18:

@@ -32,18 +32,24 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
         root = os.path.join(root, 'CIFAR100')
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return datasets.CIFAR100(data_path=root, train=train,
-                            download=False)
+                                     download=False)
 
     elif dataset == 'tinyimagenet':
         root = os.path.join(root, 'TinyImageNet')
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return datasets.TinyImageNet200(data_path=root, train=train,
-                            download=False)
+                                            download=False)
+
+    elif dataset == 'imagenet100':
+        root = os.path.join(root, 'ImageNet_blurred')
+        with FileLock(os.path.expanduser("~/.horovod_lock")):
+            return datasets.ImageNet100(data_path=root, train=train,
+                                        download=True)
 
     elif dataset == 'imagenet':
         root = os.path.join(root, 'ImageNet')
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.ImageNet1000(root=root, train=train)
+            return datasets.ImageNet1000(data_path=root, train=train)
 
     elif dataset == 'imagenet_blurred':
         root = os.path.join(root, 'ImageNet_blurred')
@@ -53,7 +59,7 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
     elif dataset == 'core50':
         root = os.path.join(root, 'CORe50')
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.Core50(data_path=root, train=train)
+            return datasets.Core50(data_path=root, train=train, download=False)
 
     elif dataset == 'candle':
         root = os.path.join(root, 'CANDLE')
