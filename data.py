@@ -41,10 +41,11 @@ def get_dataset(dataset='mnist', continual=False, split='train', transform=None,
                                             download=False)
 
     elif dataset == 'imagenet100':
-        root = os.path.join(root, 'ImageNet_blurred')
+        root = os.path.join(root, 'ImageNet100')
         with FileLock(os.path.expanduser("~/.horovod_lock")):
+            data_subset='train_100.txt' if train else 'val_100.txt'
             return datasets.ImageNet100(data_path=root, train=train,
-                                        download=True)
+                                        data_subset=os.path.join(root, data_subset))
 
     elif dataset == 'imagenet':
         root = os.path.join(root, 'ImageNet')
