@@ -334,18 +334,19 @@ class Experiment():
                 self.test_data_regime.get_loader(True)
                 self.test_data_regime.set_epoch(0)
 
-                validate_results = self.agent.validate(self.test_data_regime)
-                meters['loss'].update(validate_results['loss'])
-                meters['prec1'].update(validate_results['prec1'])
-                meters['prec5'].update(validate_results['prec5'])
+                if self.args.agent != 'icarl':
+                    validate_results = self.agent.validate(self.test_data_regime)
+                    meters['loss'].update(validate_results['loss'])
+                    meters['prec1'].update(validate_results['prec1'])
+                    meters['prec5'].update(validate_results['prec5'])
 
-                if hvd.rank() == 0:
-                    logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
-                                    .format(validate=validate_results))
+                    if hvd.rank() == 0:
+                        logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
+                                        .format(validate=validate_results))
 
-                    task_metrics_values = dict(test_task_id=test_task_id+1, epoch=0)
-                    task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
-                    task_metrics['test_task_metrics'].append(task_metrics_values)
+                        task_metrics_values = dict(test_task_id=test_task_id+1, epoch=0)
+                        task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
+                        task_metrics['test_task_metrics'].append(task_metrics_values)
             torch.cuda.nvtx.range_pop()
 
             for i_epoch in range(0, self.args.epochs):
@@ -365,6 +366,8 @@ class Experiment():
                 meters = {metric: AverageMeter(f"task_{metric}")
                           for metric in ['loss', 'prec1', 'prec5']}
                 torch.cuda.nvtx.range_push("Test")
+                if self.args.agent == 'icarl':
+                    self.agent.update_examplars(self.agent.nc, training=False)
                 for test_task_id in range(0, task_id+1):
                     self.test_data_regime.set_task_id(test_task_id)
                     self.test_data_regime.get_loader(True)
@@ -390,6 +393,8 @@ class Experiment():
                     self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
 
                 torch.cuda.nvtx.range_pop()
+
+                self.agent.after_every_epoch()
 
                 if hvd.rank() == 0:
                     img_sec = train_results['step_count'] * self.args.batch_size / train_results['time']

@@ -11,6 +11,7 @@ __all__ = ['mnistnet']
 class mnistnet_model(nn.Module):
     def __init__(self, num_features=50):
         super(mnistnet_model, self).__init__()
+        self.num_features = 50
         self.num_classes = 10
         self.feature_vector = None
 

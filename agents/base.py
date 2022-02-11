@@ -171,6 +171,9 @@ class Agent():
     def after_every_task(self):
         self.minimal_eval_loss = float('inf')
 
+    def after_every_epoch(self):
+        pass
+
     def set_tensorboard_writer(self, save_path, dummy=False):
         if dummy:
             return False

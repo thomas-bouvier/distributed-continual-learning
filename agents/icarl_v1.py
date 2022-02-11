@@ -15,13 +15,11 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
     torch.cuda.nvtx.range_push("Make candidates")
     for i in range(num_batches):
         lock_make.acquire()
-
         selection = torch.randperm(len(mem_x))[n].clone()
         nx = mem_x[selection].clone() - cand_x
         ny = mem_y[selection].clone() - cand_y
         cand_x += nx
         cand_y += ny
-
         lock_made.release()
     torch.cuda.nvtx.range_pop()
 
@@ -68,7 +66,8 @@ class icarl_v1_agent(Agent):
         self.criterion = nn.CrossEntropyLoss(weight=self.mask)
 
         # Distillation
-        if self.mem_class_x != {}:
+        self.should_distill = self.mem_class_x != {}
+        if self.should_distill:
             self.mem_x = torch.cat([samples.cpu() for samples in self.mem_class_x.values()]).share_memory_()
             self.mem_y = torch.cat([targets.cpu() for targets in self.mem_class_y.values()]).share_memory_()
 
@@ -84,12 +83,11 @@ class icarl_v1_agent(Agent):
         prefix='train' if training else 'val'
         meters = {metric: AverageMeter(f"{prefix}_{metric}")
                   for metric in ['loss', 'prec1', 'prec5']}
-        distill = self.mem_class_x != {} and training
         start = time.time()
         step_count = 0
 
         # Distillation, increment taskset
-        if distill:
+        if self.should_distill and training:
             self.cand_x = torch.zeros([self.num_candidates] + list(self.mem_x[0].size())).share_memory_()
             self.cand_y = torch.zeros([self.num_candidates] + list(self.mem_y[0].size())).share_memory_()
 
@@ -108,7 +106,6 @@ class icarl_v1_agent(Agent):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
             output, loss = self._step(i_batch, x, y, training=training,
-                                      distill=distill,
                                       average_output=average_output)
 
             # measure accuracy and record loss
@@ -147,7 +144,7 @@ class icarl_v1_agent(Agent):
             step_count += 1
 
         # Distillation
-        if distill:
+        if self.should_distill:
             self.p.join()
         end = time.time()
 
@@ -176,7 +173,7 @@ class icarl_v1_agent(Agent):
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
 
-            if self.epoch+1 == self.epochs and training:
+            if training:
                 torch.cuda.nvtx.range_push("Store batch")
                 if self.buf_x is None:
                     self.buf_x = x.detach()
@@ -186,28 +183,24 @@ class icarl_v1_agent(Agent):
                     self.buf_y = torch.cat((self.buf_y, y.detach()))
                 torch.cuda.nvtx.range_pop()
 
-            # Distillation
-            if distill:
-                self.lock_made.acquire()
-                x = torch.cat((x, move_cuda(self.cand_x, self.cuda)))
-                dist_y = move_cuda(self.cand_y, self.cuda)
-                self.lock_make.release()
+                # Distillation
+                if self.should_distill:
+                    self.lock_made.acquire()
+                    x = torch.cat((x, move_cuda(self.cand_x, self.cuda)))
+                    dist_y = move_cuda(self.cand_y, self.cuda)
+                    self.lock_make.release()
 
-            torch.cuda.nvtx.range_push("Forward pass")
-            if training:
+                torch.cuda.nvtx.range_push("Forward pass")
                 output = self.model(x)
-            else:
-                output = self.forward(x)
-            loss = self.criterion(output[:y.size(0)], y)
-            torch.cuda.nvtx.range_pop()
-
-            # Compute distillation loss
-            if distill:
-                torch.cuda.nvtx.range_push("Compute distillation loss")
-                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+                loss = self.criterion(output[:y.size(0)], y)
                 torch.cuda.nvtx.range_pop()
 
-            if training:
+                # Compute distillation loss
+                if self.should_distill:
+                    torch.cuda.nvtx.range_push("Compute distillation loss")
+                    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(dist_y))
+                    torch.cuda.nvtx.range_pop()
+
                 # accumulate gradient
                 loss.backward()
                 # SGD step
@@ -215,6 +208,11 @@ class icarl_v1_agent(Agent):
                 self.optimizer.step()
                 torch.cuda.nvtx.range_pop()
                 self.training_steps += 1
+            else:
+                torch.cuda.nvtx.range_push("Forward pass")
+                output = self.forward(x)
+                loss = self.criterion(output[:y.size(0)], y)
+                torch.cuda.nvtx.range_pop()
 
             outputs.append(output.detach())
             total_loss += loss
@@ -242,7 +240,7 @@ class icarl_v1_agent(Agent):
                 out[ss, classpred[ss]] = 1
             return out
 
-    def update_examplars(self, nc):
+    def update_examplars(self, nc, training=True):
         self.model.eval()
         with torch.no_grad():
             # Reduce exemplar set by updating value of num. exemplars per class
@@ -349,5 +347,6 @@ class icarl_v1_agent(Agent):
 
         del tmp_features
         torch.cuda.empty_cache()
-        self.buf_x = None
-        self.buf_y = None
+        if training:
+            self.buf_x = None
+            self.buf_y = None

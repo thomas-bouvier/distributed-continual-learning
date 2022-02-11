@@ -58,7 +58,8 @@ class icarl_agent(Agent):
         self.criterion = nn.CrossEntropyLoss(weight=self.mask)
 
         # Distillation
-        if self.mem_class_x != {}:
+        self.should_distill = self.mem_class_x != {}
+        if self.should_distill:
             self.mem_x = torch.cat([samples.clone() for samples in self.mem_class_x.values()])
             self.mem_y = torch.cat([targets.clone() for targets in self.mem_class_y.values()])
 
@@ -74,13 +75,12 @@ class icarl_agent(Agent):
         prefix='train' if training else 'val'
         meters = {metric: AverageMeter(f"{prefix}_{metric}")
                   for metric in ['loss', 'prec1', 'prec5']}
-        distill = self.mem_class_x != {} and training
         start = time.time()
         step_count = 0
 
         # Distillation, increment taskset
         set_x, set_y = None, None
-        if distill:
+        if self.should_distill and training:
             torch.cuda.nvtx.range_push(f"Increment taskset")
             set_x, set_y = self.increment_taskset(len(data_regime.get_loader()), self.mem_x, self.mem_y)
             torch.cuda.nvtx.range_pop()
@@ -89,9 +89,7 @@ class icarl_agent(Agent):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
             output, loss = self._step(i_batch, x, y, set_x, set_y,
-                                      training=training,
-                                      distill=distill,
-                                      average_output=average_output)
+                                      training=training, average_output=average_output)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, 5))
@@ -137,6 +135,11 @@ class icarl_agent(Agent):
 
         return meters
 
+    def after_every_epoch(self):
+        if self.epoch+1 != self.epochs:
+            self.buf_x = None
+            self.buf_y = None
+
     def increment_taskset(self, num_batches, mem_x, mem_y):
         if self.mem_class_x == {}:
             return None, None
@@ -157,7 +160,7 @@ class icarl_agent(Agent):
         return set_x, set_y
 
     def _step(self, i_batch, inputs_batch, target_batch, set_x, set_y,
-              training=False, distill=False, average_output=False, chunk_batch=1):
+              training=False, average_output=False, chunk_batch=1):
         outputs = []
         total_loss = 0
 
@@ -173,7 +176,7 @@ class icarl_agent(Agent):
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
     
-            if self.epoch+1 == self.epochs and training:
+            if training:
                 torch.cuda.nvtx.range_push("Store batch")
                 if self.buf_x is None:
                     self.buf_x = x.detach()
@@ -183,24 +186,20 @@ class icarl_agent(Agent):
                     self.buf_y = torch.cat((self.buf_y, y.detach()))
                 torch.cuda.nvtx.range_pop()
 
-            if distill:
-                x = torch.cat((x, set_x[i_batch]))
+                if self.should_distill:
+                    x = torch.cat((x, set_x[i_batch]))
 
-            torch.cuda.nvtx.range_push("Forward pass")
-            if training:
+                torch.cuda.nvtx.range_push("Forward pass")
                 output = self.model(x)
-            else:
-                output = self.forward(x)
-            loss = self.criterion(output[:y.size(0)], y)
-            torch.cuda.nvtx.range_pop()
-
-            # Compute distillation loss
-            if distill:
-                torch.cuda.nvtx.range_push("Compute distillation loss")
-                loss += self.kl(self.lsm(output[y.size(0):]), self.sm(set_y[i_batch]))
+                loss = self.criterion(output[:y.size(0)], y)
                 torch.cuda.nvtx.range_pop()
 
-            if training:
+                # Compute distillation loss
+                if self.should_distill:
+                    torch.cuda.nvtx.range_push("Compute distillation loss")
+                    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(set_y[i_batch]))
+                    torch.cuda.nvtx.range_pop()
+                
                 # accumulate gradient
                 loss.backward()
                 # SGD step
@@ -208,6 +207,11 @@ class icarl_agent(Agent):
                 self.optimizer.step()
                 torch.cuda.nvtx.range_pop()
                 self.training_steps += 1
+            else:
+                torch.cuda.nvtx.range_push("Forward pass")
+                output = self.forward(x)
+                loss = self.criterion(output[:y.size(0)], y)
+                torch.cuda.nvtx.range_pop()
 
             outputs.append(output.detach())
             total_loss += loss
@@ -235,7 +239,7 @@ class icarl_agent(Agent):
                 out[ss, classpred[ss]] = 1
             return out
 
-    def update_examplars(self, nc):
+    def update_examplars(self, nc, training=True):
         self.model.eval()
         with torch.no_grad():
             # Reduce exemplar set by updating value of num. exemplars per class
@@ -248,7 +252,7 @@ class icarl_agent(Agent):
             for c in nc:
                 # Find indices of examples of class c
                 indxs = (self.buf_y == c).nonzero(as_tuple=False).squeeze()
-                
+
                 # Select examples of class c
                 mem_x_c = torch.index_select(self.buf_x, 0, indxs)
 
@@ -269,7 +273,7 @@ class icarl_agent(Agent):
                     # Compute the mean feature vector of class              
                     nb_samples = torch.tensor(memf_c.size(0))
                     sum_memf_c = memf_c.sum(0)
-    
+
                     sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
                     sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
 
@@ -303,7 +307,7 @@ class icarl_agent(Agent):
 
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                        
+
                         dist = torch.cdist(fs[i], mean_memf_c)
                         dist = dist.view(dist.size(0))
 
@@ -350,8 +354,9 @@ class icarl_agent(Agent):
 
         del tmp_features
         torch.cuda.empty_cache()
-        self.buf_x = None
-        self.buf_y = None
+        if training:
+            self.buf_x = None
+            self.buf_y = None
 
 
 def icarl(model, config, optimizer, criterion, cuda, log_interval):
