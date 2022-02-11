@@ -229,7 +229,7 @@ class Experiment():
         # Distributed training parameters
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
         reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
-        optimizer = OptimizerRegime(model, compression, reduction,
+        self.optimizer_regime = OptimizerRegime(model, compression, reduction,
                                     self.args.batches_per_allreduce,
                                     self.args.gradient_predivide_factor,
                                     optim_regime)
@@ -244,7 +244,7 @@ class Experiment():
         }
         if self.args.agent_config != '':
             agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
-        self.agent = agent(model, agent_config, optimizer,
+        self.agent = agent(model, agent_config, self.optimizer_regime,
                            self.criterion, self.args.cuda, self.args.log_interval)
         self.agent.epochs = self.args.epochs
         logging.info(f"Created agent with configuration: {agent_config}")
@@ -324,6 +324,7 @@ class Experiment():
 
             self.train_data_regime.set_task_id(task_id)
             self.agent.before_every_task(task_id, self.train_data_regime)
+            self.optimizer_regime.num_steps = len(self.train_data_regime.get_loader())
 
             # evaluate on test set
             meters = {metric: AverageMeter(f"task_{metric}")

@@ -1,3 +1,5 @@
+import horovod.torch as hvd
+
 from copy import deepcopy
 
 class Regime(object):
@@ -9,13 +11,11 @@ class Regime(object):
           {'epoch': 8, 'optimizer': 'Adam', 'lr': 5e-5}
          ]"
     """
-
     def __init__(self, regime: list, defaults={}):
         self.regime = regime
         self.defaults = defaults
         self.config = defaults
         self.current_regime_phase = None
-
 
     def update(self, epoch, steps):
         """Adjusts config according to current epoch or steps and regime.
@@ -46,6 +46,24 @@ class Regime(object):
                 self.current_regime_phase = next_phase
 
         config.update(self.regime[self.current_regime_phase])
+
+        if 'lr_decay' in config and 'lr' in config:
+            decay_steps = config.pop('lr_decay_steps', 100)
+            if steps % decay_steps == 0:
+                decay_rate = config.pop('lr_decay')
+                config['lr'] *= decay_rate ** (steps / decay_steps)
+        elif 'lr_rampup' in config and 'lr' in config:
+            # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
+            # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
+            # the first warmup_epochs epochs.
+            # See https://arxiv.org/abs/1706.02677 for details.
+            warmup_epochs = config.pop('warmup_epochs', 5)
+            lr_epoch = epoch + float(steps + 1) / self.num_steps
+            config['lr'] *= 1. / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
+        elif 'step_lambda' in config:
+            config.update(eval_func(config.pop('step_lambda'), steps))
+        elif 'epoch_lambda' in config:
+            config.update(eval_func(config.pop('epoch_lambda'), epoch))
 
         if config == self.config:
             return False

@@ -17,3 +17,8 @@ def move_cuda(item, use_cuda=True, cuda_device=-1):
         else:
             item = item.cuda()
     return item
+
+def eval_func(f, x):
+    if isinstance(f, string_types):
+        f = eval(f)
+    return f(x)

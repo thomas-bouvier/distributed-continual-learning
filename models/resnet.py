@@ -239,11 +239,11 @@ class resnet_imagenet_model(resnet_model):
         self.fc = nn.Linear(width[-1] * expansion, num_classes)
 
         init_model(self)
-        # TODO: https://arxiv.org/abs/1706.02677
         self.regime = [{
                 'epoch': 0,
                 'optimizer': 'SGD',
-                'lr': lr * 1.,
+                'lr': lr,
+                'lr_rampup': True,
                 'momentum': 0.9,
                 'regularizer': weight_decay_config(1e-4)
             },
