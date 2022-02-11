@@ -156,6 +156,11 @@ class icarl_v1_agent(Agent):
 
         return meters
 
+    def after_every_epoch(self):
+        if self.epoch+1 != self.epochs:
+            self.buf_x = None
+            self.buf_y = None
+
     def _step(self, i_batch, inputs_batch, target_batch, training=False,
               distill=False, average_output=False, chunk_batch=1):
         outputs = []
