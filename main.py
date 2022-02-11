@@ -209,7 +209,7 @@ class Experiment():
             'model_config': self.args.model_config,
             'state_dict': model.state_dict()
         }, is_initial=True, path=self.save_path)
-        logging.info(f"Created model {model_name} with configuration: {model_config}")
+        logging.info(f"Created model {self.args.model} with configuration: {model_config}")
         # Horovod: broadcast parameters.
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
 
