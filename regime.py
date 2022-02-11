@@ -52,7 +52,7 @@ class Regime(object):
             if steps % decay_steps == 0:
                 decay_rate = config.pop('lr_decay')
                 config['lr'] *= decay_rate ** (steps / decay_steps)
-        elif 'lr_rampup' in config and 'lr' in config:
+        elif 'lr_rampup' in config and 'lr' in config and config['lr_rampup']:
             # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
             # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
             # the first warmup_epochs epochs.

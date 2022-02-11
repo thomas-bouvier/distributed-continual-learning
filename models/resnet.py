@@ -245,11 +245,14 @@ class resnet_imagenet_model(resnet_model):
                 'lr': lr,
                 'lr_rampup': True,
                 'momentum': 0.9,
-                'regularizer': weight_decay_config(1e-4)
+                'regularizer': weight_decay_config(1e-5)
+            }, {
+                'epoch': 5,
+                'lr': lr * 1.,
+                'lr_rampup': False
             },
-            {'epoch': 5, 'lr': lr * 1.},
-            {'epoch': 30, 'lr': lr * 1e-1},
-            {'epoch': 60, 'lr': lr * 1e-2},
+            {'epoch': 25, 'lr': lr * 1e-1},
+            {'epoch': 45, 'lr': lr * 1e-2},
             {'epoch': 80, 'lr': lr * 1e-3}
         ]
 
