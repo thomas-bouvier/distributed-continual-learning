@@ -19,7 +19,8 @@ class Agent():
         self.cuda = cuda
         self.log_interval = log_interval
         self.epoch = 0
-        self.training_steps = 0
+        self.global_steps = 0
+        self.steps = 0
         self.minimal_eval_loss = float('inf')
         self.best_model = None
         self.writer = None
@@ -68,10 +69,10 @@ class Agent():
                                  meters=meters))
 
                 if self.writer is not None:
-                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
-                    self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
+                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)
+                    self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.global_steps)
                     if training:
-                        self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.training_steps)
+                        self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.global_steps)
                     self.writer.flush()
                 if self.watcher is not None:
                     self.observe(trainer=self,
@@ -81,7 +82,7 @@ class Agent():
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream('lr',
-                                         (self.training_steps, self.optimizer.get_lr()[0]))
+                                         (self.global_steps, self.optimizer.get_lr()[0]))
             torch.cuda.nvtx.range_pop()
 
             step_count += 1
@@ -102,7 +103,7 @@ class Agent():
 
         if training:
             self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.training_steps)
+            self.optimizer.update(self.epoch, self.steps)
 
         for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                                  target_batch.chunk(chunk_batch, dim=0))):
@@ -124,7 +125,8 @@ class Agent():
                 torch.cuda.nvtx.range_push("Optimizer step")
                 self.optimizer.step()
                 torch.cuda.nvtx.range_pop()
-                self.training_steps += 1
+                self.global_steps += 1
+                self.steps += 1
 
             outputs.append(output.detach())
             total_loss += loss
@@ -137,7 +139,7 @@ class Agent():
     def train(self, data_regime, average_output=False):
         # switch to train mode
         self.model.train()
-        self.write_stream('epoch', (self.training_steps, self.epoch))
+        self.write_stream('epoch', (self.global_steps, self.epoch))
         return self.loop(data_regime, average_output=average_output, training=True)
 
     def validate(self, data_regime, average_output=False):
@@ -153,6 +155,8 @@ class Agent():
         pass
 
     def before_every_task(self, task_id, train_data_regime):
+        self.steps = 0
+
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
@@ -218,7 +222,7 @@ class Agent():
             stream = self.get_stream(name)
             if stream is None:
                 continue
-            stream.write((self.training_steps, value))
+            stream.write((self.global_steps, value))
         return True
 
     def write_stream(self, name, values):

@@ -208,6 +208,8 @@ class nil_v4_agent(Agent):
         self.q.close()
 
     def before_every_task(self, task_id, train_data_regime):
+        self.steps = 0
+
         if self.best_model is not None:
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
@@ -266,11 +268,11 @@ class nil_v4_agent(Agent):
                                  meters=meters))
 
                 if self.writer is not None:
-                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.training_steps)
-                    self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.training_steps)
-                    self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.training_steps)
+                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)
+                    self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.global_steps)
+                    self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.global_steps)
                     if training:
-                        self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.training_steps)
+                        self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.global_steps)
                     self.writer.flush()
                 if self.watcher is not None:
                     self.observe(trainer=self,
@@ -280,7 +282,7 @@ class nil_v4_agent(Agent):
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream('lr',
-                                         (self.training_steps, self.optimizer.get_lr()[0]))
+                                         (self.global_steps, self.optimizer.get_lr()[0]))
             torch.cuda.nvtx.range_pop()
             step_count += 1
         end = time.time()
@@ -299,7 +301,7 @@ class nil_v4_agent(Agent):
 
         if training:
             self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.training_steps)
+            self.optimizer.update(self.epoch, self.steps)
 
         #for i, (inputs, target) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
         #                                         target_batch.chunk(chunk_batch, dim=0))):
@@ -322,16 +324,17 @@ class nil_v4_agent(Agent):
         output = self.model(self.x)
         loss = self.criterion(output, self.y)
         torch.cuda.nvtx.range_pop()
-        dw = self.w / torch.sum(self.w)
 
         if training:
+            dw = self.w / torch.sum(self.w)
             # Can be faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
             loss.backward(dw)
             # SGD step
             torch.cuda.nvtx.range_push("Optimizer step")
             self.optimizer.step()
             torch.cuda.nvtx.range_pop()
-            self.training_steps += 1
+            self.global_steps += 1
+            self.steps += 1
 
         outputs.append(output.detach())
         total_loss += torch.mean(loss)
