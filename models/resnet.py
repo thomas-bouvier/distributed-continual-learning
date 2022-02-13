@@ -190,7 +190,6 @@ class resnet_cifar_model(resnet_model):
         self.maxpool = lambda x: x
 
         width = [2**i * in_channels for i in range(3)]
-        self.num_features = width[-1]
         self.layer1 = self._make_layer(block=block, planes=width[0], blocks=layers[0], groups=groups[0],
                                        residual_block=residual_block, dropout=dropout)
         self.layer2 = self._make_layer(block=block, planes=width[1], blocks=layers[1], stride=2, groups=groups[1],
@@ -200,6 +199,7 @@ class resnet_cifar_model(resnet_model):
         self.layer4 = lambda x: x
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(width[-1], num_classes)
+        self.num_features = width[-1] * expansion
 
         init_model(self)
         self.regime = [{
@@ -229,7 +229,6 @@ class resnet_imagenet_model(resnet_model):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
         width = [2**i * in_channels for i in range(len(layers))]
-        self.num_features = width[-1]
         for i in range(len(layers)):
             layer = self._make_layer(block=block, planes=width[i], blocks=layers[i], expansion=expansion,
                                      stride=1 if i == 0 else 2, residual_block=residual_block, groups=groups[i])
@@ -237,6 +236,7 @@ class resnet_imagenet_model(resnet_model):
 
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(width[-1] * expansion, num_classes)
+        self.num_features = width[-1] * expansion
 
         init_model(self)
         self.regime = [{
@@ -251,7 +251,7 @@ class resnet_imagenet_model(resnet_model):
                 'lr': lr * 1.,
                 'lr_rampup': False
             },
-            {'epoch': 25, 'lr': lr * 1e-1},
+            {'epoch': 30, 'lr': lr * 1e-1},
             {'epoch': 45, 'lr': lr * 1e-2},
             {'epoch': 80, 'lr': lr * 1e-3}
         ]
