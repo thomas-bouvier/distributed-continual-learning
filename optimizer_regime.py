@@ -38,6 +38,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         """Adjust optimizer according to current epoch or steps and training regime.
         """
         if super(OptimizerRegime, self).update(epoch, steps):
+            logging.debug(f"OPTIMIZER REGIME - update (epoch: {epoch}, steps: {steps})")
             self.adjust_from_config(self.config)
 
     def adjust_from_config(self, config):
@@ -45,8 +46,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
             optim_method = _OPTIMIZERS[config.get('optimizer', 'SGD')]
             if not isinstance(self.optimizer, optim_method):
                 self.optimizer = optim_method(self.optimizer.param_groups)
-                logging.debug('OPTIMIZER REGIME - setting method = %s' %
-                                  config['optimizer'])
+                logging.debug(f"OPTIMIZER REGIME - setting method = {config['optimizer']}")
         for param_group in self.optimizer.param_groups:
             for key in param_group.keys():
                 if key in config:
