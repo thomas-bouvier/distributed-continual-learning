@@ -28,7 +28,7 @@ class icarl_agent(Agent):
         self.buf_x = None  # stores raw inputs, PxD
         self.buf_y = None
         self.mem_class_x = {}  # stores exemplars class by class
-        self.mem_class_y = {} 
+        self.mem_class_y = {}
         self.mem_class_means = {}
 
         # setup distillation losses
@@ -38,6 +38,7 @@ class icarl_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
+        torch.cuda.empty_cache()
 
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
@@ -169,6 +170,10 @@ class icarl_agent(Agent):
         if training:
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.steps)
+            print("====================================")
+            print(f"epoch: {self.epoch}")
+            print(f"steps: {self.steps}")
+            print(f"lr: {self.optimizer.get_lr()[0]}")
 
         for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                        target_batch.chunk(chunk_batch, dim=0))):
@@ -177,7 +182,7 @@ class icarl_agent(Agent):
             torch.cuda.nvtx.range_push("Copy to device")
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
-    
+
             if training:
                 torch.cuda.nvtx.range_push("Store batch")
                 if self.buf_x is None:
@@ -201,7 +206,7 @@ class icarl_agent(Agent):
                     torch.cuda.nvtx.range_push("Compute distillation loss")
                     loss += self.kl(self.lsm(output[y.size(0):]), self.sm(set_y[i_batch]))
                     torch.cuda.nvtx.range_pop()
-                
+
                 # accumulate gradient
                 loss.backward()
                 # SGD step

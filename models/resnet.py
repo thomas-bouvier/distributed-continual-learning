@@ -199,7 +199,7 @@ class resnet_cifar_model(resnet_model):
         self.layer4 = lambda x: x
         self.avgpool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Linear(width[-1], num_classes)
-        self.num_features = width[-1] * expansion
+        self.num_features = width[-1]
 
         init_model(self)
         self.regime = [{

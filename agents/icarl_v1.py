@@ -50,6 +50,7 @@ class icarl_v1_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
+        torch.cuda.empty_cache()
 
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")

@@ -209,6 +209,7 @@ class nil_v4_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
+        torch.cuda.empty_cache()
 
         if self.best_model is not None:
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
