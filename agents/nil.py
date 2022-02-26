@@ -26,9 +26,7 @@ class nil_agent(Agent):
 
         self.representatives = [[] for _ in range(model.num_classes)]
         self.class_count = [0 for _ in range(model.num_classes)]
-        self.buffer_sizeed_reps = []
-
-        self.memory_size = config.get('num_representatives', 6000)   # number of stored examples per class
+        self.num_representatives = config.get('num_representatives', 6000)   # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
 
@@ -48,74 +46,43 @@ class nil_agent(Agent):
         else:
             return []
 
-    def random_buffer(self, image_batch, target_batch, outputs):
+    def pick_candidates(self, x, y):
         """
-        Creates a bufferbased in random sampling
-
-        :param image_batch: the list of images of a batch
-        :param target_batch: the list of one hot labels of a batch
-        :param outputs: output probabilities of the neural network
-        :param iteration: current iteration of training
-        :param megabatch: current megabatch
-        :return: None
+        Modify the representatives list by selecting candidates randomly from the
+        incoming data x and the current list of representatives
         """
-        rand_indices = torch.from_numpy(np.random.permutation(len(outputs)))
-        image_batch = image_batch.clone()[rand_indices]  # The data is ordered according to the indices
-        target_batch = target_batch.clone()[rand_indices]
-        for i in range(min(self.num_candidates, len(image_batch))):
-            self.buffer_sizeed_reps.append(Representative(image_batch[i], target_batch[i]))
-
-    def random_modify_representatives(self, candidate_representatives):
-        """
-            Modifies the representatives list according to the new data by selecting representatives randomly from the
-            buffer_size and the current list of representatives
-
-            param candidate_representatives: the num_candidates representatives from the buffer_size
-            :return: None
-        """
-        for i, _ in enumerate(candidate_representatives):
-            nclass = int(candidate_representatives[i].label.item())
-            self.representatives[nclass].append(candidate_representatives[i])
+        rand_indices = torch.from_numpy(np.random.permutation(len(x)))
+        x = x[rand_indices]  # The data is ordered according to the indices
+        y = y[rand_indices]
+        for i in range(min(self.num_candidates, len(x))):
+            nclass = y[i].item()
             self.class_count[nclass] += 1
+            if len(self.representatives[nclass]) >= self.num_representatives:
+                del self.representatives[nclass][self.num_representatives-1]
+                random.shuffle(self.representatives[nclass])
+            self.representatives[nclass].append(Representative(x[i], y[i]))
+        self.recalculate_weights()
 
-        for i in range(len(self.representatives)):
-            rand_indices = np.random.permutation(len(self.representatives[i]))
-            self.representatives[i] = [self.representatives[i][j] for j in rand_indices]
-            self.representatives[i] = self.representatives[i][:self.memory_size]
-
-        if self.memory_size > 0:
-            self.recalculate_weights(self.representatives)
-
-    def clear_buffer_size(self):
+    def recalculate_weights(self):
         """
-        Clears the buffer_size
-        :return: None
-        """
-        self.buffer_sizeed_reps = []
-
-    def recalculate_weights(self, representatives):
-        """
-        Reassigns the weights of the representatives
-        :param representatives: a list of representatives
-        :return: None
+        Reassign the weights of the representatives
         """
         total_count = np.sum(self.class_count)
         # This version proposes that the total weight of representatives is calculated from the proportion of candidate
-        # representatives respect to the batch. E.g. a batch of 100 images and 10 are num_candidatesected, total_weight = 10
+        # representatives respect to the batch. E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
         total_weight = (self.batch_size * 1.0) / self.num_candidates
         # The total_weight is adjusted to the proportion between candidate representatives and actual representatives
-        total_weight *= (total_count / np.sum([len(cls) for cls in representatives]))
+        total_weight *= (total_count / np.sum([len(cls) for cls in self.representatives]))
         probs = [count / total_count for count in self.class_count]
-        for i in range(len(representatives)):
+        for i in range(len(self.representatives)):
             if self.class_count[i] > 0:
                 weight = max(math.log(probs[i].item() * total_weight), 1.0)
-                for rep in representatives[i]:
+                for rep in self.representatives[i]:
                     # This version uses natural log as an stabilizer
                     rep.weight = weight
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
-        torch.cuda.empty_cache()
 
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
@@ -153,7 +120,7 @@ class nil_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, min(self.model.num_classes, 5)))
-            meters['loss'].update(loss, x.size(0))
+            meters['loss'].update(loss)
             meters['prec1'].update(prec1, x.size(0))
             meters['prec5'].update(prec5, x.size(0))
 
@@ -211,7 +178,7 @@ class nil_agent(Agent):
             if training:
                 # Gets the representatives
                 reps = self.get_representatives()
-                n_reps = len(reps)
+                num_reps = len(reps)
 
             # Create batch weights
             w = torch.ones(len(x))
@@ -219,7 +186,7 @@ class nil_agent(Agent):
             x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
             torch.cuda.nvtx.range_pop()
 
-            if training and n_reps > 0:
+            if training and num_reps > 0:
                 torch.cuda.nvtx.range_push("Combine batches")
                 rep_weights = torch.as_tensor([rep.weight for rep in reps])
                 rep_weights = move_cuda(rep_weights, self.cuda)
@@ -252,16 +219,18 @@ class nil_agent(Agent):
                 self.global_steps += 1
                 self.steps += 1
 
-                # Modifies the list of representatives
-                if n_reps == 0:
-                    self.random_buffer(x, y, output)
+                if hvd.local_rank() == 0:
+                    print(f"allocated: {torch.cuda.memory_allocated()/1000000000}")
+                    print(f"reserved: {torch.cuda.memory_reserved()/1000000000}")
+                    print(f"total number representatives: {sum(len(nclass) for nclass in self.representatives)}")
+
+                if num_reps == 0:
+                    self.pick_candidates(x.detach().clone(), y.detach().clone())
                 else:
-                    self.random_buffer(x[:-n_reps], y[:-n_reps], output[:-n_reps])
-                self.random_modify_representatives(self.buffer_sizeed_reps)
-                self.clear_buffer_size()
+                    self.pick_candidates(x.detach().clone()[:-num_reps], y.detach().clone()[:-num_reps])
 
             outputs.append(output.detach())
-            total_loss += torch.mean(loss)
+            total_loss += torch.mean(loss).item()
 
             torch.cuda.nvtx.range_pop()
 
