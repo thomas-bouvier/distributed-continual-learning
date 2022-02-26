@@ -190,9 +190,9 @@ class nil_agent(Agent):
                 torch.cuda.nvtx.range_push("Combine batches")
                 rep_weights = torch.as_tensor([rep.weight for rep in reps])
                 rep_weights = move_cuda(rep_weights, self.cuda)
-                #hprint([rep.value for rep in reps])
-                rep_values = torch.stack([rep.value for rep in reps])
-                rep_labels = torch.stack([rep.label for rep in reps])
+                #hprint([rep.x for rep in reps])
+                rep_values = torch.stack([rep.x for rep in reps])
+                rep_labels = torch.stack([rep.y for rep in reps])
                 # Concatenates the training samples with the representatives
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
@@ -222,7 +222,8 @@ class nil_agent(Agent):
                 if hvd.local_rank() == 0:
                     print(f"allocated: {torch.cuda.memory_allocated()/1000000000}")
                     print(f"reserved: {torch.cuda.memory_reserved()/1000000000}")
-                    print(f"total number representatives: {sum(len(nclass) for nclass in self.representatives)}")
+                    print(f"total number of representatives: {sum(len(nclass) for nclass in self.representatives)}")
+                    print(f"total size of representatives: {sum(rep.get_size() for nclass in self.representatives for rep in nclass)}")
 
                 if num_reps == 0:
                     self.pick_candidates(x.detach().clone(), y.detach().clone())
