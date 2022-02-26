@@ -96,7 +96,7 @@ class icarl_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, 5))
-            meters['loss'].update(loss, x.size(0))
+            meters['loss'].update(loss)
             meters['prec1'].update(prec1, x.size(0))
             meters['prec5'].update(prec5, x.size(0))
 
@@ -111,7 +111,7 @@ class icarl_agent(Agent):
                                  meters=meters))
 
                 if self.writer is not None:
-                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)
+                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'], self.global_steps)
                     self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.global_steps)
                     self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.global_steps)
                     if training:
@@ -170,10 +170,6 @@ class icarl_agent(Agent):
         if training:
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.steps)
-            print("====================================")
-            print(f"epoch: {self.epoch}")
-            print(f"steps: {self.steps}")
-            print(f"lr: {self.optimizer.get_lr()[0]}")
 
         for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
                                        target_batch.chunk(chunk_batch, dim=0))):

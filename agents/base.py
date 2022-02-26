@@ -54,7 +54,7 @@ class Agent():
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, y, topk=(1, min(self.model.num_classes, 5)))
-            meters['loss'].update(loss, x.size(0))
+            meters['loss'].update(loss)
             meters['prec1'].update(prec1, x.size(0))
             meters['prec5'].update(prec5, x.size(0))
 
@@ -129,7 +129,7 @@ class Agent():
                 self.steps += 1
 
             outputs.append(output.detach())
-            total_loss += loss
+            total_loss += loss.item()
 
             torch.cuda.nvtx.range_pop()
 
