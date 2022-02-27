@@ -46,6 +46,12 @@ class nil_agent(Agent):
         else:
             return []
 
+    def get_num_representatives(self):
+        return sum(len(nclass) for nclass in self.representatives)
+
+    def get_memory_size(self):
+        return sum(rep.get_size() for nclass in self.representatives for rep in nclass)
+
     def pick_candidates(self, x, y):
         """
         Modify the representatives list by selecting candidates randomly from the
@@ -140,6 +146,8 @@ class nil_agent(Agent):
                     self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.global_steps)
                     if training:
                         self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.global_steps)
+                        self.writer.add_scalar('num_representatives', self.get_num_representatives(), self.global_steps)
+                        self.writer.add_scalar('memory_size', self.get_memory_size(), self.global_steps)
                     self.writer.flush()
                 if self.watcher is not None:
                     self.observe(trainer=self,
@@ -218,12 +226,6 @@ class nil_agent(Agent):
                 torch.cuda.nvtx.range_pop()
                 self.global_steps += 1
                 self.steps += 1
-
-                if hvd.local_rank() == 0:
-                    print(f"allocated: {torch.cuda.memory_allocated()/1000000000}")
-                    print(f"reserved: {torch.cuda.memory_reserved()/1000000000}")
-                    print(f"total number of representatives: {sum(len(nclass) for nclass in self.representatives)}")
-                    print(f"total size of representatives: {sum(rep.get_size() for nclass in self.representatives for rep in nclass)}")
 
                 if num_reps == 0:
                     self.pick_candidates(x.detach().clone(), y.detach().clone())

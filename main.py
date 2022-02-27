@@ -375,6 +375,9 @@ class Experiment():
 
                         task_metrics_values = dict(test_task_id=test_task_id+1, epoch=i_epoch)
                         task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
+                        if self.args.agent == 'nil':
+                            task_metrics_values.update({'num_representatives': self.agent.get_num_representatives()})
+                            task_metrics_values.update({'memory_size': self.agent.get_memory_size()})
                         task_metrics['test_task_metrics'].append(task_metrics_values)
                 torch.cuda.nvtx.range_pop()
 
