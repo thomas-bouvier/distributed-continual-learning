@@ -327,8 +327,6 @@ class Experiment():
             self.optimizer_regime.num_steps = len(self.train_data_regime.get_loader())
 
             # evaluate on test set
-            meters = {metric: AverageMeter(f"task_{metric}")
-                      for metric in ['loss', 'prec1', 'prec5']}
             torch.cuda.nvtx.range_push("Test")
             for test_task_id in range(0, task_id+1):
                 self.test_data_regime.set_task_id(test_task_id)
@@ -337,9 +335,6 @@ class Experiment():
 
                 if self.args.agent != 'icarl':
                     validate_results = self.agent.validate(self.test_data_regime)
-                    meters['loss'].update(validate_results['loss'])
-                    meters['prec1'].update(validate_results['prec1'])
-                    meters['prec5'].update(validate_results['prec5'])
 
                     if hvd.rank() == 0:
                         logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
@@ -364,8 +359,6 @@ class Experiment():
                 torch.cuda.nvtx.range_pop()
 
                 # evaluate on test set
-                meters = {metric: AverageMeter(f"task_{metric}")
-                          for metric in ['loss', 'prec1', 'prec5']}
                 torch.cuda.nvtx.range_push("Test")
                 if self.args.agent == 'icarl':
                     self.agent.update_examplars(self.agent.nc, training=False)
@@ -375,9 +368,6 @@ class Experiment():
                     self.test_data_regime.set_epoch(i_epoch)
 
                     validate_results = self.agent.validate(self.test_data_regime)
-                    meters['loss'].update(validate_results['loss'])
-                    meters['prec1'].update(validate_results['prec1'])
-                    meters['prec5'].update(validate_results['prec5'])
 
                     if hvd.rank() == 0:
                         logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
@@ -388,9 +378,9 @@ class Experiment():
                         task_metrics['test_task_metrics'].append(task_metrics_values)
                 torch.cuda.nvtx.range_pop()
 
-                if meters['loss'].avg < self.agent.minimal_eval_loss:
-                    logging.debug(f"Saving best model with minimal eval loss ({meters['loss'].avg})..")
-                    self.agent.minimal_eval_loss = meters['loss'].avg
+                if validate_results['loss'] < self.agent.minimal_eval_loss:
+                    logging.debug(f"Saving best model with minimal eval loss ({validate_results['loss']})..")
+                    self.agent.minimal_eval_loss = validate_results['loss']
                     self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
 
                 torch.cuda.nvtx.range_pop()
