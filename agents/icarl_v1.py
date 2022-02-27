@@ -57,6 +57,11 @@ class icarl_v1_agent(Agent):
         train_data_regime.get_loader(True)
         torch.cuda.nvtx.range_pop()
 
+        if self.best_model is not None:
+            logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
+            self.model.load_state_dict(self.best_model)
+            self.minimal_eval_loss = float('inf')
+
         # Create mask so the loss is only used for classes learnt during this task
         torch.cuda.nvtx.range_push("Create mask")
         self.nc = set([data[1] for data in train_data_regime.get_data()])

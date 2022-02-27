@@ -165,6 +165,7 @@ class Agent():
         if self.best_model is not None:
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
+            self.minimal_eval_loss = float('inf')
 
         if task_id > 0:
             if self.config.get('reset_state_dict', False):
@@ -173,7 +174,7 @@ class Agent():
             self.optimizer.reset(self.model.parameters())
 
     def after_every_task(self):
-        self.minimal_eval_loss = float('inf')
+        pass
 
     def after_every_epoch(self):
         pass
