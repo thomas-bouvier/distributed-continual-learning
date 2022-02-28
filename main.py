@@ -138,7 +138,7 @@ def main():
     if hvd.local_rank() == 0:
         if not path.exists(save_path):
             makedirs(save_path)
-    
+
     setup_logging(path.join(save_path, 'log.txt'),
                   dummy=hvd.local_rank() > 0)
 

@@ -121,7 +121,7 @@ class ResultsLog(object):
                            test_loss=test_loss)
         """
         df = pd.DataFrame([kwargs.values()], columns=kwargs.keys())
-        self.results = self.results.append(df, ignore_index=True)
+        self.results = pd.concat([self.results, df])
 
     def clear(self):
         self.figures = []
