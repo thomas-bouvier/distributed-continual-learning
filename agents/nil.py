@@ -65,8 +65,9 @@ class nil_agent(Agent):
             self.class_count[nclass] += 1
             if len(self.representatives[nclass]) >= self.num_representatives:
                 del self.representatives[nclass][self.num_representatives-1]
-                random.shuffle(self.representatives[nclass])
             self.representatives[nclass].append(Representative(x[i], y[i]))
+            for i in range(len(self.representatives)):
+                random.shuffle(self.representatives[i])
         self.recalculate_weights()
 
     def recalculate_weights(self):
@@ -229,9 +230,9 @@ class nil_agent(Agent):
                 self.steps += 1
 
                 if num_reps == 0:
-                    self.pick_candidates(x.detach().clone(), y.detach().clone())
+                    self.pick_candidates(x, y)
                 else:
-                    self.pick_candidates(x.detach().clone()[:-num_reps], y.detach().clone()[:-num_reps])
+                    self.pick_candidates(x[:-num_reps], y[:-num_reps])
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
