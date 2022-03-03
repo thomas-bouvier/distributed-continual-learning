@@ -74,6 +74,8 @@ parser.add_argument('--dataloader-workers', type=int, default=0,
                     help='number of dataloaders workers to spawn')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train (default: 10)')
+parser.add_argument('--no-evaluate', action='store_true',
+                    help='don\'t validate between training phases')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate for a single GPU (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
@@ -108,6 +110,7 @@ parser.add_argument('--tensorwatch-port', default=0, type=int,
 def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+    args.evaluate = not args.no_evaluate
 
     time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     if args.save_dir == '':
@@ -327,23 +330,29 @@ class Experiment():
             self.optimizer_regime.num_steps = len(self.train_data_regime.get_loader())
 
             # evaluate on test set
-            torch.cuda.nvtx.range_push("Test")
-            for test_task_id in range(0, task_id+1):
-                self.test_data_regime.set_task_id(test_task_id)
-                self.test_data_regime.get_loader(True)
-                self.test_data_regime.set_epoch(0)
+            if self.args.evaluate:
+                meters = {metric: AverageMeter(f"task_{metric}")
+                        for metric in ['loss', 'prec1', 'prec5']}
+                torch.cuda.nvtx.range_push("Test")
+                for test_task_id in range(0, task_id+1):
+                    self.test_data_regime.set_task_id(test_task_id)
+                    self.test_data_regime.get_loader(True)
+                    self.test_data_regime.set_epoch(0)
 
-                if self.args.agent != 'icarl':
-                    validate_results = self.agent.validate(self.test_data_regime)
+                    if self.args.agent != 'icarl':
+                        validate_results = self.agent.validate(self.test_data_regime)
+                        meters['loss'].update(validate_results['loss'])
+                        meters['prec1'].update(validate_results['prec1'])
+                        meters['prec5'].update(validate_results['prec5'])
 
-                    if hvd.rank() == 0:
-                        logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
-                                        .format(validate=validate_results))
+                        if hvd.rank() == 0:
+                            logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
+                                            .format(validate=validate_results))
 
-                        task_metrics_values = dict(test_task_id=test_task_id+1, epoch=0)
-                        task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
-                        task_metrics['test_task_metrics'].append(task_metrics_values)
-            torch.cuda.nvtx.range_pop()
+                            task_metrics_values = dict(test_task_id=test_task_id+1, epoch=0)
+                            task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
+                            task_metrics['test_task_metrics'].append(task_metrics_values)
+                torch.cuda.nvtx.range_pop()
 
             for i_epoch in range(0, self.args.epochs):
                 torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
@@ -359,34 +368,37 @@ class Experiment():
                 torch.cuda.nvtx.range_pop()
 
                 # evaluate on test set
-                torch.cuda.nvtx.range_push("Test")
-                if self.args.agent == 'icarl':
-                    self.agent.update_examplars(self.agent.nc, training=False)
-                for test_task_id in range(0, task_id+1):
-                    self.test_data_regime.set_task_id(test_task_id)
-                    self.test_data_regime.get_loader(True)
-                    self.test_data_regime.set_epoch(i_epoch)
+                if self.args.evaluate:
+                    meters = {metric: AverageMeter(f"task_{metric}")
+                            for metric in ['loss', 'prec1', 'prec5']}
+                    torch.cuda.nvtx.range_push("Test")
+                    if self.args.agent == 'icarl':
+                        self.agent.update_examplars(self.agent.nc, training=False)
+                    for test_task_id in range(0, task_id+1):
+                        self.test_data_regime.set_task_id(test_task_id)
+                        self.test_data_regime.get_loader(True)
+                        self.test_data_regime.set_epoch(i_epoch)
 
-                    validate_results = self.agent.validate(self.test_data_regime)
+                        validate_results = self.agent.validate(self.test_data_regime)
+                        meters['loss'].update(validate_results['loss'])
+                        meters['prec1'].update(validate_results['prec1'])
+                        meters['prec5'].update(validate_results['prec5'])
 
-                    if hvd.rank() == 0:
-                        logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
-                                        .format(validate=validate_results))
+                        if hvd.rank() == 0:
+                            logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
+                                            .format(validate=validate_results))
 
-                        task_metrics_values = dict(test_task_id=test_task_id+1, epoch=i_epoch)
-                        task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
-                        if self.args.agent == 'nil':
-                            task_metrics_values.update({'num_representatives': self.agent.get_num_representatives()})
-                            task_metrics_values.update({'memory_size': self.agent.get_memory_size()})
-                        task_metrics['test_task_metrics'].append(task_metrics_values)
-                torch.cuda.nvtx.range_pop()
+                            task_metrics_values = dict(test_task_id=test_task_id+1, epoch=i_epoch)
+                            task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
+                            task_metrics['test_task_metrics'].append(task_metrics_values)
+                    torch.cuda.nvtx.range_pop()
 
-                if validate_results['loss'] < self.agent.minimal_eval_loss:
-                    logging.debug(f"Saving best model with minimal eval loss ({validate_results['loss']})..")
-                    self.agent.minimal_eval_loss = validate_results['loss']
-                    self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
+                    if meters['loss'].avg < self.agent.minimal_eval_loss:
+                        logging.debug(f"Saving best model with minimal eval loss ({meters['loss'].avg})..")
+                        self.agent.minimal_eval_loss = meters['loss'].avg
+                        self.agent.best_model = copy.deepcopy(self.agent.model.state_dict())
 
-                torch.cuda.nvtx.range_pop()
+                    torch.cuda.nvtx.range_pop()
 
                 self.agent.after_every_epoch()
 
