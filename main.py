@@ -227,7 +227,7 @@ class Experiment():
             'momentum': self.args.momentum,
             'weight_decay': self.args.weight_decay
         }])
-        logging.info("Optimizer regime: %s", optim_regime)
+        logging.info(f"Optimizer regime: {optim_regime}")
 
         # Distributed training parameters
         compression = hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none

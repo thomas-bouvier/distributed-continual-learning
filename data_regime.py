@@ -11,7 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from data import get_dataset
 from preprocess import get_transform
-from regime import Regime      
+from regime import Regime
 from sampler import MyDistributedSampler
 
 
@@ -125,8 +125,9 @@ class DataRegime(object):
 
     def set_task_id(self, task_id):
         logging.debug(f"DATA REGIME {self.config['data']['split']} - set task id: {task_id+1}")
-        self.task_id = task_id
-        self.get_data(True)
+        if self.task_id != task_id:
+            self.task_id = task_id
+            self.get_data(True)
 
     def __len__(self):
         return len(self._data) or 1

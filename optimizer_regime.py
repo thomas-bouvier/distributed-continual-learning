@@ -38,7 +38,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         """Adjust optimizer according to current epoch or steps and training regime.
         """
         if super(OptimizerRegime, self).update(epoch, steps):
-            logging.debug(f"OPTIMIZER REGIME - update (epoch: {epoch}, steps: {steps})")
+            logging.debug(f"OPTIMIZER REGIME - update (epoch: {epoch+1}, steps: {steps+1})")
             self.adjust_from_config(self.config)
 
     def adjust_from_config(self, config):
