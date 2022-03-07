@@ -101,6 +101,12 @@ class nil_agent(Agent):
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float('inf')
 
+        if task_id > 0:
+            if self.config.get('reset_state_dict', False):
+                logging.debug(f"Resetting model internal state..")
+                self.model.load_state_dict(copy.deepcopy(self.initial_snapshot))
+            self.optimizer.reset(self.model.parameters())
+
         # Add the new classes to the mask
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])

@@ -166,7 +166,6 @@ class Agent():
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float('inf')
-
         if task_id > 0:
             if self.config.get('reset_state_dict', False):
                 logging.debug(f"Resetting model internal state..")

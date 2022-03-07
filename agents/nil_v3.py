@@ -16,80 +16,80 @@ from utils.meters import AverageMeter, accuracy
 
 
 def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_candidates, num_representatives, batch_size, cuda, rank):
-        representatives = [[] for _ in range(num_classes)]
-        class_count = [0 for _ in range(num_classes)]
+    representatives = [[] for _ in range(num_classes)]
+    class_count = [0 for _ in range(num_classes)]
+    buffer_sizeed_reps = []
+    reps_x, reps_y, reps_w = q_new_batch.get()
+    device = rank % 4
+
+    while True:
+        #Get new batch
+        new_batch = q_new_batch.get()
+
+        if new_batch == 0:
+            return
+
+        x = new_batch[0].clone()
+        y = new_batch[1].clone()
+
+        del new_batch
+
+        samples = torch.randperm(min(num_candidates, len(x)))
+
+        image_batch = x.clone()[samples]
+        target_batch = y.clone()[samples]
+
+        for i in range(len(image_batch)):
+            buffer_sizeed_reps.append(Representative(image_batch[i].clone(), target_batch[i].clone()))
+
+        for i, _ in enumerate(buffer_sizeed_reps):
+            nclass = int(buffer_sizeed_reps[i].label.item())
+            representatives[nclass].append(buffer_sizeed_reps[i])
+            class_count[nclass] += 1
+        
         buffer_sizeed_reps = []
-        reps_x, reps_y, reps_w = q_new_batch.get()
-        device = rank % 4
 
-        while True:
-            #Get new batch
-            new_batch = q_new_batch.get()
+        for i in range(len(representatives)):
+            rand_indices = np.random.permutation(len(representatives[i]))
+            representatives[i] = [representatives[i][j] for j in rand_indices]
+            representatives[i] = representatives[i][:num_representatives]
 
-            if new_batch == 0:
-                return
+        # Update weights of reps
+        total_count = sum(class_count)
+        total_weight = (batch_size * 1.0) / num_candidates
+        total_weight *= (total_count / np.sum([len(cls) for cls in representatives]))
 
-            x = new_batch[0].clone()
-            y = new_batch[1].clone()
+        probs = [count / total_count for count in class_count]
 
-            del new_batch
+        for i in range(len(representatives)):
+            for rep in representatives[i]:
+                rep.weight = max(math.log(probs[i] * total_weight), 1.0)
+        
+        #Send next batch's candidates 
+        repr_list = [a for sublist in representatives for a in sublist]
 
-            samples = torch.randperm(min(num_candidates, len(x)))
+        while len(repr_list) < (num_candidates if len(x) == batch_size else (num_candidates + batch_size)):
+            repr_list += [a for sublist in representatives for a in sublist]
 
-            image_batch = x.clone()[samples]
-            target_batch = y.clone()[samples]
+        sampled = random.sample(repr_list, (num_candidates if len(x) == batch_size else (num_candidates + batch_size - len(x))))
 
-            for i in range(len(image_batch)):
-                buffer_sizeed_reps.append(Representative(image_batch[i].clone(), target_batch[i].clone()))
+        n_reps_x = torch.stack([a.value for a in sampled])
+        n_reps_y = torch.tensor([a.label.item() for a in sampled])
+        n_reps_w = torch.tensor([a.weight for a in sampled])
 
-            for i, _ in enumerate(buffer_sizeed_reps):
-                nclass = int(buffer_sizeed_reps[i].label.item())
-                representatives[nclass].append(buffer_sizeed_reps[i])
-                class_count[nclass] += 1
-            
-            buffer_sizeed_reps = []
+        w = torch.ones(len(x))
 
-            for i in range(len(representatives)):
-                rand_indices = np.random.permutation(len(representatives[i]))
-                representatives[i] = [representatives[i][j] for j in rand_indices]
-                representatives[i] = representatives[i][:num_representatives]
+        w = torch.cat([w, n_reps_w])
+        x = torch.cat([x, n_reps_x])
+        y = torch.cat([y, n_reps_y])
 
-            # Update weights of reps
-            total_count = sum(class_count)
-            total_weight = (batch_size * 1.0) / num_candidates
-            total_weight *= (total_count / np.sum([len(cls) for cls in representatives]))
-
-            probs = [count / total_count for count in class_count]
-
-            for i in range(len(representatives)):
-                for rep in representatives[i]:
-                    rep.weight = max(math.log(probs[i] * total_weight), 1.0)
-            
-            #Send next batch's candidates 
-            repr_list = [a for sublist in representatives for a in sublist]
-
-            while len(repr_list) < (num_candidates if len(x) == batch_size else (num_candidates + batch_size)):
-                repr_list += [a for sublist in representatives for a in sublist]
-
-            sampled = random.sample(repr_list, (num_candidates if len(x) == batch_size else (num_candidates + batch_size - len(x))))
-
-            n_reps_x = torch.stack([a.value for a in sampled])
-            n_reps_y = torch.tensor([a.label.item() for a in sampled])
-            n_reps_w = torch.tensor([a.weight for a in sampled])
-
-            w = torch.ones(len(x))
-
-            w = torch.cat([w, n_reps_w])
-            x = torch.cat([x, n_reps_x])
-            y = torch.cat([y, n_reps_y])
-
-            lock_make.acquire()
-            lock.acquire()
-            reps_x[0] = move_cuda(x, cuda, device)
-            reps_y[0] = move_cuda(y, cuda, device)
-            reps_w[0] = move_cuda(w, cuda, device)
-            lock.release()
-            lock_made.release()
+        lock_make.acquire()
+        lock.acquire()
+        reps_x[0] = move_cuda(x, cuda, device)
+        reps_y[0] = move_cuda(y, cuda, device)
+        reps_w[0] = move_cuda(w, cuda, device)
+        lock.release()
+        lock_made.release()
 
 
 class nil_v3_agent(Agent):
@@ -132,7 +132,6 @@ class nil_v3_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
-        torch.cuda.empty_cache()
 
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
@@ -143,6 +142,11 @@ class nil_v3_agent(Agent):
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float('inf')
+        if task_id > 0:
+            if self.config.get('reset_state_dict', False):
+                logging.debug(f"Resetting model internal state..")
+                self.model.load_state_dict(copy.deepcopy(self.initial_snapshot))
+            self.optimizer.reset(self.model.parameters())
 
         # Add the new classes to the mask
         torch.cuda.nvtx.range_push("Create mask")

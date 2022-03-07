@@ -50,7 +50,6 @@ class icarl_v1_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
-        torch.cuda.empty_cache()
 
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
@@ -61,6 +60,11 @@ class icarl_v1_agent(Agent):
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float('inf')
+        if task_id > 0:
+            if self.config.get('reset_state_dict', False):
+                logging.debug(f"Resetting model internal state..")
+                self.model.load_state_dict(copy.deepcopy(self.initial_snapshot))
+            self.optimizer.reset(self.model.parameters())
 
         # Create mask so the loss is only used for classes learnt during this task
         torch.cuda.nvtx.range_push("Create mask")
@@ -310,7 +314,6 @@ class icarl_v1_agent(Agent):
 
                     dist_memf_c = None
                     tmp_mem_x = None
-                    torch.cuda.empty_cache()
 
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
@@ -360,7 +363,6 @@ class icarl_v1_agent(Agent):
                 self.mean_features = torch.stack(tuple(self.mem_class_means.values()))
 
         del tmp_features
-        torch.cuda.empty_cache()
         if training:
             self.buf_x = None
             self.buf_y = None

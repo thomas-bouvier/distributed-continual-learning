@@ -133,7 +133,6 @@ class nil_v1_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
-        torch.cuda.empty_cache()
 
         # Distribute the data
         torch.cuda.nvtx.range_push("Distribute dataset")
@@ -144,6 +143,11 @@ class nil_v1_agent(Agent):
             logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float('inf')
+        if task_id > 0:
+            if self.config.get('reset_state_dict', False):
+                logging.debug(f"Resetting model internal state..")
+                self.model.load_state_dict(copy.deepcopy(self.initial_snapshot))
+            self.optimizer.reset(self.model.parameters())
 
         # Add the new classes to the mask
         torch.cuda.nvtx.range_push("Create mask")
