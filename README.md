@@ -71,6 +71,24 @@ python main.py --model <model> --dataset <dataset> --tasksets-config "{<..taskse
 python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets-config>}"
 ```
 
+#### NIL implementations
+
+**nil**: default implementation, without parallel memory management
+
+**nil_v1**: synchronous parallel memory management, representatives are synchronized using `Queue`s. The memory manager waits until the main process sends candidates, and the main process waits until the memory manager fills the shared buffer with new representatives. *First implementation v1*.
+
+**nil_v2**: asynchronous version of **nil_v1**. The main process doesn’t wait for the memory manager to fill the shared buffer. If the episodic memory update takes longer than the training time, the process is sped up with the drawback of reusing the same representatives multiple times in a row. *First implementation v2*.
+
+**nil_v3**: management of the episodic memory including the creation of batches from the taskset, their copy on the GPU, the selection of candidates and the concatenation of batches with selected representatives.
+
+**nil_v4**: **nil_v3** including batch sampling. *Second implementation*.
+
+**global**: strategy where representatives are shared between workers
+#### iCaRL implementations
+
+**icarl**: default implementation, without parallel memory management
+
+**icarl_v1**: parallel memory management but very little impact observed
 ## Credits
 
 Some parts of the project are inspired by https://github.com/eladhoffer/convNet.pytorch.
