@@ -4,4 +4,4 @@ results
 mlruns
 trace.json
 args.json
-min.py
+min*.py
