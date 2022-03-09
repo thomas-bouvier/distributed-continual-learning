@@ -451,13 +451,22 @@ class Experiment():
         self.agent.after_all_tasks()
         total_end = time.time()
 
-        img_sec_mean = np.mean(img_secs)
-        img_sec_conf = 1.96 * np.std(img_secs)
-        logging.info('\nFINAL RESULTS:')
-        logging.info(f"Total time: {total_end - total_start}")
-        logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
-        logging.info('Average on %d device(s): %.1f +-%.1f' %
-            (hvd.size(), hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
+        if hvd.rank() == 0:
+            img_sec_mean = np.mean(img_secs)
+            img_sec_conf = 1.96 * np.std(img_secs)
+            logging.info('\nFINAL RESULTS:')
+            logging.info(f"Total time: {total_end - total_start}")
+            logging.info('Average: %.1f +-%.1f samples/sec per device' % (img_sec_mean, img_sec_conf))
+            logging.info('Average on %d device(s): %.1f +-%.1f' %
+                (hvd.size(), hvd.size() * img_sec_mean, hvd.size() * img_sec_conf))
+
+            values = {
+                'total_time': total_end - total_start,
+                'training img_sec': img_sec_mean,
+                'training total_img_sec': img_sec_mean * hvd.size()
+            }
+            time_metrics.add(**values)
+            time_metrics.save()
 
         save_checkpoint({
             'task': len(self.train_data_regime.tasksets),
@@ -466,17 +475,6 @@ class Experiment():
             'model_config': self.args.model_config,
             'state_dict': self.agent.model.state_dict()
         }, is_final=True, path=self.save_path)
-
-        values = {
-            'total_time': total_end-total_start,
-            'training img_sec': img_sec_mean,
-            'training total_img_sec': img_sec_mean * hvd.size()
-        }
-        time_metrics.add(**values)
-        time_metrics.save()
-
-        return train_results
-
 
 if __name__ == "__main__":
     main()
