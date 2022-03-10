@@ -8,7 +8,6 @@ import nvtx
 import os
 import pickle
 import time
-import torch.multiprocessing as mp
 import torch.utils.data.distributed
 
 from ast import literal_eval
@@ -154,24 +153,14 @@ def main():
         with open(path.join(save_path, 'args.json'), 'w') as f:
             json.dump(args.__dict__, f, indent=2)
 
-    # https://github.com/horovod/horovod/issues/2053
-    kwargs = {'num_workers': args.dataloader_workers, 'pin_memory': True} if args.cuda else {}
-    # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
-    # issues with Infiniband implementations that are not fork-safe
-    if (kwargs.get('num_workers', 0) > 0 and hasattr(mp, '_supports_context') and
-            mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
-        kwargs['multiprocessing_context'] = 'forkserver'
-    logging.debug("Multiprocessing arguments: %s", kwargs)
-
-    xp = Experiment(save_path, args, kwargs)
+    xp = Experiment(save_path, args)
     xp.run()
 
 
 class Experiment():
-    def __init__(self, save_path, args, kwargs):
+    def __init__(self, save_path, args):
         self.save_path = save_path
         self.args = args
-        self.kwargs = kwargs
 
         self._create_agent()
         self._prepare_dataset()
@@ -269,6 +258,7 @@ class Experiment():
             'dataset_dir': self.args.dataset_dir,
             'distributed': True,
             'pin_memory': True,
+            'num_workers': self.args.dataloader_workers, # https://github.com/horovod/horovod/issues/2053
             'shard': self.args.shard,
             'continual': tasksets_config.get('continual'),
             'scenario': tasksets_config.get('scenario', 'class'),

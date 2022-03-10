@@ -2,6 +2,7 @@ import horovod.torch as hvd
 import logging
 import numpy as np
 import torch
+import torch.multiprocessing as mp
 
 from copy import deepcopy
 from continuum import ClassIncremental, InstanceIncremental
@@ -61,6 +62,12 @@ class DataRegime(object):
                         self._data, num_replicas=hvd.size(), rank=hvd.rank()
                     )
             self.sampler = self.config['loader'].get('sampler', None)
+
+            # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
+            # issues with Infiniband implementations that are not fork-safe
+            if (self.config['loader']['num_workers'] > 0 and hasattr(mp, '_supports_context') and
+                mp._supports_context and 'forkserver' in mp.get_all_start_methods()):
+                self.config['loader']['multiprocessing_context'] = 'forkserver'
 
             self.loader = DataLoader(self._data, **self.config['loader'])
             logging.debug(f"DATA REGIME {self.config['data']['split']} - distributed")
