@@ -66,8 +66,6 @@ class nil_agent(Agent):
             if len(self.representatives[nclass]) >= self.num_representatives:
                 del self.representatives[nclass][self.num_representatives-1]
             self.representatives[nclass].append(Representative(x[i], y[i]))
-            for i in range(len(self.representatives)):
-                random.shuffle(self.representatives[i])
         self.recalculate_weights()
 
     def recalculate_weights(self):
@@ -83,10 +81,9 @@ class nil_agent(Agent):
         probs = [count / total_count for count in self.class_count]
         for i in range(len(self.representatives)):
             if self.class_count[i] > 0:
-                weight = max(math.log(probs[i].item() * total_weight), 1.0)
                 for rep in self.representatives[i]:
                     # This version uses natural log as an stabilizer
-                    rep.weight = weight
+                    rep.weight = max(math.log(probs[i].item() * total_weight), 1.0)
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -206,9 +203,8 @@ class nil_agent(Agent):
                 torch.cuda.nvtx.range_push("Combine batches")
                 rep_weights = torch.as_tensor([rep.weight for rep in reps])
                 rep_weights = move_cuda(rep_weights, self.cuda)
-                #hprint([rep.x for rep in reps])
-                rep_values = torch.stack([rep.x for rep in reps])
-                rep_labels = torch.stack([rep.y for rep in reps])
+                rep_values = move_cuda(torch.stack([rep.x for rep in reps]), self.cuda)
+                rep_labels = move_cuda(torch.stack([rep.y for rep in reps]), self.cuda)
                 # Concatenates the training samples with the representatives
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
@@ -236,9 +232,9 @@ class nil_agent(Agent):
                 self.steps += 1
 
                 if num_reps == 0:
-                    self.pick_candidates(x, y)
+                    self.pick_candidates(x.detach().cpu(), y.detach().cpu())
                 else:
-                    self.pick_candidates(x[:-num_reps], y[:-num_reps])
+                    self.pick_candidates(x.detach().cpu()[:-num_reps], y.detach().cpu()[:-num_reps])
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
