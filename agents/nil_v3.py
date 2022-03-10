@@ -18,20 +18,16 @@ from utils.meters import AverageMeter, accuracy
 def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_candidates, num_representatives, batch_size, cuda, rank):
     representatives = [[] for _ in range(num_classes)]
     class_count = [0 for _ in range(num_classes)]
-    buffer_sizeed_reps = []
     reps_x, reps_y, reps_w = q_new_batch.get()
-    device = rank % 4
 
     while True:
-        #Get new batch
+        # Get new batch
         new_batch = q_new_batch.get()
-
         if new_batch == 0:
             return
 
         x = new_batch[0].clone()
         y = new_batch[1].clone()
-
         del new_batch
 
         samples = torch.randperm(min(num_candidates, len(x)))
@@ -39,26 +35,20 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
         image_batch = x.clone()[samples]
         target_batch = y.clone()[samples]
 
-        for i in range(len(image_batch)):
-            buffer_sizeed_reps.append(Representative(image_batch[i].clone(), target_batch[i].clone()))
-
-        for i, _ in enumerate(buffer_sizeed_reps):
-            nclass = int(buffer_sizeed_reps[i].label.item())
-            representatives[nclass].append(buffer_sizeed_reps[i])
+        rand_indices = torch.from_numpy(np.random.permutation(len(x)))
+        x = x[rand_indices]  # The data is ordered according to the indices
+        y = y[rand_indices]
+        for i in range(min(num_candidates, len(x))):
+            nclass = y[i].item()
             class_count[nclass] += 1
-        
-        buffer_sizeed_reps = []
-
-        for i in range(len(representatives)):
-            rand_indices = np.random.permutation(len(representatives[i]))
-            representatives[i] = [representatives[i][j] for j in rand_indices]
-            representatives[i] = representatives[i][:num_representatives]
+            if len(selrepresentatives[nclass]) >= num_representatives:
+                del representatives[nclass][num_representatives-1]
+            representatives[nclass].append(Representative(x[i], y[i]))
 
         # Update weights of reps
         total_count = sum(class_count)
         total_weight = (batch_size * 1.0) / num_candidates
         total_weight *= (total_count / np.sum([len(cls) for cls in representatives]))
-
         probs = [count / total_count for count in class_count]
 
         for i in range(len(representatives)):
@@ -85,9 +75,9 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
 
         lock_make.acquire()
         lock.acquire()
-        reps_x[0] = move_cuda(x, cuda, device)
-        reps_y[0] = move_cuda(y, cuda, device)
-        reps_w[0] = move_cuda(w, cuda, device)
+        reps_x[0] = move_cuda(x, cuda)
+        reps_y[0] = move_cuda(y, cuda)
+        reps_w[0] = move_cuda(w, cuda)
         lock.release()
         lock_made.release()
 
@@ -181,7 +171,7 @@ class nil_v3_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, min(self.model.num_classes, 5)))
-            meters['loss'].update(loss, x.size(0))
+            meters['loss'].update(loss)
             meters['prec1'].update(prec1, x.size(0))
             meters['prec5'].update(prec5, x.size(0))
 
@@ -239,9 +229,6 @@ class nil_v3_agent(Agent):
             x.share_memory_()  # The data is ordered according to the indices
             y.share_memory_()
             self.q_new_batch.put((x, y))
-
-            #if batch_id == 0 and epoch == 0 and task_id == 0:
-            #    continue
 
             torch.cuda.nvtx.range_push(f"Wait for representatives")
             self.lock_made.acquire()

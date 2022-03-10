@@ -15,37 +15,29 @@ from utils.utils import move_cuda
 from utils.meters import AverageMeter, accuracy
 
 
-def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_candidates, nb_representatives, batch_size, cuda, rank):
+def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_candidates, num_representatives, batch_size, cuda):
     representatives = [[] for _ in range(num_classes)]
     class_count = [0 for _ in range(num_classes)]
-    buffer_sizeed_reps = []
-    device = rank % 4
 
     while True:
-        #Get new batch
-        new_batch = q_new_batch.get()
-        if new_batch == 0:
+        # Get new batch
+        item = q_new_batch.get()
+        if item == 0:
             return
 
-        image_batch = move_cuda(new_batch[0].clone(), cuda, device)
-        target_batch = move_cuda(new_batch[1].clone(), cuda, device)
+        x = move_cuda(item[0].clone(), cuda)
+        y = move_cuda(item[1].clone(), cuda)
+        del item
 
-        for i in range(len(image_batch)):
-            buffer_sizeed_reps.append(Representative(image_batch[i].clone(), target_batch[i].clone()))
-
-        del image_batch, target_batch
-
-        for i, _ in enumerate(buffer_sizeed_reps):
-            nclass = int(buffer_sizeed_reps[i].label.item())
-            representatives[nclass].append(buffer_sizeed_reps[i])
+        rand_indices = torch.from_numpy(np.random.permutation(len(x)))
+        x = x[rand_indices]  # The data is ordered according to the indices
+        y = y[rand_indices]
+        for i in range(min(num_candidates, len(x))):
+            nclass = y[i].item()
             class_count[nclass] += 1
-
-        buffer_sizeed_reps = []
-
-        for i in range(len(representatives)):
-            rand_indices = np.random.permutation(len(representatives[i]))
-            representatives[i] = [representatives[i][j] for j in rand_indices]
-            representatives[i] = representatives[i][:nb_representatives]
+            if len(selrepresentatives[nclass]) >= num_representatives:
+                del representatives[nclass][num_representatives-1]
+            representatives[nclass].append(Representative(x[i], y[i]))
 
         # Update weights of reps
         total_count = sum(class_count)
@@ -55,10 +47,9 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_c
 
         for i in range(len(representatives)):
             if class_count[i] > 0:
-                weight = max(math.log(probs[i] * total_weight), 1.0)
                 for rep in representatives[i]:
                     # This version uses natural log as an stabilizer
-                    rep.weight = weight
+                    rep.weight = max(math.log(probs[i] * total_weight), 1.0)
 
         #Send next batch's candidates 
         repr_list = [a for sublist in representatives for a in sublist]
@@ -81,7 +72,7 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_c
             samples = random.sample(repr_list, num_candidates)
             n_reps_x = torch.stack([a.value for a in samples]) - reps_x
             n_reps_y = torch.stack([a.label for a in samples]) - reps_y
-            n_reps_w = move_cuda(torch.tensor([a.weight for a in samples]), cuda, device) - reps_w
+            n_reps_w = move_cuda(torch.tensor([a.weight for a in samples]), cuda) - reps_w
 
             lock.acquire()
             reps_x += n_reps_x
@@ -170,7 +161,7 @@ class nil_v2_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, min(self.model.num_classes, 5)))
-            meters['loss'].update(loss, x.size(0))
+            meters['loss'].update(loss)
             meters['prec1'].update(prec1, x.size(0))
             meters['prec5'].update(prec5, x.size(0))
 
@@ -225,25 +216,26 @@ class nil_v2_agent(Agent):
                                        target_batch.chunk(chunk_batch, dim=0))):
             torch.cuda.nvtx.range_push(f"Chunk {i}")
 
-            torch.cuda.nvtx.range_push(f"Get representatives")
-            self.lock.acquire()
-            rep_values = self.reps_x.clone()
-            rep_labels = self.reps_y.clone()
-            rep_weights = self.reps_w.clone()
-            self.lock.release()
-            if rep_weights[-1] == 0 :
-                n_reps = 0
-            else:
-                n_reps = len(self.reps_x)
-            torch.cuda.nvtx.range_pop()
+            if training:
+                torch.cuda.nvtx.range_push(f"Get representatives")
+                self.lock.acquire()
+                rep_values = self.reps_x.clone()
+                rep_labels = self.reps_y.clone()
+                rep_weights = self.reps_w.clone()
+                self.lock.release()
+                if rep_weights[-1] == 0 :
+                    n_reps = 0
+                else:
+                    n_reps = len(self.reps_x)
+                torch.cuda.nvtx.range_pop()
 
-            # select next samples to become representatives
-            torch.cuda.nvtx.range_push(f"Update representatives")
-            rand_indices = torch.from_numpy(np.random.permutation(min(self.num_candidates, len(x))))
-            reps_x = x[rand_indices].clone().share_memory_()  # The data is ordered according to the indices
-            reps_y = y[rand_indices].clone().share_memory_()
-            self.q_new_batch.put((reps_x, reps_y))
-            torch.cuda.nvtx.range_pop()
+                # select next samples to become representatives
+                torch.cuda.nvtx.range_push(f"Update representatives")
+                rand_indices = torch.from_numpy(np.random.permutation(min(self.num_candidates, len(x))))
+                reps_x = x[rand_indices].clone().share_memory_()  # The data is ordered according to the indices
+                reps_y = y[rand_indices].clone().share_memory_()
+                self.q_new_batch.put((reps_x, reps_y))
+                torch.cuda.nvtx.range_pop()
 
             # Create batch weights
             w = torch.ones(len(x))
@@ -251,7 +243,7 @@ class nil_v2_agent(Agent):
             x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
             torch.cuda.nvtx.range_pop()
 
-            if n_reps > 0:
+            if training and n_reps > 0:
                 # Concatenates the training samples with the representatives
                 torch.cuda.nvtx.range_push("Combine batches")
                 w = torch.cat((w, rep_weights))
