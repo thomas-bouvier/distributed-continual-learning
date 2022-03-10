@@ -11,7 +11,7 @@ import torch.optim as optim
 
 from agents.base import Agent
 from utils.cl import Representative
-from utils.utils import move_cuda
+from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 
@@ -166,11 +166,11 @@ class nil_v4_agent(Agent):
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
 
-        self.class_count = [0 for _ in range(model.num_classes)]
-
         self.memory_size = config.get('num_representatives') # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20) # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
+
+        self.mask = torch.as_tensor([0.0 for _ in range(self.model.num_classes)], device=torch.device(get_device(self.cuda)))
 
     def before_all_tasks(self, train_data_regime, validate_data_regime):
         self.x_dim = list(train_data_regime.tasksets[0][0][0].size())
@@ -185,7 +185,7 @@ class nil_v4_agent(Agent):
         self.lock_made = mp.Lock()
         self.lock_made.acquire()
 
-        self.p = mp.Process(target=memory_manager, args=[train_data_regime, validate_data_regime, self.q, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda, hvd.size(), hvd.rank()])
+        self.p = mp.Process(target=memory_manager, args=[train_data_regime, validate_data_regime, self.q, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda])
         self.p.start()
         self.q.put((self.reps_x, self.reps_y, self.reps_w))
 
@@ -210,10 +210,8 @@ class nil_v4_agent(Agent):
         # Create mask so the loss is only used for classes learnt during this task
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
-        mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
-            mask[y] = True
-        self.mask = move_cuda(mask.float(), self.cuda)
+            mask[y] = 1.0
         torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')

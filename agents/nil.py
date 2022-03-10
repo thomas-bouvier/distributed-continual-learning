@@ -14,7 +14,7 @@ from agents.nil_v2 import nil_v2_agent
 from agents.nil_v3 import nil_v3_agent
 from agents.nil_v4 import nil_v4_agent
 from utils.cl import Representative
-from utils.utils import move_cuda
+from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 class nil_agent(Agent):
@@ -30,8 +30,7 @@ class nil_agent(Agent):
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
 
-        mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
-        self.mask = move_cuda(mask.float(), self.cuda)
+        self.mask = torch.as_tensor([0.0 for _ in range(self.model.num_classes)], device=torch.device(get_device(self.cuda)))
 
     def get_representatives(self):
         """
@@ -108,7 +107,7 @@ class nil_agent(Agent):
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
         for y in nc:
-            self.mask[y] = True
+            self.mask[y] = 1.0
         torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
@@ -194,15 +193,14 @@ class nil_agent(Agent):
                 num_reps = len(reps)
 
             # Create batch weights
-            w = torch.ones(len(x))
+            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             torch.cuda.nvtx.range_push("Copy to device")
-            x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
 
             if training and num_reps > 0:
                 torch.cuda.nvtx.range_push("Combine batches")
-                rep_weights = torch.as_tensor([rep.weight for rep in reps])
-                rep_weights = move_cuda(rep_weights, self.cuda)
+                rep_weights = torch.as_tensor([rep.weight for rep in reps], device=torch.device(get_device(self.cuda)))
                 rep_values = move_cuda(torch.stack([rep.x for rep in reps]), self.cuda)
                 rep_labels = move_cuda(torch.stack([rep.y for rep in reps]), self.cuda)
                 # Concatenates the training samples with the representatives

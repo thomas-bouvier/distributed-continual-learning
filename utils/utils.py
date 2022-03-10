@@ -1,5 +1,10 @@
 import torch
 
+def get_device(use_cuda=True):
+    if use_cuda and torch.cuda.is_available():
+        return 'cuda'
+    return 'cpu'
+
 def move_cuda(item, use_cuda=True, cuda_device=-1):
     """
     Moves the given item to CUDA and returns it, if `use_cuda` is available.

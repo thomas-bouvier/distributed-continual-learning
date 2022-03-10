@@ -11,7 +11,7 @@ import torch.optim as optim
 
 from agents.base import Agent
 from utils.cl import Representative
-from utils.utils import move_cuda
+from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 
@@ -34,12 +34,12 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, lock_make, lock_ma
         rand_indices = torch.from_numpy(np.random.permutation(len(x)))
         x = x[rand_indices]  # The data is ordered according to the indices
         y = y[rand_indices]
-        for i in range(min(self.num_candidates, len(x))):
+        for i in range(min(num_candidates, len(x))):
             nclass = y[i].item()
-            self.class_count[nclass] += 1
-            if len(self.representatives[nclass]) >= self.num_representatives:
-                del self.representatives[nclass][self.num_representatives-1]
-            self.representatives[nclass].append(Representative(x[i], y[i]))
+            class_count[nclass] += 1
+            if len(representatives[nclass]) >= num_representatives:
+                del representatives[nclass][num_representatives-1]
+            representatives[nclass].append(Representative(x[i], y[i]))
 
         if num_candidates > 0:
             # Update weights of reps
@@ -51,7 +51,7 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, lock_make, lock_ma
                 for rep in representatives[i]:
                     rep.weight = max(math.log(probs[i] * total_weight), 1.0)
 
-            #Send next batch's candidates 
+            # Send next batch's candidates
             repr_list = [a for sublist in representatives for a in sublist]
             if len(repr_list) > 0:
                 while len(repr_list) < num_candidates:
@@ -93,13 +93,11 @@ class nil_v1_agent(Agent):
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
 
-        self.class_count = [0 for _ in range(model.num_classes)]
-
         self.memory_size = config.get('num_representatives', 6000)   # number of stored examples per class
         self.num_candidates = config.get('num_candidates', 20)   # number of representatives used to increment batches and to update representatives
         self.batch_size = config.get('batch_size')
 
-        self.val_set = None
+        self.mask = torch.as_tensor([0.0 for _ in range(self.model.num_classes)], device=torch.device(get_device(self.cuda)))
 
     def before_all_tasks(self, train_data_regime):
         x_dim = list(train_data_regime.tasksets[0][0][0].size())
@@ -114,7 +112,7 @@ class nil_v1_agent(Agent):
         self.lock_make.acquire()
         self.lock_made = mp.Lock()
 
-        self.p = mp.Process(target=memory_manager, args=[self.q_new_batch, self.reps_x, self.reps_y, self.reps_w, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda, hvd.rank()])
+        self.p = mp.Process(target=memory_manager, args=[self.q_new_batch, self.reps_x, self.reps_y, self.reps_w, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda])
         self.p.start()
 
     def after_all_tasks(self):
@@ -143,10 +141,8 @@ class nil_v1_agent(Agent):
         # Add the new classes to the mask
         torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
-        mask = torch.as_tensor([False for _ in range(self.model.num_classes)])
         for y in nc:
-            mask[y] = True
-        self.mask = move_cuda(mask.float(), self.cuda)
+            self.mask[y] = 1.0
         torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
@@ -248,9 +244,9 @@ class nil_v1_agent(Agent):
                 torch.cuda.nvtx.range_pop()
 
             # Create batch weights
-            w = torch.ones(len(x))
+            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             torch.cuda.nvtx.range_push("Copy to device")
-            x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
 
             if training and n_reps > 0:
