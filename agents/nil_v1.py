@@ -60,8 +60,8 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, lock_make, lock_ma
                 # Version without concurrent reads
 
                 #samples = random.sample(repr_list, num_candidates)
-                #n_reps_x = torch.stack([a.value for a in samples])
-                #n_reps_y = torch.tensor([a.label.item() for a in samples])
+                #n_reps_x = torch.stack([a.x for a in samples])
+                #n_reps_y = torch.tensor([a.y.item() for a in samples])
                 #n_reps_w = torch.tensor([a.weight for a in samples])
                 #
                 #lock.acquire()
@@ -73,8 +73,8 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, lock_make, lock_ma
                 # Version with concurrent reads
 
                 samples = random.sample(repr_list, num_candidates)
-                n_reps_x = torch.stack([a.value for a in samples]) - reps_x
-                n_reps_y = torch.stack([a.label for a in samples]) - reps_y
+                n_reps_x = torch.stack([a.x for a in samples]) - reps_x
+                n_reps_y = torch.stack([a.y for a in samples]) - reps_y
                 n_reps_w = move_cuda(torch.tensor([a.weight for a in samples]), cuda, device) - reps_w
 
                 lock_make.acquire()

@@ -63,8 +63,8 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
 
         sampled = random.sample(repr_list, (num_candidates if len(x) == batch_size else (num_candidates + batch_size - len(x))))
 
-        n_reps_x = torch.stack([a.value for a in sampled])
-        n_reps_y = torch.tensor([a.label.item() for a in sampled])
+        n_reps_x = torch.stack([a.x for a in sampled])
+        n_reps_y = torch.tensor([a.y.item() for a in sampled])
         n_reps_w = torch.tensor([a.weight for a in sampled])
 
         w = torch.ones(len(x))
