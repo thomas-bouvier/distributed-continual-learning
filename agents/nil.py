@@ -200,10 +200,10 @@ class nil_agent(Agent):
 
             if training and num_reps > 0:
                 torch.cuda.nvtx.range_push("Combine batches")
-                rep_weights = torch.as_tensor([rep.weight for rep in reps], device=torch.device(get_device(self.cuda)))
                 rep_values = move_cuda(torch.stack([rep.x for rep in reps]), self.cuda)
                 rep_labels = move_cuda(torch.stack([rep.y for rep in reps]), self.cuda)
-                # Concatenates the training samples with the representatives
+                rep_weights = torch.as_tensor([rep.weight for rep in reps], device=torch.device(get_device(self.cuda)))
+                # Concatenate the training samples with the representatives
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))

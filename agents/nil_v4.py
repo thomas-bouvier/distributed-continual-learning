@@ -17,7 +17,7 @@ from utils.meters import AverageMeter, accuracy
 
 def memory_manager(train_data_regime, validate_data_regime, q, lock, lock_make,
                    lock_made, num_classes, num_candidates, num_representatives,
-                   batch_size, cuda, size):
+                   batch_size, cuda, device):
     representatives = [[] for _ in range(num_classes)]
     class_count = [0 for _ in range(num_classes)]
     reps_x, reps_y, reps_w = q.get()

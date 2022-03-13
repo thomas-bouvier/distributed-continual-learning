@@ -15,25 +15,18 @@ from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 
-def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_candidates, num_representatives, batch_size, cuda, rank):
+def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_candidates, num_representatives, batch_size, cuda, device):
     representatives = [[] for _ in range(num_classes)]
     class_count = [0 for _ in range(num_classes)]
     reps_x, reps_y, reps_w = q_new_batch.get()
 
     while True:
         # Get new batch
-        new_batch = q_new_batch.get()
-        if new_batch == 0:
+        item = q_new_batch.get()
+        if item == 0:
             return
-
-        x = new_batch[0].clone()
-        y = new_batch[1].clone()
-        del new_batch
-
-        samples = torch.randperm(min(num_candidates, len(x)))
-
-        image_batch = x.clone()[samples]
-        target_batch = y.clone()[samples]
+        x = item[0]
+        y = item[1]
 
         rand_indices = torch.from_numpy(np.random.permutation(len(x)))
         x = x[rand_indices]  # The data is ordered according to the indices
@@ -57,12 +50,10 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
         
         #Send next batch's candidates 
         repr_list = [a for sublist in representatives for a in sublist]
-
         while len(repr_list) < (num_candidates if len(x) == batch_size else (num_candidates + batch_size)):
             repr_list += [a for sublist in representatives for a in sublist]
 
         sampled = random.sample(repr_list, (num_candidates if len(x) == batch_size else (num_candidates + batch_size - len(x))))
-
         n_reps_x = torch.stack([a.x for a in sampled])
         n_reps_y = torch.tensor([a.y.item() for a in sampled])
         n_reps_w = torch.tensor([a.weight for a in sampled])
@@ -98,9 +89,9 @@ class nil_v3_agent(Agent):
     def before_all_tasks(self, train_data_regime):
         self.x_dim = list(train_data_regime.tasksets[0][0][0].size())
 
-        self.reps_x = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size] + self.x_dim), self.cuda).share_memory_()
-        self.reps_y = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size], dtype=torch.long), self.cuda).share_memory_()
-        self.reps_w = move_cuda(torch.zeros([1, self.num_candidates + self.batch_size]), self.cuda).share_memory_()
+        self.reps_x = torch.zeros([1, self.num_candidates + self.batch_size] + self.x_dim, device=torch.device(get_device(self.cuda))).share_memory_()
+        self.reps_y = torch.zeros([1, self.num_candidates + self.batch_size], dtype=torch.long, device=torch.device(get_device(self.cuda))).share_memory_()
+        self.reps_w = torch.zeros([1, self.num_candidates + self.batch_size], device=torch.device(get_device(self.cuda))).share_memory_()
         
         self.q_new_batch = mp.Queue()
         self.lock = mp.Lock()
@@ -108,7 +99,7 @@ class nil_v3_agent(Agent):
         self.lock_made = mp.Lock()
         self.lock_made.acquire()
 
-        self.p = mp.Process(target=memory_manager, args=[self.q_new_batch, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda])
+        self.p = mp.Process(target=memory_manager, args=[self.q_new_batch, self.lock, self.lock_make, self.lock_made, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda, hvd.local_rank()])
         self.p.start()
 
         self.q_new_batch.put((self.reps_x, self.reps_y, self.reps_w))

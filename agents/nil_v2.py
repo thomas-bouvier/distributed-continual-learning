@@ -15,7 +15,7 @@ from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 
-def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_candidates, num_representatives, batch_size, cuda):
+def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_candidates, num_representatives, batch_size, cuda, device):
     representatives = [[] for _ in range(num_classes)]
     class_count = [0 for _ in range(num_classes)]
 
@@ -24,10 +24,8 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_c
         item = q_new_batch.get()
         if item == 0:
             return
-
-        x = move_cuda(item[0].clone(), cuda)
-        y = move_cuda(item[1].clone(), cuda)
-        del item
+        x = item[0]
+        y = item[1]
 
         rand_indices = torch.from_numpy(np.random.permutation(len(x)))
         x = x[rand_indices]  # The data is ordered according to the indices
@@ -65,14 +63,14 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_c
             #reps_x -= reps_x - n_reps_x
             #reps_y -= reps_y - n_reps_y
             #reps_w -= reps_w - n_reps_w
-            #lock.release()samples = random.sample(repr_list, num_candidates)
+            #lock.release()
 
             # Version with concurrent reads
 
             samples = random.sample(repr_list, num_candidates)
-            n_reps_x = torch.stack([a.value for a in samples]) - reps_x
-            n_reps_y = torch.stack([a.y for a in samples]) - reps_y
-            n_reps_w = move_cuda(torch.tensor([a.weight for a in samples]), cuda) - reps_w
+            n_reps_x = move_cuda(torch.stack([a.x for a in samples]), cuda, device) - reps_x
+            n_reps_y = move_cuda(torch.stack([a.y for a in samples]), cuda, device) - reps_y
+            n_reps_w = torch.as_tensor([a.weight for a in samples], device=torch.device(device)) - reps_w
 
             lock.acquire()
             reps_x += n_reps_x
@@ -97,14 +95,14 @@ class nil_v2_agent(Agent):
     def before_all_tasks(self, train_data_regime):
         x_dim = list(train_data_regime.tasksets[0][0][0].size())
 
-        self.reps_x = move_cuda(torch.zeros([self.num_candidates] + x_dim), self.cuda).share_memory_()
-        self.reps_y = move_cuda(torch.zeros([self.num_candidates], dtype=torch.long), self.cuda).share_memory_()
-        self.reps_w = move_cuda(torch.zeros([self.num_candidates]), self.cuda).share_memory_()
+        self.reps_x = torch.zeros([self.num_candidates] + x_dim, device=torch.device(get_device(self.cuda))).share_memory_()
+        self.reps_y = torch.zeros([self.num_candidates], dtype=torch.long, device=torch.device(get_device(self.cuda))).share_memory_()
+        self.reps_w = torch.zeros([self.num_candidates], device=torch.device(get_device(self.cuda))).share_memory_()
         
         self.q_new_batch = mp.Queue()
         self.lock = mp.Lock()
 
-        self.p = mp.Process(target=memory_manager, args=[self.q_new_batch, self.reps_x, self.reps_y, self.reps_w, self.lock, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda])
+        self.p = mp.Process(target=memory_manager, args=[self.q_new_batch, self.reps_x, self.reps_y, self.reps_w, self.lock, self.model.num_classes, self.num_candidates, self.memory_size, self.batch_size, self.cuda, hvd.local_rank()])
         self.p.start()
 
     def after_all_tasks(self):
