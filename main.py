@@ -8,6 +8,7 @@ import nvtx
 import os
 import pickle
 import time
+import torch.multiprocessing as mp
 import torch.utils.data.distributed
 
 from ast import literal_eval
@@ -110,6 +111,8 @@ def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     args.evaluate = not args.no_evaluate
+
+    mp.set_start_method('spawn')
 
     time_stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     if args.save_dir == '':
