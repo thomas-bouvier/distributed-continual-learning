@@ -116,7 +116,7 @@ class icarl_agent(Agent):
                                  meters=meters))
 
                 if self.writer is not None:
-                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'], self.global_steps)
+                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)
                     self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.global_steps)
                     self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.global_steps)
                     if training:
