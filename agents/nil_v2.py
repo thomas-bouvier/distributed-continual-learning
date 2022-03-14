@@ -232,9 +232,9 @@ class nil_v2_agent(Agent):
                 torch.cuda.nvtx.range_pop()
 
             # Create batch weights
-            w = torch.ones(len(x))
+            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             torch.cuda.nvtx.range_push("Copy to device")
-            x, y, w = move_cuda(x, self.cuda), move_cuda(y, self.cuda), move_cuda(w, self.cuda)
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
 
             if training and n_reps > 0:
@@ -247,7 +247,10 @@ class nil_v2_agent(Agent):
 
             torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
-            loss = self.criterion(output, y)
+            if training:
+                loss = self.criterion(output, y)
+            else:
+                loss = nn.CrossEntropyLoss()(output, y)
             torch.cuda.nvtx.range_pop()
 
             if training:

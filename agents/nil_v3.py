@@ -232,7 +232,10 @@ class nil_v3_agent(Agent):
 
             torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(self.tx)
-            loss = self.criterion(output, self.ty)
+            if training:
+                loss = self.criterion(output, self.ty)
+            else:
+                loss = nn.CrossEntropyLoss()(output, self.ty)
             torch.cuda.nvtx.range_pop()
 
             if training:

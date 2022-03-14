@@ -40,8 +40,7 @@ class nil_agent(Agent):
         """
         repr_list = [a for sublist in self.representatives for a in sublist]
         if len(repr_list) > 0:
-            samples = random.sample(repr_list, min(self.num_candidates, len(repr_list)))
-            return samples
+            return random.sample(repr_list, min(self.num_candidates, len(repr_list)))
         else:
             return []
 
@@ -65,7 +64,9 @@ class nil_agent(Agent):
             if len(self.representatives[nclass]) >= self.num_representatives:
                 del self.representatives[nclass][self.num_representatives-1]
             self.representatives[nclass].append(Representative(x[i], y[i]))
-        self.recalculate_weights()
+
+        if self.num_candidates > 0:
+            self.recalculate_weights()
 
     def recalculate_weights(self):
         """
