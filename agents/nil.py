@@ -219,8 +219,9 @@ class nil_agent(Agent):
             torch.cuda.nvtx.range_pop()
 
             if training:
-                total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
-                dw = w / total_weight
+                # Leads to decreased accuracy
+                #total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
+                dw = w / torch.sum(w)
                 # Faster to provide the derivative of L wrt {l}^n than letting pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
