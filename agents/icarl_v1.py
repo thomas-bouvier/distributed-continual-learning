@@ -168,11 +168,6 @@ class icarl_v1_agent(Agent):
 
         return meters
 
-    def after_every_epoch(self):
-        if self.epoch+1 != self.epochs:
-            self.buf_x = None
-            self.buf_y = None
-
     def _step(self, i_batch, inputs_batch, target_batch, training=False,
               distill=False, average_output=False, chunk_batch=1):
         outputs = []
@@ -193,11 +188,11 @@ class icarl_v1_agent(Agent):
             if training:
                 torch.cuda.nvtx.range_push("Store batch")
                 if self.buf_x is None:
-                    self.buf_x = x.detach()
-                    self.buf_y = y.detach()
+                    self.buf_x = x.detach().cpu()
+                    self.buf_y = y.detach().cpu()
                 else:
-                    self.buf_x = torch.cat((self.buf_x, x.detach()))
-                    self.buf_y = torch.cat((self.buf_y, y.detach()))
+                    self.buf_x = torch.cat((self.buf_x, x.detach().cpu()))
+                    self.buf_y = torch.cat((self.buf_y, y.detach().cpu()))
                 torch.cuda.nvtx.range_pop()
 
                 # Distillation
@@ -240,6 +235,11 @@ class icarl_v1_agent(Agent):
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
 
+    def after_every_epoch(self):
+        if self.epoch + 1 != self.epochs:
+            self.buf_x = None
+            self.buf_y = None
+
     def forward(self, x):
         self.model.eval()
         ns = x.size(0)
@@ -271,9 +271,7 @@ class icarl_v1_agent(Agent):
             for c in nc:
                 # Find indices of examples of class c
                 indxs = (self.buf_y == c).nonzero(as_tuple=False).squeeze()
-
-                # Select examples of class c
-                mem_x_c = torch.index_select(self.buf_x, 0, indxs)
+                mem_x_c = move_cuda(torch.index_select(self.buf_x, 0, indxs), self.cuda)
 
                 # Not the CANDLE dataset
                 if self.model.num_classes != 2:
@@ -282,13 +280,12 @@ class icarl_v1_agent(Agent):
                     memf_c = self.model.feature_vector
 
                     # Compute the mean feature vector of class
-                    nb_samples = torch.tensor(memf_c.size(0))
+                    num_samples = torch.tensor(memf_c.size(0))
                     sum_memf_c = memf_c.sum(0)
-
                     sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
-                    sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
+                    sum_num_samples = hvd.allreduce(num_samples, name=f'sum_num_samples_{c}', op=hvd.Sum)
 
-                    mean_memf_c = sum_memf_c / sum_nb_samples
+                    mean_memf_c = sum_memf_c / sum_num_samples
                     mean_memf_c = mean_memf_c.view(1, self.model.num_features)
 
                     # Compute the distance between each feature vector of the examples of class c and the mean feature vector of class c
@@ -303,7 +300,6 @@ class icarl_v1_agent(Agent):
                 else:
                     means = []
                     fs = {}
-
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
                         self.model(x)
@@ -311,13 +307,11 @@ class icarl_v1_agent(Agent):
                         means.append(fs[i].sum(0))
 
                     mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.model.num_features)
-
                     dist_memf_c = None
                     tmp_mem_x = None
 
                     for i in range(0, len(mem_x_c), 5):
                         x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-
                         dist = torch.cdist(fs[i], mean_memf_c)
                         dist = dist.view(dist.size(0))
 
@@ -353,13 +347,12 @@ class icarl_v1_agent(Agent):
                     self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
                     tmp_features = self.model.feature_vector
 
-                nb_samples = torch.tensor(tmp_features.size(0))
+                num_samples = torch.tensor(tmp_features.size(0))
                 sum_memf_c = tmp_features.sum(0)
-
                 sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
-                sum_nb_samples = hvd.allreduce(nb_samples, name=f'sum_nb_samples_{c}', op=hvd.Sum)
+                sum_num_samples = hvd.allreduce(num_samples, name=f'sum_num_samples_{c}', op=hvd.Sum)
 
-                self.mem_class_means[cc] = sum_memf_c / sum_nb_samples
+                self.mem_class_means[cc] = sum_memf_c / sum_num_samples
                 self.mean_features = torch.stack(tuple(self.mem_class_means.values()))
 
         del tmp_features
