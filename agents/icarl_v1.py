@@ -274,78 +274,78 @@ class icarl_v1_agent(Agent):
                 mem_x_c = move_cuda(torch.index_select(self.buf_x, 0, indxs), self.cuda)
 
                 # Not the CANDLE dataset
-                if self.model.num_classes != 2:
-                    # Compute feature vectors of examples of class c
-                    self.model(mem_x_c)
-                    memf_c = self.model.feature_vector
+                #if self.model.num_classes != 2:
+                # Compute feature vectors of examples of class c
+                self.model(mem_x_c)
+                memf_c = self.model.feature_vector
 
-                    # Compute the mean feature vector of class
-                    num_samples = torch.tensor(memf_c.size(0))
-                    sum_memf_c = memf_c.sum(0)
-                    sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
-                    sum_num_samples = hvd.allreduce(num_samples, name=f'sum_num_samples_{c}', op=hvd.Sum)
+                # Compute the mean feature vector of class
+                num_samples = torch.tensor(memf_c.size(0))
+                sum_memf_c = memf_c.sum(0)
+                sum_memf_c = hvd.allreduce(sum_memf_c, name=f'sum_memf_{c}', op=hvd.Sum)
+                sum_num_samples = hvd.allreduce(num_samples, name=f'sum_num_samples_{c}', op=hvd.Sum)
 
-                    mean_memf_c = sum_memf_c / sum_num_samples
-                    mean_memf_c = mean_memf_c.view(1, self.model.num_features)
+                mean_memf_c = sum_memf_c / sum_num_samples
+                mean_memf_c = mean_memf_c.view(1, self.model.num_features)
 
-                    # Compute the distance between each feature vector of the examples of class c and the mean feature vector of class c
-                    dist_memf_c = torch.cdist(memf_c, mean_memf_c)
-                    dist_memf_c = dist_memf_c.view(dist_memf_c.size(0))
+                # Compute the distance between each feature vector of the examples of class c and the mean feature vector of class c
+                dist_memf_c = torch.cdist(memf_c, mean_memf_c)
+                dist_memf_c = dist_memf_c.view(dist_memf_c.size(0))
 
-                    # Find the indices the self.num_exemplars features vectors closest to the mean feature vector of class c
-                    indices = torch.sort(dist_memf_c)[1][:self.num_exemplars]
+                # Find the indices the self.num_exemplars features vectors closest to the mean feature vector of class c
+                indices = torch.sort(dist_memf_c)[1][:self.num_exemplars]
 
-                    # Save the self.num_exemplars examples of class c with the closest feature vector to the mean feature vector of class c
-                    self.mem_class_x[c] = torch.index_select(mem_x_c, 0, indices)
-                else:
-                    means = []
-                    fs = {}
-                    for i in range(0, len(mem_x_c), 5):
-                        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                        self.model(x)
-                        fs[i] = self.model.feature_vector
-                        means.append(fs[i].sum(0))
-
-                    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.model.num_features)
-                    dist_memf_c = None
-                    tmp_mem_x = None
-
-                    for i in range(0, len(mem_x_c), 5):
-                        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                        dist = torch.cdist(fs[i], mean_memf_c)
-                        dist = dist.view(dist.size(0))
-
-                        if dist_memf_c is None:
-                            indices = torch.sort(dist)[1][:self.num_exemplars]
-                            dist_memf_c = torch.index_select(dist, 0, indices)
-                            tmp_mem_x = torch.index_select(x, 0, indices)
-                        else:
-                            x = torch.cat((x, tmp_mem_x))
-                            dist = torch.cat((dist, dist_memf_c))
-                            indices = torch.sort(dist)[1][:self.num_exemplars]
-                            dist_memf_c = torch.index_select(dist, 0, indices)
-                            tmp_mem_x = torch.index_select(x, 0, indices)
-
-                    self.mem_class_x[c] = tmp_mem_x
-                    del fs
+                # Save the self.num_exemplars examples of class c with the closest feature vector to the mean feature vector of class c
+                self.mem_class_x[c] = torch.index_select(mem_x_c, 0, indices)
+                #else:
+                #    means = []
+                #    fs = {}
+                #    for i in range(0, len(mem_x_c), 5):
+                #        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
+                #        self.model(x)
+                #        fs[i] = self.model.feature_vector
+                #        means.append(fs[i].sum(0))
+                #
+                #    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.model.num_features)
+                #    dist_memf_c = None
+                #    tmp_mem_x = None
+                #
+                #    for i in range(0, len(mem_x_c), 5):
+                #        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
+                #        dist = torch.cdist(fs[i], mean_memf_c)
+                #        dist = dist.view(dist.size(0))
+                #
+                #        if dist_memf_c is None:
+                #            indices = torch.sort(dist)[1][:self.num_exemplars]
+                #            dist_memf_c = torch.index_select(dist, 0, indices)
+                #            tmp_mem_x = torch.index_select(x, 0, indices)
+                #        else:
+                #            x = torch.cat((x, tmp_mem_x))
+                #            dist = torch.cat((dist, dist_memf_c))
+                #            indices = torch.sort(dist)[1][:self.num_exemplars]
+                #            dist_memf_c = torch.index_select(dist, 0, indices)
+                #            tmp_mem_x = torch.index_select(x, 0, indices)
+                #
+                #    self.mem_class_x[c] = tmp_mem_x
+                #    del fs
 
             # recompute outputs for distillation purposes and means for inference purposes
             self.model.eval()
             for cc in self.mem_class_x.keys():
                 # CANDLE dataset
-                if self.model.num_classes == 2:
-                    outs = []
-                    feats = []
-                    for i in range(0, len(self.mem_class_x[cc]), 40):
-                        o = self.model(self.mem_class_x[cc][i:min(i + 40, len(self.mem_class_x[cc]))])
-                        f = self.model.feature_vector
-                        outs.append(o)
-                        feats.append(f)
-                    tmp_features = torch.cat(feats)
-                    self.mem_class_y[cc] = torch.cat(outs)
-                else:
-                    self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
-                    tmp_features = self.model.feature_vector
+                #if self.model.num_classes == 2:
+                #    outs = []
+                #    feats = []
+                #    for i in range(0, len(self.mem_class_x[cc]), 40):
+                #        o = self.model(self.mem_class_x[cc][i:min(i + 40, len(self.mem_class_x[cc]))])
+                #        f = self.model.feature_vector
+                #        outs.append(o)
+                #        feats.append(f)
+                #    tmp_features = torch.cat(feats)
+                #    self.mem_class_y[cc] = torch.cat(outs)
+                #else:
+                self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
+                tmp_features = self.model.feature_vector
 
                 num_samples = torch.tensor(tmp_features.size(0))
                 sum_memf_c = tmp_features.sum(0)
