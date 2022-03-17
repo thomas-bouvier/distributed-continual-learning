@@ -21,7 +21,7 @@ class icarl_agent(Agent):
 
         # Modified parameters
         self.num_exemplars = 0
-        self.num_memories = config.get('num_representatives', 6000) * model.num_classes
+        self.memory_size = config.get('num_representatives', 6000) * model.num_classes
         self.num_candidates = config.get('num_candidates', 20)
 
         # memory
@@ -72,8 +72,8 @@ class icarl_agent(Agent):
             self.mem_y = torch.cat([targets.clone() for targets in self.mem_class_y.values()])
 
     def after_every_task(self):
-        torch.cuda.nvtx.range_push("Update examplars")
-        self.update_examplars(self.nc)
+        torch.cuda.nvtx.range_push("Update exemplars")
+        self.update_exemplars(self.nc)
         torch.cuda.nvtx.range_pop()
 
     """
@@ -228,7 +228,7 @@ class icarl_agent(Agent):
         set_x = torch.stack([torch.stack([mem_x[index] for index in perm]) for perm in perms])
         set_y = torch.stack([torch.stack([mem_y[index] for index in perm]) for perm in perms])
 
-        return set_x, set_y
+        return move_cuda(set_x, self.cuda), move_cuda(set_y, self.cuda)
 
     def forward(self, x):
         self.model.eval()
@@ -238,7 +238,8 @@ class icarl_agent(Agent):
             classpred = torch.LongTensor(ns)
             self.model(x)
             preds = move_cuda(self.model.feature_vector.detach().clone(), self.cuda)
-            dist = torch.cdist(preds.view(1, *preds.size()), self.mean_features.view(1, *self.mean_features.size())).view(ns, len(self.mem_class_means.keys()))
+            mean_features = move_cuda(self.mean_features, self.cuda)
+            dist = torch.cdist(preds.view(1, *preds.size()), mean_features.view(1, *mean_features.size())).view(ns, len(self.mem_class_means.keys()))
 
             for ss in range(ns):
                 classpred[ss] = torch.argmin(dist[ss])
@@ -248,11 +249,11 @@ class icarl_agent(Agent):
                 out[ss, classpred[ss]] = 1
             return out
 
-    def update_examplars(self, nc, training=True):
+    def update_exemplars(self, nc, training=True):
         self.model.eval()
         with torch.no_grad():
             # Reduce exemplar set by updating value of num. exemplars per class
-            self.num_exemplars = int(self.num_memories / (len(nc) + len(self.mem_class_x.keys())))
+            self.num_exemplars = int(self.memory_size / (len(nc) + len(self.mem_class_x.keys())))
 
             for c in self.mem_class_x.keys():
                 self.mem_class_x[c] = self.mem_class_x[c][:self.num_exemplars]
@@ -263,8 +264,6 @@ class icarl_agent(Agent):
                 indxs = (self.buf_y == c).nonzero(as_tuple=False).squeeze()
                 mem_x_c = move_cuda(torch.index_select(self.buf_x, 0, indxs), self.cuda)
 
-                # Not the CANDLE dataset
-                #if self.model.num_classes != 2:
                 # Compute feature vectors of examples of class c
                 self.model(mem_x_c)
                 memf_c = self.model.feature_vector
@@ -286,55 +285,11 @@ class icarl_agent(Agent):
                 indices = torch.sort(dist_memf_c)[1][:self.num_exemplars]
 
                 # Save the self.num_exemplars examples of class c with the closest feature vector to the mean feature vector of class c
-                self.mem_class_x[c] = torch.index_select(mem_x_c, 0, indices)
-                #else:
-                #    means = []
-                #    fs = {}
-                #    for i in range(0, len(mem_x_c), 5):
-                #        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                #        self.model(x)
-                #        fs[i] = self.model.feature_vector
-                #        means.append(fs[i].sum(0))
-                #
-                #    mean_memf_c = (torch.stack(means).sum(0) / len(mem_x_c)).view(1, self.model.num_features)
-                #    dist_memf_c = None
-                #    tmp_mem_x = None
-                #
-                #    for i in range(0, len(mem_x_c), 5):
-                #        x = mem_x_c[i:min(len(mem_x_c), i + 5)]
-                #        dist = torch.cdist(fs[i], mean_memf_c)
-                #        dist = dist.view(dist.size(0))
-                #
-                #        if dist_memf_c is None:
-                #            indices = torch.sort(dist)[1][:self.num_exemplars]
-                #            dist_memf_c = torch.index_select(dist, 0, indices)
-                #            tmp_mem_x = torch.index_select(x, 0, indices)
-                #        else:
-                #            x = torch.cat((x, tmp_mem_x))
-                #            dist = torch.cat((dist, dist_memf_c))
-                #            indices = torch.sort(dist)[1][:self.num_exemplars]
-                #            dist_memf_c = torch.index_select(dist, 0, indices)
-                #            tmp_mem_x = torch.index_select(x, 0, indices)
-                #
-                #    self.mem_class_x[c] = tmp_mem_x
-                #    del fs
+                self.mem_class_x[c] = torch.index_select(mem_x_c, 0, indices).cpu()
 
             # Recompute outputs for distillation purposes and means for inference purposes
-            self.model.eval()
             for cc in self.mem_class_x.keys():
-                # CANDLE dataset
-                #if self.model.num_classes == 2:
-                #    outs = []
-                #    feats = []
-                #    for i in range(0, len(self.mem_class_x[cc]), 40):
-                #        o = self.model(self.mem_class_x[cc][i:min(i + 40, len(self.mem_class_x[cc]))])
-                #        f = self.model.feature_vector
-                #        outs.append(o)
-                #        feats.append(f)
-                #    tmp_features = torch.cat(feats)
-                #    self.mem_class_y[cc] = torch.cat(outs)
-                #else:
-                self.mem_class_y[cc] = self.model(self.mem_class_x[cc])
+                self.mem_class_y[cc] = self.model(move_cuda(self.mem_class_x[cc], self.cuda)).cpu()
                 tmp_features = self.model.feature_vector
 
                 num_samples = torch.tensor(tmp_features.size(0))
@@ -343,7 +298,7 @@ class icarl_agent(Agent):
                 sum_num_samples = hvd.allreduce(num_samples, name=f'sum_num_samples_{c}', op=hvd.Sum)
 
                 self.mem_class_means[cc] = sum_memf_c / sum_num_samples
-                self.mean_features = torch.stack(tuple(self.mem_class_means.values()))
+                self.mean_features = torch.stack(tuple(self.mem_class_means.values())).cpu()
 
         del tmp_features
         if training:

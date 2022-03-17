@@ -366,7 +366,7 @@ class Experiment():
                             for metric in ['loss', 'prec1', 'prec5']}
                     torch.cuda.nvtx.range_push("Test")
                     if self.args.agent == 'icarl':
-                        self.agent.update_examplars(self.agent.nc, training=False)
+                        self.agent.update_exemplars(self.agent.nc, training=False)
                     for test_task_id in range(0, task_id+1):
                         self.test_data_regime.set_task_id(test_task_id)
                         self.test_data_regime.get_loader(True)
