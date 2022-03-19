@@ -27,29 +27,30 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_c
         x = item[0]
         y = item[1]
 
-        rand_indices = torch.from_numpy(np.random.permutation(len(x)))
-        x = x[rand_indices]  # The data is ordered according to the indices
-        y = y[rand_indices]
+        #rand_indices = torch.from_numpy(np.random.permutation(len(x)))
+        #x = x[rand_indices]  # The data is ordered according to the indices
+        #y = y[rand_indices]
         for i in range(min(num_candidates, len(x))):
             nclass = y[i].item()
             class_count[nclass] += 1
-            if len(selrepresentatives[nclass]) >= num_representatives:
-                del representatives[nclass][num_representatives-1]
-            representatives[nclass].append(Representative(x[i], y[i]))
+            if len(representatives[nclass]) >= num_representatives:
+                rand = random.randrange(len(representatives[nclass]))
+                representatives[nclass][rand] = Representative(x[i], y[i])
+            else:
+                representatives[nclass].append(Representative(x[i], y[i]))
 
         # Update weights of reps
         total_count = sum(class_count)
         total_weight = (batch_size * 1.0) / num_candidates
         total_weight *= (total_count / np.sum([len(cls) for cls in representatives]))
         probs = [count / total_count for count in class_count]
-
         for i in range(len(representatives)):
             if class_count[i] > 0:
                 for rep in representatives[i]:
-                    # This version uses natural log as an stabilizer
+                    # This version uses natural log as a stabilizer
                     rep.weight = max(math.log(probs[i] * total_weight), 1.0)
 
-        #Send next batch's candidates 
+        # Send next batch's candidates 
         repr_list = [a for sublist in representatives for a in sublist]
         if len(repr_list) > num_candidates:
             # Version without concurrent reads
@@ -58,7 +59,7 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, num_classes, num_c
             #n_reps_x = torch.stack([a.value for a in samples])
             #n_reps_y = torch.tensor([a.y.item() for a in samples])
             #n_reps_w = torch.tensor([a.weight for a in samples])
-            #
+
             #lock.acquire()
             #reps_x -= reps_x - n_reps_x
             #reps_y -= reps_y - n_reps_y
@@ -217,10 +218,7 @@ class nil_v2_agent(Agent):
                 rep_labels = self.reps_y.clone()
                 rep_weights = self.reps_w.clone()
                 self.lock.release()
-                if rep_weights[-1] == 0 :
-                    n_reps = 0
-                else:
-                    n_reps = len(self.reps_x)
+                n_reps = 0 if rep_weights[-1] == 0 else len(self.reps_x)
                 torch.cuda.nvtx.range_pop()
 
                 # select next samples to become representatives

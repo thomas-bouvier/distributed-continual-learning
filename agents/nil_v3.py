@@ -34,9 +34,11 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
         for i in range(min(num_candidates, len(x))):
             nclass = y[i].item()
             class_count[nclass] += 1
-            if len(selrepresentatives[nclass]) >= num_representatives:
-                del representatives[nclass][num_representatives-1]
-            representatives[nclass].append(Representative(x[i], y[i]))
+            if len(representatives[nclass]) >= num_representatives:
+                rand = random.randrange(len(representatives[nclass]))
+                representatives[nclass][rand] = Representative(x[i], y[i])
+            else:
+                representatives[nclass].append(Representative(x[i], y[i]))
 
         # Update weights of reps
         total_count = sum(class_count)
@@ -59,7 +61,6 @@ def memory_manager(q_new_batch, lock, lock_make, lock_made, num_classes, num_can
         n_reps_w = torch.tensor([a.weight for a in sampled])
 
         w = torch.ones(len(x))
-
         w = torch.cat([w, n_reps_w])
         x = torch.cat([x, n_reps_x])
         y = torch.cat([y, n_reps_y])

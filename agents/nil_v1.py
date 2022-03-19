@@ -29,15 +29,17 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, lock_make, lock_ma
         x = item[0]
         y = item[1]
 
-        rand_indices = torch.from_numpy(np.random.permutation(len(x)))
-        x = x[rand_indices]  # The data is ordered according to the indices
-        y = y[rand_indices]
+        #rand_indices = torch.from_numpy(np.random.permutation(len(x)))
+        #x = x[rand_indices]  # The data is ordered according to the indices
+        #y = y[rand_indices]
         for i in range(min(num_candidates, len(x))):
             nclass = y[i].item()
             class_count[nclass] += 1
             if len(representatives[nclass]) >= num_representatives:
-                del representatives[nclass][num_representatives-1]
-            representatives[nclass].append(Representative(x[i], y[i]))
+                rand = random.randrange(len(representatives[nclass]))
+                representatives[nclass][rand] = Representative(x[i], y[i])
+            else:
+                representatives[nclass].append(Representative(x[i], y[i]))
 
         if num_candidates > 0:
             # Update weights of reps
@@ -47,21 +49,19 @@ def memory_manager(q_new_batch, reps_x, reps_y, reps_w, lock, lock_make, lock_ma
             probs = [count / total_count for count in class_count]
             for i in range(len(representatives)):
                 for rep in representatives[i]:
+                    # This version uses natural log as a stabilizer
                     rep.weight = max(math.log(probs[i] * total_weight), 1.0)
 
             # Send next batch's candidates
             repr_list = [a for sublist in representatives for a in sublist]
-            if len(repr_list) > 0:
-                while len(repr_list) < num_candidates:
-                    repr_list += [a for sublist in representatives for a in sublist]
-
+            if len(repr_list) > num_candidates:
                 # Version without concurrent reads
 
                 #samples = random.sample(repr_list, num_candidates)
                 #n_reps_x = torch.stack([a.x for a in samples])
                 #n_reps_y = torch.tensor([a.y.item() for a in samples])
                 #n_reps_w = torch.tensor([a.weight for a in samples])
-                #
+
                 #lock.acquire()
                 #reps_x -= reps_x - n_reps_x
                 #reps_y -= reps_y - n_reps_y

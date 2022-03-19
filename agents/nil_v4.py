@@ -48,9 +48,11 @@ def memory_manager(train_data_regime, validate_data_regime, q, lock, lock_make,
             for i in range(min(num_candidates, len(x))):
                 nclass = y[i].item()
                 class_count[nclass] += 1
-                if len(selrepresentatives[nclass]) >= num_representatives:
-                    del representatives[nclass][num_representatives-1]
-                representatives[nclass].append(Representative(x[i], y[i]))
+                if len(representatives[nclass]) >= num_representatives:
+                    rand = random.randrange(len(representatives[nclass]))
+                    representatives[nclass][rand] = Representative(x[i], y[i])
+                else:
+                    representatives[nclass].append(Representative(x[i], y[i]))
 
                 # Update weights of reps
                 total_count = sum(class_count)

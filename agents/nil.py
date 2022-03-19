@@ -62,8 +62,10 @@ class nil_agent(Agent):
             nclass = y[i].item()
             self.class_count[nclass] += 1
             if len(self.representatives[nclass]) >= self.num_representatives:
-                del self.representatives[nclass][self.num_representatives-1]
-            self.representatives[nclass].append(Representative(x[i], y[i]))
+                rand = random.randrange(len(self.representatives[nclass]))
+                self.representatives[nclass][rand] = Representative(x[i], y[i])
+            else:
+                self.representatives[nclass].append(Representative(x[i], y[i]))
 
         if self.num_candidates > 0:
             self.recalculate_weights()
@@ -82,7 +84,7 @@ class nil_agent(Agent):
         for i in range(len(self.representatives)):
             if self.class_count[i] > 0:
                 for rep in self.representatives[i]:
-                    # This version uses natural log as an stabilizer
+                    # This version uses natural log as a stabilizer
                     rep.weight = max(math.log(probs[i].item() * total_weight), 1.0)
 
     def before_every_task(self, task_id, train_data_regime):
