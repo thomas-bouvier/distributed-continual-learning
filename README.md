@@ -53,19 +53,19 @@ python main.py --model resnet --agent nil --dataset cifar100 --tasksets-config "
 python main.py --model resnet --model-config "{'depth': 101}" --agent icarl --dataset tinyimagenet --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
 ```
 
-#### Scratch baseline 
+#### Scratch baseline
 
 ```
 python main.py --model <model> --dataset <dataset> --agent-config "{'reset_state_dict': True}" --tasksets-config "{<..tasksets-config, 'concatenate_tasksets': True>}"
 ```
 
-#### Transfer baseline 
+#### Transfer baseline
 
 ```
 python main.py --model <model> --dataset <dataset> --tasksets-config "{<..tasksets-config, 'concatenate_tasksets': True>}"
 ```
 
-#### Naive baseline 
+#### Naive baseline
 
 ```
 python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets-config>}"
@@ -83,7 +83,7 @@ python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets
 
 **nil_v4**: **nil_v3** including batch sampling. *Second implementation*.
 
-**global**: strategy where representatives are shared between workers
+**nil_global**: strategy where representatives are shared between workers
 #### iCaRL implementations
 
 **icarl**: default implementation, without parallel memory management
