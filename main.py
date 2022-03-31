@@ -322,31 +322,6 @@ class Experiment():
             self.agent.before_every_task(task_id, self.train_data_regime)
             self.optimizer_regime.num_steps = len(self.train_data_regime.get_loader())
 
-            # evaluate on test set
-            if self.args.evaluate:
-                meters = {metric: AverageMeter(f"task_{metric}")
-                        for metric in ['loss', 'prec1', 'prec5']}
-                torch.cuda.nvtx.range_push("Test")
-                for test_task_id in range(0, task_id+1):
-                    self.test_data_regime.set_task_id(test_task_id)
-                    self.test_data_regime.get_loader(True)
-                    self.test_data_regime.set_epoch(0)
-
-                    if self.args.agent != 'icarl':
-                        validate_results = self.agent.validate(self.test_data_regime)
-                        meters['loss'].update(validate_results['loss'])
-                        meters['prec1'].update(validate_results['prec1'])
-                        meters['prec5'].update(validate_results['prec5'])
-
-                        if hvd.rank() == 0:
-                            logging.info('\nRESULTS: Testing loss: {validate[loss]:.4f}\n'
-                                            .format(validate=validate_results))
-
-                            task_metrics_values = dict(test_task_id=test_task_id+1, epoch=0)
-                            task_metrics_values.update({'test_' + k: v for k, v in validate_results.items()})
-                            task_metrics['test_task_metrics'].append(task_metrics_values)
-                torch.cuda.nvtx.range_pop()
-
             for i_epoch in range(0, self.args.epochs):
                 torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
                 logging.info(f"Starting task {task_id+1}, epoch: {i_epoch+1}")
