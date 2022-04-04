@@ -48,7 +48,7 @@ def get_transform(transform_name='imagenet', augment=True, input_size=None,
         return scale_crop(input_size=input_size, scale_size=scale_size,
                           normalize=normalize)
     
-    elif transform_name == 'imagenet100' or transform_name == 'imagenet' or transform_name == 'imagenet_blurred':
+    elif transform_name == 'imagenet100' or transform_name == 'imagenet100small' or transform_name == 'imagenet' or transform_name == 'imagenet_blurred':
         input_size = input_size or 224
         scale_size = scale_size or int(input_size * 8 / 7)
         if augment:
