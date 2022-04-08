@@ -10,12 +10,11 @@ import torch.nn as nn
 import torch.optim as optim
 
 from agents.base import Agent
-from utils.cl import Representative
 from utils.utils import get_device, move_cuda
 
 class nil_global_agent(Agent):
     def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(nil_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+        super(nil_global_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -61,9 +60,8 @@ class nil_global_agent(Agent):
         :return: None
         """
         rand_indices = torch.randperm(len(y))
-        x = x.clone()[rand_indices]  # The data is ordered according to the indices
+        x = x.clone()[rand_indices]
         y = y.clone()[rand_indices]
-
         i = min(self.num_candidates, len(x))
         x = x[:i]
         y = y[:i]
@@ -75,15 +73,15 @@ class nil_global_agent(Agent):
         removed = []
         added = []
         offsets = [0]
-        for i in range(self.num_classes):
+        for i in range(self.model.num_classes):
             offsets.append(offsets[-1] + len(self.local_candidates[i]))
             rand_indices = torch.randperm(len(self.local_reps[i]) + len(self.local_candidates[i]))[:self.num_representatives]
             removed += [j + self.num_representatives * i for j in range(len(self.local_reps[i])) if j not in rand_indices]
             added += [j + self.num_candidates * i for j in range(len(self.local_candidates[i])) if j + len(self.local_reps[i]) in rand_indices]
 
-        while len(added) < self.num_classes * self.num_candidates:
+        while len(added) < self.model.num_classes * self.num_candidates:
             added.append(-1)
-        while len(removed) < self.num_classes * self.num_candidates:
+        while len(removed) < self.model.num_classes * self.num_candidates:
             removed.append(-1)
 
         self.share_reps(removed, added, offsets)
@@ -113,7 +111,7 @@ class nil_global_agent(Agent):
             to_rm_w = removed[worker]
             to_rm_w = to_rm_w[to_rm_w != -1]
 
-            for c in range(self.num_classes):
+            for c in range(self.model.num_classes):
                 lower = offsets[worker][c]
                 upper = offsets[worker][c + 1]
 
@@ -139,18 +137,17 @@ class nil_global_agent(Agent):
                     self.reps_by_worker[worker][c] = torch.cat((self.reps_by_worker[worker][c], new_reps[worker][lower:upper][to_add])) 
 
         self.global_x_reps = torch.cat([torch.cat(per_worker) for per_worker in self.reps_by_worker])
-        self.local_candidates = [torch.Tensor() for _ in range(self.num_classes)]
+        self.local_candidates = [torch.Tensor() for _ in range(self.model.num_classes)]
 
-        for i in range(self.num_classes):
+        for i in range(self.model.num_classes):
             self.local_reps[i] = self.reps_by_worker[hvd.rank()][i] 
 
-        y = torch.tensor([i for i in range(self.num_classes) for _ in range(len(self.local_reps[i]))])
+        y = torch.tensor([i for i in range(self.model.num_classes) for _ in range(len(self.local_reps[i]))])
         self.global_y_reps = hvd.allgather(y)
 
     def recalculate_weights(self):
-    """
-    Reassign the weights of the representatives
-    """
+        """Reassign the weights of the representatives
+        """
         total_count = torch.sum(self.global_class_count).item()
         if total_count == 0:
             return
@@ -323,9 +320,3 @@ class nil_global_agent(Agent):
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
-
-
-def nil_global(model, config, optimizer, criterion, cuda, log_interval):
-    implementation = config.get('implementation', '')
-    agent = nil_global
-    return agent(model, config, optimizer, criterion, cuda, log_interval)

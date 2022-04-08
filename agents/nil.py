@@ -15,6 +15,7 @@ from agents.nil_v1 import nil_v1_agent
 from agents.nil_v2 import nil_v2_agent
 from agents.nil_v3 import nil_v3_agent
 from agents.nil_v4 import nil_v4_agent
+from agents.nil_global import nil_global_agent
 from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
@@ -306,4 +307,6 @@ def nil(model, config, optimizer, criterion, cuda, log_interval):
         agent = nil_v3_agent
     elif implementation == 'v4':
         agent = nil_v4_agent
+    elif implementation == 'global':
+        agent = nil_global_agent
     return agent(model, config, optimizer, criterion, cuda, log_interval)
