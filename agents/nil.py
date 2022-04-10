@@ -8,6 +8,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision
 
 from agents.base import Agent
 from agents.nil_list import nil_list_agent
@@ -26,7 +27,7 @@ class nil_agent(Agent):
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
 
-        self.num_representatives = config.get('num_representatives', 60)   # number of stored examples per class
+        self.num_representatives = config.get('num_representatives', 60)
         self.num_candidates = config.get('num_candidates', 20)
         self.batch_size = config.get('batch_size')
 
@@ -95,13 +96,11 @@ class nil_agent(Agent):
                 continue
 
             to_add = add
-            to_add = to_add[to_add >= self.num_candidates * c]
-            to_add = to_add[to_add < self.num_candidates * (c + 1)]
+            to_add = to_add[(to_add >= self.num_candidates * c) & (to_add < self.num_candidates * (c + 1))]
             to_add -= self.num_candidates * c
             if len(rm) > 0:
                 to_rm = rm
-                to_rm = to_rm[to_rm >= self.num_representatives * c]
-                to_rm = to_rm[to_rm < self.num_representatives * (c + 1)]
+                to_rm = to_rm[(to_rm >= self.num_representatives * c) & (to_rm < self.num_representatives * (c + 1))]
                 to_rm -= self.num_representatives * c
 
             if len(torch.flatten(self.representatives[c])) == 0:
@@ -243,6 +242,10 @@ class nil_agent(Agent):
                 # Get the representatives
                 rep_values, rep_labels, rep_weights = self.get_representatives()
                 num_reps = len(rep_values)
+
+                if self.writer is not None and num_reps > 0:
+                    grid = torchvision.utils.make_grid(rep_values)
+                    self.writer.add_image("rep_values", grid)
 
             # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
