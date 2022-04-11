@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.optim as optim
 
 from agents.base import Agent
-from agents.icarl_v1 import icarl_v1_agent
 from utils.utils import move_cuda
 from utils.meters import AverageMeter, accuracy
 
@@ -24,14 +23,15 @@ class icarl_agent(Agent):
         self.memory_size = config.get('num_representatives', 6000) * model.num_classes
         self.num_candidates = config.get('num_candidates', 20)
 
-        # memory
-        self.buf_x = None  # stores raw inputs, PxD
+        # Store current batch on CPU for current epoch
+        self.buf_x = None
         self.buf_y = None
-        self.mem_class_x = {}  # stores exemplars class by class
+        # Store exemplars by class
+        self.mem_class_x = {}
         self.mem_class_y = {}
         self.mem_class_means = {}
 
-        # setup distillation losses
+        # Setup distillation losses
         self.kl = nn.KLDivLoss(reduction='batchmean')
         self.lsm = nn.LogSoftmax(dim=1)
         self.sm = nn.Softmax(dim=1)
@@ -68,6 +68,7 @@ class icarl_agent(Agent):
         # Distillation
         self.should_distill = self.mem_class_x != {}
         if self.should_distill:
+            # Updated before each task
             self.mem_x = torch.cat([samples.clone() for samples in self.mem_class_x.values()])
             self.mem_y = torch.cat([targets.clone() for targets in self.mem_class_y.values()])
 
@@ -87,16 +88,16 @@ class icarl_agent(Agent):
         step_count = 0
 
         # Distillation, increment taskset
-        set_x, set_y = None, None
+        cand_x, cand_y = None, None
         if self.should_distill and training:
             torch.cuda.nvtx.range_push(f"Increment taskset")
-            set_x, set_y = self.increment_taskset(len(data_regime.get_loader()), self.mem_x, self.mem_y)
+            cand_x, cand_y = self.make_candidates(len(data_regime.get_loader()), self.mem_x, self.mem_y)
             torch.cuda.nvtx.range_pop()
 
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
-            output, loss = self._step(i_batch, x, y, set_x, set_y,
+            output, loss = self._step(i_batch, x, y, cand_x, cand_y,
                                       training=training, average_output=average_output)
 
             # measure accuracy and record loss
@@ -143,7 +144,7 @@ class icarl_agent(Agent):
 
         return meters
 
-    def _step(self, i_batch, inputs_batch, target_batch, set_x, set_y,
+    def _step(self, i_batch, inputs_batch, target_batch, cand_x, cand_y,
               training=False, average_output=False, chunk_batch=1):
         outputs = []
         total_loss = 0
@@ -171,7 +172,7 @@ class icarl_agent(Agent):
                 torch.cuda.nvtx.range_pop()
 
                 if self.should_distill:
-                    x = torch.cat((x, set_x[i_batch]))
+                    x = torch.cat((x, cand_x[i_batch]))
 
                 torch.cuda.nvtx.range_push("Forward pass")
                 output = self.model(x)
@@ -181,7 +182,7 @@ class icarl_agent(Agent):
                 # Compute distillation loss
                 if self.should_distill:
                     torch.cuda.nvtx.range_push("Compute distillation loss")
-                    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(set_y[i_batch]))
+                    loss += self.kl(self.lsm(output[y.size(0):]), self.sm(cand_y[i_batch]))
                     torch.cuda.nvtx.range_pop()
 
                 # accumulate gradient
@@ -211,7 +212,17 @@ class icarl_agent(Agent):
             self.buf_x = None
             self.buf_y = None
 
-    def increment_taskset(self, num_batches, mem_x, mem_y):
+    def make_candidates(self, num_batches, mem_x, mem_y):
+        """Shuffle and move the minibatch to CUDA memory.
+
+        Args:
+            num_batches (str): the number of batches
+            mem_x (tensor): x batches
+            mem_y (tensor): y batches
+
+        Returns:
+            The list of the python-grid5000 jobs retrieved.
+        """
         if self.mem_class_x == {}:
             return None, None
 
@@ -219,16 +230,14 @@ class icarl_agent(Agent):
         perm = np.random.permutation(num_mem)
         while len(perm) < self.num_candidates * num_batches:
             perm = np.concatenate([perm, np.random.permutation(num_mem)])
-
         perms = []
         for i in range(num_batches):
             perms.append(perm[:self.num_candidates])
             perm = perm[self.num_candidates:]
+        cand_x = torch.stack([torch.stack([mem_x[index] for index in perm]) for perm in perms])
+        cand_y = torch.stack([torch.stack([mem_y[index] for index in perm]) for perm in perms])
 
-        set_x = torch.stack([torch.stack([mem_x[index] for index in perm]) for perm in perms])
-        set_y = torch.stack([torch.stack([mem_y[index] for index in perm]) for perm in perms])
-
-        return move_cuda(set_x, self.cuda), move_cuda(set_y, self.cuda)
+        return move_cuda(cand_x, self.cuda), move_cuda(cand_y, self.cuda)
 
     def forward(self, x):
         self.model.eval()
@@ -308,6 +317,4 @@ class icarl_agent(Agent):
 
 def icarl(model, config, optimizer, criterion, cuda, log_interval):
     implementation = config.get('implementation', '')
-    if implementation == 'v1':
-        return icarl_v1_agent(model, config, optimizer, criterion, cuda, log_interval)
     return icarl_agent(model, config, optimizer, criterion, cuda, log_interval)

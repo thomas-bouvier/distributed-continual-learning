@@ -1,7 +1,6 @@
 import horovod.torch as hvd
 import math
 import numpy as np
-import numpy.ma as ma
 import logging
 import random
 import time
@@ -12,10 +11,6 @@ import torchvision
 
 from agents.base import Agent
 from agents.nil_list import nil_list_agent
-from agents.nil_v1 import nil_v1_agent
-from agents.nil_v2 import nil_v2_agent
-from agents.nil_v3 import nil_v3_agent
-from agents.nil_v4 import nil_v4_agent
 from agents.nil_global import nil_global_agent
 from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
@@ -242,7 +237,6 @@ class nil_agent(Agent):
                 # Get the representatives
                 rep_values, rep_labels, rep_weights = self.get_representatives()
                 num_reps = len(rep_values)
-
                 if self.writer is not None and num_reps > 0:
                     grid = torchvision.utils.make_grid(rep_values)
                     self.writer.add_image("rep_values", grid)
@@ -302,14 +296,6 @@ def nil(model, config, optimizer, criterion, cuda, log_interval):
     agent = nil_agent
     if implementation == 'list':
         agent = nil_list_agent
-    elif implementation == 'v1':
-        agent = nil_v1_agent
-    elif implementation == 'v2':
-        agent = nil_v2_agent
-    elif implementation == 'v3':
-        agent = nil_v3_agent
-    elif implementation == 'v4':
-        agent = nil_v4_agent
     elif implementation == 'global':
         agent = nil_global_agent
     return agent(model, config, optimizer, criterion, cuda, log_interval)
