@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-__all__ = ['candlenet']
+__all__ = ["candlenet"]
+
 
 class candlenet_model(nn.Module):
     def __init__(self):

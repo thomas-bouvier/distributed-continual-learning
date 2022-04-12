@@ -13,6 +13,7 @@ from agents.base import Agent
 from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
+
 class Representative(object):
     """
     Representative sample of the algorithm
@@ -41,28 +42,54 @@ class Representative(object):
 
 """This implementation doesn't work because of CUDA OOM issues.
 """
+
+
 class nil_list_agent(Agent):
-    def __init__(self, model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict=None):
-        super(nil_list_agent, self).__init__(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict)
+    def __init__(
+        self,
+        model,
+        config,
+        optimizer,
+        criterion,
+        cuda,
+        buffer_cuda,
+        log_interval,
+        state_dict=None,
+    ):
+        super(nil_list_agent, self).__init__(
+            model,
+            config,
+            optimizer,
+            criterion,
+            cuda,
+            buffer_cuda,
+            log_interval,
+            state_dict,
+        )
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
 
-        self.num_representatives = config.get('num_representatives', 60)   # number of stored examples per class
-        self.num_candidates = config.get('num_candidates', 20)
-        self.batch_size = config.get('batch_size')
+        self.num_representatives = config.get(
+            "num_representatives", 60
+        )  # number of stored examples per class
+        self.num_candidates = config.get("num_candidates", 20)
+        self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
         self.representatives = [[] for _ in range(model.num_classes)]
-        #self.representatives_x = ma.masked_all((model.num_classes, self.num_representatives), torch.Tensor)
+        # self.representatives_x = ma.masked_all((model.num_classes, self.num_representatives), torch.Tensor)
         self.class_count = [0 for _ in range(model.num_classes)]
 
-        self.mask = torch.as_tensor([0.0 for _ in range(self.model.num_classes)], device=torch.device(get_device(self.cuda)))
+        self.mask = torch.as_tensor(
+            [0.0 for _ in range(self.model.num_classes)],
+            device=torch.device(get_device(self.cuda)),
+        )
 
     def get_representatives(self):
         """Select or retrieve the representatives from the data
 
-            :return: a list of num_candidates representatives.
+        :return: a list of num_candidates representatives.
         """
         # Naive version
         repr_list = [a for sublist in self.representatives for a in sublist]
@@ -72,10 +99,10 @@ class nil_list_agent(Agent):
             return []
 
         # Numpy version
-        #repr_list = self.representatives_x.compressed()
-        #if len(repr_list) > 0:
+        # repr_list = self.representatives_x.compressed()
+        # if len(repr_list) > 0:
         #    return np.random.choice(repr_list, (min(self.num_candidates, len(repr_list)),), replace=False)
-        #else:
+        # else:
         #    return np.array([])
 
     def get_num_representatives(self):
@@ -104,7 +131,7 @@ class nil_list_agent(Agent):
             else:
                 self.representatives[nclass].append(Representative(x[i], y[i]))
 
-        #for i in range(min(self.num_candidates, len(x))):
+        # for i in range(min(self.num_candidates, len(x))):
         #    nclass = y[i].item()
         #    self.class_count[nclass] += 1
         #    if self.class_count[nclass] > self.num_representatives:
@@ -126,13 +153,15 @@ class nil_list_agent(Agent):
         # representatives respect to the batch. E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
         total_weight = (self.batch_size * 1.0) / self.num_candidates
         # The total_weight is adjusted to the proportion between candidate representatives and actual representatives
-        total_weight *= (total_count / np.sum([len(cls) for cls in self.representatives]))
+        total_weight *= total_count / \
+            np.sum([len(cls) for cls in self.representatives])
         probs = [count / total_count for count in self.class_count]
         for i in range(len(self.representatives)):
             if self.class_count[i] > 0:
                 for rep in self.representatives[i]:
                     # This version uses natural log as a stabilizer
-                    rep.weight = max(math.log(probs[i].item() * total_weight), 1.0)
+                    rep.weight = max(
+                        math.log(probs[i].item() * total_weight), 1.0)
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -143,14 +172,17 @@ class nil_list_agent(Agent):
         torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
-            logging.debug(f"Loading best model with minimal eval loss ({self.minimal_eval_loss})..")
+            logging.debug(
+                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
+            )
             self.model.load_state_dict(self.best_model)
-            self.minimal_eval_loss = float('inf')
+            self.minimal_eval_loss = float("inf")
 
         if task_id > 0:
-            if self.config.get('reset_state_dict', False):
+            if self.config.get("reset_state_dict", False):
                 logging.debug(f"Resetting model internal state..")
-                self.model.load_state_dict(copy.deepcopy(self.initial_snapshot))
+                self.model.load_state_dict(
+                    copy.deepcopy(self.initial_snapshot))
             self.optimizer.reset(self.model.parameters())
 
         # Add the new classes to the mask
@@ -160,72 +192,118 @@ class nil_list_agent(Agent):
             self.mask[y] = 1.0
         torch.cuda.nvtx.range_pop()
 
-        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
+        self.criterion = nn.CrossEntropyLoss(
+            weight=self.mask, reduction="none")
 
     """
     Forward pass for the current epoch
     """
+
     def loop(self, data_regime, average_output=False, training=False):
-        prefix='train' if training else 'val'
-        meters = {metric: AverageMeter(f"{prefix}_{metric}")
-                  for metric in ['loss', 'prec1', 'prec5']}
+        prefix = "train" if training else "val"
+        meters = {
+            metric: AverageMeter(f"{prefix}_{metric}")
+            for metric in ["loss", "prec1", "prec5"]
+        }
         start = time.time()
         step_count = 0
 
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
-            output, loss = self._step(i_batch, x, y, training=training,
-                                      average_output=average_output)
+            output, loss = self._step(
+                i_batch, x, y, training=training, average_output=average_output
+            )
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output[:y.size(0)], y, topk=(1, min(self.model.num_classes, 5)))
-            meters['loss'].update(loss)
-            meters['prec1'].update(prec1, x.size(0))
-            meters['prec5'].update(prec5, x.size(0))
+            prec1, prec5 = accuracy(
+                output[: y.size(0)],
+                y,
+                topk=(1, min(self.model.num_classes, 5)),
+            )
+            meters["loss"].update(loss)
+            meters["prec1"].update(prec1, x.size(0))
+            meters["prec5"].update(prec5, x.size(0))
 
-            if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
-                logging.info('{phase}: epoch: {0} [{1}/{2}]\t'
-                             'Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t'
-                             'Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t'
-                             'Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t'
-                             .format(
-                                 self.epoch+1, i_batch, len(data_regime.get_loader()),
-                                 phase='TRAINING' if training else 'EVALUATING',
-                                 meters=meters))
+            if i_batch % self.log_interval == 0 or i_batch == len(
+                data_regime.get_loader()
+            ):
+                logging.info(
+                    "{phase}: epoch: {0} [{1}/{2}]\t"
+                    "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
+                    "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
+                    "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
+                        self.epoch + 1,
+                        i_batch,
+                        len(data_regime.get_loader()),
+                        phase="TRAINING" if training else "EVALUATING",
+                        meters=meters,
+                    )
+                )
 
                 if self.writer is not None:
-                    self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)
-                    self.writer.add_scalar(f"{prefix}_prec1", meters['prec1'].avg, self.global_steps)
-                    self.writer.add_scalar(f"{prefix}_prec5", meters['prec5'].avg, self.global_steps)
+                    self.writer.add_scalar(
+                        f"{prefix}_loss", meters["loss"].avg, self.global_steps
+                    )
+                    self.writer.add_scalar(
+                        f"{prefix}_prec1",
+                        meters["prec1"].avg,
+                        self.global_steps,
+                    )
+                    self.writer.add_scalar(
+                        f"{prefix}_prec5",
+                        meters["prec5"].avg,
+                        self.global_steps,
+                    )
                     if training:
-                        self.writer.add_scalar('lr', self.optimizer.get_lr()[0], self.global_steps)
-                        self.writer.add_scalar('num_representatives', self.get_num_representatives(), self.global_steps)
-                        self.writer.add_scalar('memory_size', self.get_memory_size(), self.global_steps)
+                        self.writer.add_scalar(
+                            "lr", self.optimizer.get_lr()[0], self.global_steps
+                        )
+                        self.writer.add_scalar(
+                            "num_representatives",
+                            self.get_num_representatives(),
+                            self.global_steps,
+                        )
+                        self.writer.add_scalar(
+                            "memory_size",
+                            self.get_memory_size(),
+                            self.global_steps,
+                        )
                     self.writer.flush()
                 if self.watcher is not None:
-                    self.observe(trainer=self,
-                                model=self.model,
-                                optimizer=self.optimizer,
-                                data=(x, y))
+                    self.observe(
+                        trainer=self,
+                        model=self.model,
+                        optimizer=self.optimizer,
+                        data=(x, y),
+                    )
                     self.stream_meters(meters, prefix=prefix)
                     if training:
-                        self.write_stream('lr',
-                                         (self.global_steps, self.optimizer.get_lr()[0]))
+                        self.write_stream(
+                            "lr",
+                            (self.global_steps, self.optimizer.get_lr()[0]),
+                        )
             torch.cuda.nvtx.range_pop()
             step_count += 1
         end = time.time()
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
-        meters['error1'] = 100. - meters['prec1']
-        meters['error5'] = 100. - meters['prec5']
-        meters['time'] = end - start
-        meters['step_count'] = step_count
+        meters["error1"] = 100.0 - meters["prec1"]
+        meters["error5"] = 100.0 - meters["prec5"]
+        meters["time"] = end - start
+        meters["step_count"] = step_count
 
         return meters
 
-    def _step(self, i_batch, inputs_batch, target_batch, training=False,
-              average_output=False, chunk_batch=1):
+    def _step(
+        self,
+        i_batch,
+        inputs_batch,
+        target_batch,
+        training=False,
+        average_output=False,
+        chunk_batch=1,
+    ):
         outputs = []
         total_loss = 0
 
@@ -233,8 +311,12 @@ class nil_list_agent(Agent):
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.steps)
 
-        for i, (x, y) in enumerate(zip(inputs_batch.chunk(chunk_batch, dim=0),
-                                       target_batch.chunk(chunk_batch, dim=0))):
+        for i, (x, y) in enumerate(
+            zip(
+                inputs_batch.chunk(chunk_batch, dim=0),
+                target_batch.chunk(chunk_batch, dim=0),
+            )
+        ):
             torch.cuda.nvtx.range_push(f"Chunk {i}")
 
             if training:
@@ -250,9 +332,14 @@ class nil_list_agent(Agent):
 
             if training and num_reps > 0:
                 torch.cuda.nvtx.range_push("Combine batches")
-                rep_values = move_cuda(torch.stack([rep.x for rep in reps]), self.cuda)
-                rep_labels = move_cuda(torch.stack([rep.y for rep in reps]), self.cuda)
-                rep_weights = torch.as_tensor([rep.weight for rep in reps], device=torch.device(get_device(self.cuda)))
+                rep_values = move_cuda(torch.stack(
+                    [rep.x for rep in reps]), self.cuda)
+                rep_labels = move_cuda(torch.stack(
+                    [rep.y for rep in reps]), self.cuda)
+                rep_weights = torch.as_tensor(
+                    [rep.weight for rep in reps],
+                    device=torch.device(get_device(self.cuda)),
+                )
                 # Concatenate the training samples with the representatives
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
@@ -269,7 +356,7 @@ class nil_list_agent(Agent):
 
             if training:
                 # Leads to decreased accuracy
-                #total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
+                # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
                 dw = w / torch.sum(w)
                 # Faster to provide the derivative of L wrt {l}^n than letting pytorch computing it by itself
                 loss.backward(dw)
@@ -289,7 +376,8 @@ class nil_list_agent(Agent):
                     if self.buffer_cuda:
                         self.pick_candidates(x[:-num_reps], y[:-num_reps])
                     else:
-                        self.pick_candidates(x[:-num_reps].cpu(), y[:-num_reps].cpu())
+                        self.pick_candidates(
+                            x[:-num_reps].cpu(), y[:-num_reps].cpu())
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()

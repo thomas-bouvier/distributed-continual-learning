@@ -1,9 +1,11 @@
 import torch
 
+
 def get_device(use_cuda=True):
     if use_cuda and torch.cuda.is_available():
-        return 'cuda'
-    return 'cpu'
+        return "cuda"
+    return "cpu"
+
 
 def move_cuda(item, use_cuda=True, cuda_device=-1):
     """
@@ -22,6 +24,7 @@ def move_cuda(item, use_cuda=True, cuda_device=-1):
         else:
             item = item.cuda()
     return item
+
 
 def eval_func(f, x):
     if isinstance(f, string_types):

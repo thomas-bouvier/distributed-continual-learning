@@ -7,8 +7,18 @@ from regularizer import Regularizer
 
 _OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
 
+
 class OptimizerRegime(Regime, torch.optim.Optimizer):
-    def __init__(self, model, compression, reduction, batches_per_allreduce, gradient_predivide_factor, regime, defaults={}):
+    def __init__(
+        self,
+        model,
+        compression,
+        reduction,
+        batches_per_allreduce,
+        gradient_predivide_factor,
+        regime,
+        defaults={},
+    ):
         super(OptimizerRegime, self).__init__(regime, defaults)
         self.model = model
         self.parameters = list(model.parameters())
@@ -27,32 +37,38 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
         # Horovod: wrap optimizer with DistributedOptimizer.
-        return hvd.DistributedOptimizer(optimizer,
-                                    named_parameters=self.model.named_parameters(),
-                                    compression=self.compression,
-                                    op=self.reduction,
-                                    backward_passes_per_step=self.batches_per_allreduce,
-                                    gradient_predivide_factor=self.gradient_predivide_factor)
+        return hvd.DistributedOptimizer(
+            optimizer,
+            named_parameters=self.model.named_parameters(),
+            compression=self.compression,
+            op=self.reduction,
+            backward_passes_per_step=self.batches_per_allreduce,
+            gradient_predivide_factor=self.gradient_predivide_factor,
+        )
 
     def update(self, epoch=None, steps=None):
-        """Adjust optimizer according to current epoch or steps and training regime.
-        """
+        """Adjust optimizer according to current epoch or steps and training regime."""
         if super(OptimizerRegime, self).update(epoch, steps):
-            logging.debug(f"OPTIMIZER REGIME - update (epoch: {epoch+1}, steps: {steps+1})")
+            logging.debug(
+                f"OPTIMIZER REGIME - update (epoch: {epoch+1}, steps: {steps+1})"
+            )
             self.adjust_from_config(self.config)
 
     def adjust_from_config(self, config):
-        if 'optimizer' in config:
-            optim_method = _OPTIMIZERS[config.get('optimizer', 'SGD')]
+        if "optimizer" in config:
+            optim_method = _OPTIMIZERS[config.get("optimizer", "SGD")]
             if not isinstance(self.optimizer, optim_method):
                 self.optimizer = optim_method(self.optimizer.param_groups)
-                logging.debug(f"OPTIMIZER REGIME - setting method = {config['optimizer']}")
+                logging.debug(
+                    f"OPTIMIZER REGIME - setting method = {config['optimizer']}"
+                )
         for param_group in self.optimizer.param_groups:
             for key in param_group.keys():
                 if key in config:
                     new_val = config[key]
                     if new_val != param_group[key]:
-                        logging.debug(f"OPTIMIZER REGIME - updating {key} = {new_val}")
+                        logging.debug(
+                            f"OPTIMIZER REGIME - updating {key} = {new_val}")
                         param_group[key] = config[key]
 
     def zero_grad(self):
@@ -67,17 +83,16 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
     def __getstate__(self):
         return {
-            'optimizer_state': self.optimizer.__getstate__(),
-            'regime': self.regime,
+            "optimizer_state": self.optimizer.__getstate__(),
+            "regime": self.regime,
         }
 
     def __setstate__(self, state):
-        self.regime = state.get('regime')
-        self.optimizer.__setstate__(state.get('optimizer_state'))
+        self.regime = state.get("regime")
+        self.optimizer.__setstate__(state.get("optimizer_state"))
 
     def state_dict(self):
-        """Returns the state of the optimizer as a :class:`dict`.
-        """
+        """Returns the state of the optimizer as a :class:`dict`."""
         return self.optimizer.state_dict()
 
     def load_state_dict(self, state_dict):
@@ -91,7 +106,8 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
     def reset(self, parameters):
         logging.debug("OPTIMIZER REGIME - resetting state..")
-        self.optimizer.load_state_dict(torch.optim.SGD(parameters, lr=0).state_dict())
+        self.optimizer.load_state_dict(
+            torch.optim.SGD(parameters, lr=0).state_dict())
         # Horovod: broadcast optimizer state.
         hvd.broadcast_optimizer_state(self.optimizer, root_rank=0)
         self.config = self.defaults
@@ -101,4 +117,4 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         return [group[key] for group in self.optimizer.param_groups]
 
     def get_lr(self):
-        return self.get_value('lr')
+        return self.get_value("lr")
