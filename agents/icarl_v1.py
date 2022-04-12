@@ -1,10 +1,10 @@
+import copy
 import horovod.torch as hvd
 import logging
 import time
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
-import torch.optim as optim
 
 from agents.base import Agent
 from utils.utils import move_cuda
@@ -84,7 +84,7 @@ class icarl_v1_agent(Agent):
             self.minimal_eval_loss = float("inf")
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
-                logging.debug(f"Resetting model internal state..")
+                logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer.reset(self.model.parameters())

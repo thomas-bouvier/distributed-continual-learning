@@ -1,12 +1,10 @@
-import horovod.torch as hvd
+import copy
 import math
 import numpy as np
 import logging
-import random
 import time
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torchvision
 
 from agents.base import Agent
@@ -98,9 +96,6 @@ class nil_agent(Agent):
             self.candidates[labels[i]] = x[(
                 y == labels[i]).nonzero(as_tuple=True)[0]]
 
-        # Indices in 1d list representatives
-        representatives = [torch.Tensor()
-                           for _ in range(self.model.num_classes)]
         rm = []
         add = []
         offsets = [0]
@@ -207,7 +202,7 @@ class nil_agent(Agent):
 
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
-                logging.debug(f"Resetting model internal state..")
+                logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer.reset(self.model.parameters())

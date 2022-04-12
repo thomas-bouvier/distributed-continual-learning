@@ -1,5 +1,7 @@
 import torch
 
+from six import string_types
+
 
 def get_device(use_cuda=True):
     if use_cuda and torch.cuda.is_available():

@@ -9,7 +9,7 @@ from continuum.tasks import TaskType
 from filelock import FileLock
 from sklearn.preprocessing import MaxAbsScaler
 from torchvision.datasets.vision import VisionDataset
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 
 def get_dataset(
@@ -90,30 +90,30 @@ def get_dataset(
                 "float32")
 
             seqlen = df_train.shape[1]
-            Y_train = df_train[:, 0].astype("int")
-            Y_test = df_test[:, 0].astype("int")
+            y_train = df_train[:, 0].astype("int")
+            y_test = df_test[:, 0].astype("int")
             df_x_train = df_train[:, 1:seqlen].astype(np.float32)
             df_x_test = df_test[:, 1:seqlen].astype(np.float32)
-            X_train = df_x_train
-            X_test = df_x_test
+            x_train = df_x_train
+            x_test = df_x_test
 
             scaler = MaxAbsScaler()
-            mat = np.concatenate((X_train, X_test), axis=0)
+            mat = np.concatenate((x_train, x_test), axis=0)
             mat = scaler.fit_transform(mat)
 
-            X_train = mat[: X_train.shape[0], :]
-            X_test = mat[X_train.shape[0]:, :]
-            X_train = np.expand_dims(X_train, axis=1)
-            X_test = np.expand_dims(X_test, axis=1)
-            X_train = torch.as_tensor(X_train)
-            X_test = torch.as_tensor(X_test)
-            Y_train = torch.as_tensor(Y_train)
-            Y_test = torch.as_tensor(Y_test)
+            x_train = mat[: x_train.shape[0], :]
+            x_test = mat[x_train.shape[0]:, :]
+            x_train = np.expand_dims(x_train, axis=1)
+            x_test = np.expand_dims(x_test, axis=1)
+            x_train = torch.as_tensor(x_train)
+            x_test = torch.as_tensor(x_test)
+            y_train = torch.as_tensor(y_train)
+            y_test = torch.as_tensor(y_test)
 
-            torch.save(X_test, os.path.join(root, "x_test.pt"))
-            torch.save(Y_test, os.path.join(root, "y_test.pt"))
-            torch.save(X_train, os.path.join(root, "x_train.pt"))
-            torch.save(Y_train, os.path.join(root, "y_train.pt"))
+            torch.save(x_test, os.path.join(root, "x_test.pt"))
+            torch.save(y_test, os.path.join(root, "y_test.pt"))
+            torch.save(x_train, os.path.join(root, "x_train.pt"))
+            torch.save(y_train, os.path.join(root, "y_train.pt"))
             data_train = torch.load(os.path.join(root, "x_train.pt"))
             target_train = torch.load(os.path.join(root, "y_train.pt"))
             data_test = torch.load(os.path.join(root, "x_test.pt"))

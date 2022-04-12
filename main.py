@@ -309,7 +309,7 @@ class Experiment:
         if self.args.cuda:
             # If using GPU Adasum allreduce, scale learning rate by local_size.
             if self.args.use_adasum and hvd.nccl_built():
-                lr_scaler = args.batches_per_allreduce * hvd.local_size()
+                lr_scaler = self.args.batches_per_allreduce * hvd.local_size()
 
         model_name = models.__dict__[self.args.model]
         model_config = {

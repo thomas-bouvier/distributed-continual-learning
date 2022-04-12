@@ -1,13 +1,11 @@
-import horovod.torch as hvd
+import copy
 import math
 import numpy as np
-import numpy.ma as ma
 import logging
 import random
 import time
 import torch
 import torch.nn as nn
-import torch.optim as optim
 
 from agents.base import Agent
 from utils.utils import get_device, move_cuda
@@ -180,7 +178,7 @@ class nil_list_agent(Agent):
 
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
-                logging.debug(f"Resetting model internal state..")
+                logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer.reset(self.model.parameters())

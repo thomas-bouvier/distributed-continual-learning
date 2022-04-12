@@ -1,12 +1,10 @@
+import copy
 import horovod.torch as hvd
 import math
-import numpy as np
 import logging
-import random
 import time
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torchvision
 
 from agents.base import Agent
@@ -249,7 +247,7 @@ class nil_global_agent(Agent):
 
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
-                logging.debug(f"Resetting model internal state..")
+                logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer.reset(self.model.parameters())

@@ -1,7 +1,6 @@
 import horovod.torch as hvd
 import logging
 import numpy as np
-import torch
 import torch.multiprocessing as mp
 
 from copy import deepcopy

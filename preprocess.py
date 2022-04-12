@@ -1,4 +1,4 @@
-from torchvision import datasets, transforms
+from torchvision import transforms
 
 _IMAGENET_NORMALIZE_STATS = {
     "mean": [0.485, 0.456, 0.406],

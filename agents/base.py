@@ -216,7 +216,7 @@ class Agent:
             self.minimal_eval_loss = float("inf")
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
-                logging.debug(f"Resetting model internal state..")
+                logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer.reset(self.model.parameters())
