@@ -120,8 +120,11 @@ class ResultsLog(object):
             resultsLog.add(epoch=epoch_num, train_loss=loss,
                            test_loss=test_loss)
         """
+        #logging.debug(f"--add: adding content")
         df = pd.DataFrame([kwargs.values()], columns=kwargs.keys())
+        #logging.debug(f"df.shape: {df.shape}")
         self.results = pd.concat([self.results, df])
+        #logging.debug(f"self.results.shape: {self.results.shape}")
 
     def clear(self):
         self.figures = []
@@ -158,8 +161,17 @@ class ResultsLog(object):
             save(plot)
             self.clear()
 
+        # https://stackoverflow.com/questions/49545985/catch-pandas-df-to-json-exception
         if self.data_format == 'json':
-            self.results.to_json(self.data_path, orient='records')
+            #logging.debug(f"--save:")
+            #logging.debug(f"self.results: {self.results}")
+            # Sometimes the following doesn't work for some reason, probably
+            # a memory issue.
+            #self.results.to_json(self.data_path, orient='records')
+            # Replacing that function as suggested on SO
+            holder_dictionary = self.results.to_dict(orient='records')
+            with open(self.data_path, 'w') as outfile:
+                json.dump(holder_dictionary, outfile)
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
 

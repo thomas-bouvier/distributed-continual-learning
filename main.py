@@ -6,14 +6,12 @@ import logging
 import numpy as np
 import nvtx
 import os
-import pickle
 import time
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
 
 from ast import literal_eval
 from datetime import datetime
-from filelock import FileLock
 from os import path, makedirs
 
 import models
@@ -26,8 +24,6 @@ from optimizer_regime import OptimizerRegime
 from utils.log import save_checkpoint, setup_logging, ResultsLog
 from utils.meters import AverageMeter
 from utils.yaml_params import YParams
-
-from torchsummary import summary
 
 model_names = sorted(name for name in models.__dict__
                      if name.islower() and not name.startswith("__")
@@ -410,6 +406,7 @@ class Experiment():
 
             end = time.time()
             task_metrics.update({'time': end-start})
+            #logging.debug(f"\nTask metrics : {task_metrics}")
             tasks_metrics.add(**task_metrics)
             tasks_metrics.save()
 
