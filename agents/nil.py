@@ -49,14 +49,16 @@ class nil_agent(Agent):
         return (self.representatives_x[repr_list], self.representatives_y[repr_list], self.representatives_w[repr_list])
 
     def get_num_representatives(self):
-        return 0
+        return sum(x.size(dim=0) for x in self.representatives)
 
     def get_memory_size(self):
-        return 0
+        return sum(x.element_size() * x.nelement() for x in self.representatives)
 
     def pick_candidates(self, x, y):
         """Modify the representatives list by selecting candidates randomly from the
-        incoming data x and the current list of representatives
+        incoming data x and the current list of representatives.
+
+        In this version, we permute indices on r+c and we discard the c last samples.
         """
         i = min(self.num_candidates, len(x))
         rand_indices = torch.randperm(len(y))
@@ -99,7 +101,7 @@ class nil_agent(Agent):
                 to_rm -= self.num_representatives * c
 
             if len(torch.flatten(self.representatives[c])) == 0:
-                self.representatives[c] = torch.tensor(new_reps[lower:upper][to_add])
+                self.representatives[c] = new_reps[lower:upper][to_add].detach().clone()
             else:
                 selected = [i for i in range(len(self.representatives[c])) if i not in to_rm]
                 self.representatives[c] = self.representatives[c][selected]
@@ -189,6 +191,7 @@ class nil_agent(Agent):
                                  self.epoch+1, i_batch, len(data_regime.get_loader()),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
+                print(f"get_num_representatives {self.get_num_representatives()}, get_memory_size {self.get_memory_size()}")
 
                 if self.writer is not None:
                     self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)

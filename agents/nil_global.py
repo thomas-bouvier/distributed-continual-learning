@@ -51,6 +51,12 @@ class nil_global_agent(Agent):
 
         return (self.global_x_reps[repr_list], self.global_y_reps[repr_list], self.global_w_reps[repr_list])
 
+    def get_num_representatives(self):
+        return sum(x.size(dim=0) for x in self.representatives)
+
+    def get_memory_size(self):
+        return sum(x.element_size() * x.nelement() for x in self.representatives)
+
     def pick_candidates(self, x, y):
         """Create a bufferbased in random sampling
 
@@ -101,8 +107,8 @@ class nil_global_agent(Agent):
         offsets = hvd.allgather(offsets)
         new_reps = hvd.allgather(torch.cat(self.candidates).unsqueeze(0))
 
-        for worker in range(hvd.size()):  
-            add_w = add[worker] 
+        for worker in range(hvd.size()):
+            add_w = add[worker]
             add_w = add_w[add_w != -1]
             rm_w = rm[worker]
             rm_w = rm_w[rm_w != -1]

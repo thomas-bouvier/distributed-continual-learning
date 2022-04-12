@@ -86,7 +86,10 @@ class nil_list_agent(Agent):
 
     def pick_candidates(self, x, y):
         """Modify the representatives list by selecting candidates randomly from the
-        incoming data x and the current list of representatives
+        incoming data x and the current list of representatives.
+
+        In this version, all c first candidates of the incoming batch x are injected
+        into the episodic memory.
         """
         # Naive version
         rand_indices = torch.from_numpy(np.random.permutation(len(x)))
