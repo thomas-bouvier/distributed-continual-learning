@@ -9,7 +9,7 @@ from utils.meters import AverageMeter, accuracy
 from utils.utils import move_cuda
 
 class Agent():
-    def __init__(self, model, config, optimizer, criterion, cuda, log_interval,
+    def __init__(self, model, config, optimizer, criterion, cuda, buffer_cuda, log_interval,
                  state_dict=None):
         super(Agent, self).__init__()
         self.model = model
@@ -17,6 +17,7 @@ class Agent():
         self.optimizer = optimizer
         self.criterion = criterion
         self.cuda = cuda
+        self.buffer_cuda = buffer_cuda
         self.log_interval = log_interval
         self.epoch = 0
         self.global_steps = 0
@@ -231,5 +232,5 @@ class Agent():
             stream.write(values)
 
 
-def base(model, agent_config, optimizer, criterion, cuda, log_interval):
-    return Agent(model, agent_config, optimizer, criterion, cuda, log_interval)
+def base(model, agent_config, optimizer, criterion, cuda, buffer_cuda, log_interval):
+    return Agent(model, agent_config, optimizer, criterion, cuda, buffer_cuda, log_interval)

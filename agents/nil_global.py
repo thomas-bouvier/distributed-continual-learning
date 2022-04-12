@@ -14,8 +14,8 @@ from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 class nil_global_agent(Agent):
-    def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(nil_global_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+    def __init__(self, model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict=None):
+        super(nil_global_agent, self).__init__(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -311,9 +311,15 @@ class nil_global_agent(Agent):
                 self.steps += 1
 
                 if num_reps == 0:
-                    self.pick_candidates(x.cpu(), y.cpu())
+                    if self.buffer_cuda:
+                        self.pick_candidates(x, y)
+                    else:
+                        self.pick_candidates(x.cpu(), y.cpu())
                 else:
-                    self.pick_candidates(x[:-num_reps].cpu(), y[:-num_reps].cpu())
+                    if self.buffer_cuda:
+                        self.pick_candidates(x[:-num_reps], y[:-num_reps])
+                    else:
+                        self.pick_candidates(x[:-num_reps].cpu(), y[:-num_reps].cpu())
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()

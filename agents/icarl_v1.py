@@ -25,8 +25,8 @@ def make_candidates(n, mem_x, mem_y, cand_x, cand_y, lock_make, lock_made, num_b
 
 
 class icarl_v1_agent(Agent):
-    def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(icarl_v1_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+    def __init__(self, model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict=None):
+        super(icarl_v1_agent, self).__init__(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)

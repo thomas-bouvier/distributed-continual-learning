@@ -12,8 +12,8 @@ from utils.utils import move_cuda
 from utils.meters import AverageMeter, accuracy
 
 class icarl_agent(Agent):
-    def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(icarl_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+    def __init__(self, model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict=None):
+        super(icarl_agent, self).__init__(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -315,6 +315,5 @@ class icarl_agent(Agent):
             self.buf_y = None
 
 
-def icarl(model, config, optimizer, criterion, cuda, log_interval):
-    implementation = config.get('implementation', '')
-    return icarl_agent(model, config, optimizer, criterion, cuda, log_interval)
+def icarl(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval):
+    return icarl_agent(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval)

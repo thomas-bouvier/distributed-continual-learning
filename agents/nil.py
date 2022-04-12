@@ -16,8 +16,8 @@ from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 class nil_agent(Agent):
-    def __init__(self, model, config, optimizer, criterion, cuda, log_interval, state_dict=None):
-        super(nil_agent, self).__init__(model, config, optimizer, criterion, cuda, log_interval, state_dict)
+    def __init__(self, model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict=None):
+        super(nil_agent, self).__init__(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval, state_dict)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -191,7 +191,6 @@ class nil_agent(Agent):
                                  self.epoch+1, i_batch, len(data_regime.get_loader()),
                                  phase='TRAINING' if training else 'EVALUATING',
                                  meters=meters))
-                print(f"get_num_representatives {self.get_num_representatives()}, get_memory_size {self.get_memory_size()}")
 
                 if self.writer is not None:
                     self.writer.add_scalar(f"{prefix}_loss", meters['loss'].avg, self.global_steps)
@@ -281,9 +280,15 @@ class nil_agent(Agent):
                 self.steps += 1
 
                 if num_reps == 0:
-                    self.pick_candidates(x.cpu(), y.cpu())
+                    if self.buffer_cuda:
+                        self.pick_candidates(x, y)
+                    else:
+                        self.pick_candidates(x.cpu(), y.cpu())
                 else:
-                    self.pick_candidates(x[:-num_reps].cpu(), y[:-num_reps].cpu())
+                    if self.buffer_cuda:
+                        self.pick_candidates(x[:-num_reps], y[:-num_reps])
+                    else:
+                        self.pick_candidates(x[:-num_reps].cpu(), y[:-num_reps].cpu())
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
@@ -294,11 +299,11 @@ class nil_agent(Agent):
         return outputs, total_loss
 
 
-def nil(model, config, optimizer, criterion, cuda, log_interval):
+def nil(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval):
     implementation = config.get('implementation', '')
     agent = nil_agent
     if implementation == 'list':
         agent = nil_list_agent
     elif implementation == 'global':
         agent = nil_global_agent
-    return agent(model, config, optimizer, criterion, cuda, log_interval)
+    return agent(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval)

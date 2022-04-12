@@ -46,6 +46,8 @@ parser.add_argument('--tasksets-config', default='',
                     help='additional taskset configuration (useful for continual learning)')
 parser.add_argument('--shard', action='store_true', default=False,
                     help='sample data from a same subset of the dataset at each epoch')
+parser.add_argument('--buffer-cuda', action='store_true', default=False,
+                    help='store replay buffers in CUDA memory rather than cpu')
 parser.add_argument('--agent', metavar='AGENT', default=None,
                     choices=agent_names,
                     help='model agent: ' + ' | '.join(agent_names))
@@ -106,6 +108,7 @@ parser.add_argument('--tensorwatch-port', default=0, type=int,
 def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+    args.buffer_cuda = args.buffer_cuda and args.cuda
     args.evaluate = not args.no_evaluate
 
     mp.set_start_method('spawn')
@@ -236,7 +239,7 @@ class Experiment():
         if self.args.agent_config != '':
             agent_config = dict(agent_config, **literal_eval(self.args.agent_config))
         self.agent = agent(model, agent_config, self.optimizer_regime,
-                           self.criterion, self.args.cuda, self.args.log_interval)
+                           self.criterion, self.args.cuda, self.args.buffer_cuda, self.args.log_interval)
         self.agent.epochs = self.args.epochs
         logging.info(f"Created agent with configuration: {agent_config}")
 
@@ -264,7 +267,7 @@ class Experiment():
             'initial_increment': tasksets_config.get('initial_increment', 0),
             'increment': tasksets_config.get('increment', 1),
             'num_tasks': tasksets_config.get('num_tasks', 5),
-            'concatenate_tasksets': tasksets_config.get('concatenate_tasksets', False)
+            'concatenate_tasksets': tasksets_config.get('concatenate_tasksets', False),
         }
 
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
