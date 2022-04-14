@@ -147,10 +147,12 @@ class nil_list_agent(Agent):
         Reassign the weights of the representatives
         """
         total_count = np.sum(self.class_count)
-        # This version proposes that the total weight of representatives is calculated from the proportion of candidate
-        # representatives respect to the batch. E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
+        # This version proposes that the total weight of representatives is
+        # calculated from the proportion of candidates with respect to the batch.
+        # E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
         total_weight = (self.batch_size * 1.0) / self.num_candidates
-        # The total_weight is adjusted to the proportion between candidate representatives and actual representatives
+        # The total_weight is adjusted to the proportion between candidates
+        # and representatives.
         total_weight *= total_count / \
             np.sum([len(cls) for cls in self.representatives])
         probs = [count / total_count for count in self.class_count]
@@ -356,7 +358,8 @@ class nil_list_agent(Agent):
                 # Leads to decreased accuracy
                 # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
                 dw = w / torch.sum(w)
-                # Faster to provide the derivative of L wrt {l}^n than letting pytorch computing it by itself
+                # Faster to provide the derivative of L wrt {l}^n than letting
+                # pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
                 torch.cuda.nvtx.range_push("Optimizer step")

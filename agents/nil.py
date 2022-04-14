@@ -95,62 +95,38 @@ class nil_agent(Agent):
             self.class_count[labels[i]] += counts[i]
             self.candidates[labels[i]] = x[(
                 y == labels[i]).nonzero(as_tuple=True)[0]]
+        new_reps = torch.cat(self.candidates)
 
         rm = []
         add = []
         offsets = [0]
         for i in range(self.model.num_classes):
-            offsets.append(offsets[-1] + len(self.candidates[i]))
+            lower = offsets[-1]
+            upper = lower + len(self.candidates[i])
+            offsets.append(upper)
+            if lower == upper: continue
+
             rand_indices = torch.randperm(
                 len(self.representatives[i]) + len(self.candidates[i])
             )[: self.num_representatives]
-            rm += [
-                j + self.num_representatives * i
-                for j in range(len(self.representatives[i]))
+            rm = torch.tensor([
+                j for j in range(len(self.representatives[i]))
                 if j not in rand_indices
-            ]
-            add += [
-                j + self.num_candidates * i
-                for j in range(len(self.candidates[i]))
+            ], dtype=torch.int64)
+            add = torch.tensor([
+                j for j in range(len(self.candidates[i]))
                 if j + len(self.representatives[i]) in rand_indices
-            ]
+            ], dtype=torch.int64)
 
-        if sum(self.class_count) == 0:
-            return
-        rm = torch.tensor([rm])
-        add = torch.tensor([add])
-        new_reps = torch.cat(self.candidates)
-
-        for c in range(self.model.num_classes):
-            lower = offsets[c]
-            upper = offsets[c + 1]
-            if lower == upper:
-                continue
-
-            to_add = add
-            to_add = to_add[
-                (to_add >= self.num_candidates * c)
-                & (to_add < self.num_candidates * (c + 1))
-            ]
-            to_add -= self.num_candidates * c
-            if len(rm) > 0:
-                to_rm = rm
-                to_rm = to_rm[
-                    (to_rm >= self.num_representatives * c)
-                    & (to_rm < self.num_representatives * (c + 1))
-                ]
-                to_rm -= self.num_representatives * c
-
-            if len(torch.flatten(self.representatives[c])) == 0:
-                self.representatives[c] = new_reps[lower:upper][to_add].detach(
+            if len(torch.flatten(self.representatives[i])) == 0:
+                self.representatives[i] = new_reps[lower:upper][add].detach(
                 ).clone()
             else:
                 selected = [
-                    i for i in range(len(self.representatives[c])) if i not in to_rm
+                    j for j in range(len(self.representatives[i])) if j not in rm
                 ]
-                self.representatives[c] = self.representatives[c][selected]
-                self.representatives[c] = torch.cat(
-                    (self.representatives[c], new_reps[lower:upper][to_add])
+                self.representatives[i] = torch.cat(
+                    (self.representatives[i][selected], new_reps[lower:upper][add])
                 )
 
         self.representatives_x = torch.cat(self.representatives)
@@ -172,10 +148,13 @@ class nil_agent(Agent):
         Reassign the weights of the representatives
         """
         total_count = np.sum(self.class_count)
-        # This version proposes that the total weight of representatives is calculated from the proportion of candidate
-        # representatives respect to the batch. E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
+        # This version proposes that the total weight of representatives is
+        # calculated from the proportion of candidates with respect to the batch.
+        # E.g. a batch of 100 images and 10 are num_candidates selected,
+        # total_weight = 10
         total_weight = (self.batch_size * 1.0) / self.num_candidates
-        # The total_weight is adjusted to the proportion between candidate representatives and actual representatives
+        # The total_weight is adjusted to the proportion between candidates
+        # and representatives.
         total_weight *= total_count / len(self.representatives_y)
         probs = self.class_count / total_count
         ws = []
@@ -349,9 +328,9 @@ class nil_agent(Agent):
                     rep_weights,
                 ) = self.get_representatives()
                 num_reps = len(rep_values)
-                if self.writer is not None and num_reps > 0:
-                    grid = torchvision.utils.make_grid(rep_values)
-                    self.writer.add_image("rep_values", grid)
+                # if self.writer is not None and num_reps > 0:
+                #    grid = torchvision.utils.make_grid(rep_values)
+                #    self.writer.add_image("rep_values", grid)
 
             # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
