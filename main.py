@@ -78,6 +78,12 @@ parser.add_argument(
     help="store replay buffers in CUDA memory rather than cpu",
 )
 parser.add_argument(
+    "--buffer-tensorboard",
+    action="store_true",
+    default=False,
+    help="log replay buffers to tensorboard",
+)
+parser.add_argument(
     "--agent",
     metavar="AGENT",
     default=None,
@@ -241,6 +247,7 @@ def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     args.buffer_cuda = args.buffer_cuda and args.cuda
+    args.buffer_tensorboard = args.buffer_tensorboard and args.tensorboard
     args.evaluate = not args.no_evaluate
 
     mp.set_start_method("spawn")
@@ -412,7 +419,7 @@ class Experiment:
 
         if self.args.tensorboard:
             self.agent.set_tensorboard_writer(
-                save_path=self.save_path, dummy=hvd.local_rank() > 0
+                save_path=self.save_path, dummy=hvd.local_rank() > 0, images=self.args.buffer_tensorboard
             )
         if self.args.tensorwatch:
             self.agent.set_tensorwatch_watcher(

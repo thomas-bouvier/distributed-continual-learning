@@ -356,9 +356,11 @@ class nil_agent(Agent):
                     rep_weights,
                 ) = self.get_representatives()
                 num_reps = len(rep_values)
-                # if self.writer is not None and num_reps > 0:
-                #    grid = torchvision.utils.make_grid(rep_values)
-                #    self.writer.add_image("rep_values", grid)
+                if self.writer is not None and self.writer_images and num_reps > 0:
+                    grid = torchvision.utils.make_grid(rep_values)
+                    caption = ', '.join([str(label.item())
+                                        for label in rep_labels])
+                    self.writer.add_image(caption, grid, self.global_steps)
 
             # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))

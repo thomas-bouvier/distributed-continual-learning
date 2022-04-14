@@ -35,6 +35,7 @@ class Agent:
         self.minimal_eval_loss = float("inf")
         self.best_model = None
         self.writer = None
+        self.writer_images = False
         self.watcher = None
         self.streams = {}
 
@@ -227,9 +228,11 @@ class Agent:
     def after_every_epoch(self):
         pass
 
-    def set_tensorboard_writer(self, save_path, dummy=False):
+    def set_tensorboard_writer(self, save_path, dummy=False, images=False):
         if dummy:
             return False
+        if images:
+            self.writer_images = images
         self.writer = SummaryWriter(log_dir=save_path)
         return True
 
