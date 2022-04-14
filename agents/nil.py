@@ -1,4 +1,5 @@
 import copy
+import itertools
 import math
 import numpy as np
 import logging
@@ -12,6 +13,8 @@ from agents.nil_list import nil_list_agent
 from agents.nil_global import nil_global_agent
 from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
+
+from bisect import bisect
 
 
 class nil_agent(Agent):
@@ -45,8 +48,8 @@ class nil_agent(Agent):
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
-        self.representatives = [torch.Tensor()
-                                for _ in range(model.num_classes)]
+        self.representatives_x = [torch.Tensor()
+                                  for _ in range(model.num_classes)]
         self.candidates = [torch.Tensor() for _ in range(model.num_classes)]
         self.class_count = [0 for _ in range(model.num_classes)]
 
@@ -68,17 +71,33 @@ class nil_agent(Agent):
             repr_list += torch.randperm(self.num_reps)
         repr_list = repr_list[: self.num_candidates]
 
+        # Accumulated sum of representative list lengths
+        def len_cumsum(x):
+            return list(itertools.accumulate(map(len, x)))
+
+        # Find 2D index from accumulated list of lengths
+        def find_2d_idx(c, idx):
+            i1 = bisect(c, idx)
+            i2 = (idx - c[i1 - 1]) if i1 > 0 else idx
+            return (i1, i2)
+        idx_2d = [find_2d_idx(len_cumsum(
+            self.representatives_x), i.item()) for i in repr_list]
+
         return (
-            self.representatives_x[repr_list],
+            torch.stack([self.representatives_x[i1][i2] for i1, i2 in idx_2d]),
+            # self.representatives_x_x[repr_list],
             self.representatives_y[repr_list],
             self.representatives_w[repr_list],
         )
 
     def get_num_representatives(self):
-        return sum(x.size(dim=0) for x in self.representatives)
+        return self.num_reps
 
     def get_memory_size(self):
-        return sum(x.element_size() * x.nelement() for x in self.representatives)
+        for reps in self.representatives_x:
+            for rep in reps:
+                return rep.element_size() * rep.nelement() * self.num_reps
+        return -1
 
     def pick_candidates(self, x, y):
         """Modify the representatives list by selecting candidates randomly from the
@@ -104,37 +123,46 @@ class nil_agent(Agent):
             lower = offsets[-1]
             upper = lower + len(self.candidates[i])
             offsets.append(upper)
-            if lower == upper: continue
+            if lower == upper:
+                continue
 
             rand_indices = torch.randperm(
-                len(self.representatives[i]) + len(self.candidates[i])
+                len(self.representatives_x[i]) + len(self.candidates[i])
             )[: self.num_representatives]
             rm = torch.tensor([
-                j for j in range(len(self.representatives[i]))
+                j for j in range(len(self.representatives_x[i]))
                 if j not in rand_indices
             ], dtype=torch.int64)
             add = torch.tensor([
                 j for j in range(len(self.candidates[i]))
-                if j + len(self.representatives[i]) in rand_indices
+                if j + len(self.representatives_x[i]) in rand_indices
             ], dtype=torch.int64)
 
-            if len(torch.flatten(self.representatives[i])) == 0:
-                self.representatives[i] = new_reps[lower:upper][add].detach(
+            if len(self.representatives_x[i]) == 0:
+                self.representatives_x[i] = new_reps[lower:upper][add].detach(
                 ).clone()
-            else:
+            elif len(self.representatives_x[i]) < self.num_representatives:
                 selected = [
-                    j for j in range(len(self.representatives[i])) if j not in rm
+                    j for j in range(len(self.representatives_x[i])) if j not in rm
                 ]
-                self.representatives[i] = torch.cat(
-                    (self.representatives[i][selected], new_reps[lower:upper][add])
+                self.representatives_x[i] = torch.cat(
+                    (self.representatives_x[i][selected],
+                     new_reps[lower:upper][add])
                 )
+            else:
+                for r, a in zip(rm, add):
+                    self.representatives_x[i][r] = new_reps[lower:upper][a]
 
-        self.representatives_x = torch.cat(self.representatives)
+        # Previously, we were concatenating the entire list of representatives
+        # 'representatives' to a single tensor 'representatives_x'.
+        # Now, we're working on the list 'representatives_x' and we're
+        # concatenating candidates only in a smarter way.
+        #self.representatives_x_x = torch.cat(self.representatives_x)
         self.representatives_y = torch.tensor(
             [
                 i
                 for i in range(self.model.num_classes)
-                for _ in range(len(self.representatives[i]))
+                for _ in range(len(self.representatives_x[i]))
             ]
         )
         self.num_reps = len(self.representatives_y)
