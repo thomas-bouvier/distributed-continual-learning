@@ -11,7 +11,7 @@ import torchvision
 from agents.base import Agent
 from agents.nil_list import nil_list_agent
 from agents.nil_global import nil_global_agent
-from utils.utils import get_device, move_cuda
+from utils.utils import get_device, move_cuda, plot_candidates
 from utils.meters import AverageMeter, accuracy
 
 from bisect import bisect
@@ -357,10 +357,8 @@ class nil_agent(Agent):
                 ) = self.get_representatives()
                 num_reps = len(rep_values)
                 if self.writer is not None and self.writer_images and num_reps > 0:
-                    grid = torchvision.utils.make_grid(rep_values)
-                    caption = ', '.join([str(label.item())
-                                        for label in rep_labels])
-                    self.writer.add_image(caption, grid, self.global_steps)
+                    fig = plot_candidates(rep_values, rep_labels, 5)
+                    self.writer.add_figure("candidates", fig, self.global_steps)
 
             # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
@@ -393,7 +391,8 @@ class nil_agent(Agent):
                 # Leads to decreased accuracy
                 # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
                 dw = w / torch.sum(w)
-                # Faster to provide the derivative of L wrt {l}^n than letting pytorch computing it by itself
+                # Faster to provide the derivative of L wrt {l}^n than letting
+                # pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
                 torch.cuda.nvtx.range_push("Optimizer step")

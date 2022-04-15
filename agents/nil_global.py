@@ -395,10 +395,8 @@ class nil_global_agent(Agent):
                 ) = self.get_representatives()
                 num_reps = len(rep_values)
                 if self.writer is not None and self.writer_images and num_reps > 0:
-                    grid = torchvision.utils.make_grid(rep_values)
-                    caption = ', '.join([str(label.item())
-                                        for label in rep_labels])
-                    self.writer.add_image(caption, grid, self.global_steps)
+                    fig = plot_candidates(rep_values, rep_labels, 5)
+                    self.writer.add_figure("candidates", fig, self.global_steps)
 
             # Get the respective weights
             w = torch.ones(len(x))
