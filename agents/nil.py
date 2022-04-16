@@ -68,20 +68,21 @@ class nil_agent(Agent):
 
         repr_list = torch.randperm(self.num_reps)
         while len(repr_list) < self.num_candidates:
-            repr_list += torch.randperm(self.num_reps)
+            repr_list = torch.cat((repr_list, torch.randperm(self.num_reps)))
         repr_list = repr_list[: self.num_candidates]
 
         # Accumulated sum of representative list lengths
-        def len_cumsum(x):
-            return list(itertools.accumulate(map(len, x)))
+        def len_cumsum():
+            counts = np.clip(copy.deepcopy(self.class_count),
+                             0, self.num_representatives)
+            return list(itertools.accumulate(counts))
 
         # Find 2D index from accumulated list of lengths
         def find_2d_idx(c, idx):
             i1 = bisect(c, idx)
             i2 = (idx - c[i1 - 1]) if i1 > 0 else idx
             return (i1, i2)
-        idx_2d = [find_2d_idx(len_cumsum(
-            self.representatives_x), i.item()) for i in repr_list]
+        idx_2d = [find_2d_idx(len_cumsum(), i.item()) for i in repr_list]
 
         return (
             torch.stack([self.representatives_x[i1][i2] for i1, i2 in idx_2d]),
@@ -105,13 +106,16 @@ class nil_agent(Agent):
 
         In this version, we permute indices on r+c and we discard the c last samples.
         """
+        counts = np.clip(copy.deepcopy(self.class_count),
+                         0, self.num_representatives)
+
         i = min(self.num_candidates, len(x))
         rand_indices = torch.randperm(len(y))
         x = x.clone()[rand_indices][:i]
         y = y.clone()[rand_indices][:i]
-        labels, counts = y.unique(return_counts=True)
+        labels, c = y.unique(return_counts=True)
         for i in range(len(labels)):
-            self.class_count[labels[i]] += counts[i]
+            self.class_count[labels[i]] += c[i]
             self.candidates[labels[i]] = x[(
                 y == labels[i]).nonzero(as_tuple=True)[0]]
         new_reps = torch.cat(self.candidates)
@@ -127,42 +131,34 @@ class nil_agent(Agent):
                 continue
 
             rand_indices = torch.randperm(
-                len(self.representatives_x[i]) + len(self.candidates[i])
+                counts[i] + len(self.candidates[i])
             )[: self.num_representatives]
-            rm = torch.tensor([
-                j for j in range(len(self.representatives_x[i]))
+            rm = [
+                j for j in range(counts[i])
                 if j not in rand_indices
-            ], dtype=torch.int64)
-            add = torch.tensor([
+            ]
+            add = [
                 j for j in range(len(self.candidates[i]))
-                if j + len(self.representatives_x[i]) in rand_indices
-            ], dtype=torch.int64)
+                if j + counts[i] in rand_indices
+            ]
 
-            if len(self.representatives_x[i]) == 0:
-                self.representatives_x[i] = new_reps[lower:upper][add].detach(
-                ).clone()
-            elif len(self.representatives_x[i]) < self.num_representatives:
-                selected = [
-                    j for j in range(len(self.representatives_x[i])) if j not in rm
-                ]
-                self.representatives_x[i] = torch.cat(
-                    (self.representatives_x[i][selected],
-                     new_reps[lower:upper][add])
-                )
-            else:
-                for r, a in zip(rm, add):
-                    self.representatives_x[i][r] = new_reps[lower:upper][a]
+            if counts[i] == 0 and len(add) > 0:
+                size = list(new_reps[lower:upper][add][0].size())
+                size.insert(0, self.num_representatives)
+                self.representatives_x[i] = torch.empty(*size)
 
-        # Previously, we were concatenating the entire list of representatives
-        # 'representatives' to a single tensor 'representatives_x'.
-        # Now, we're working on the list 'representatives_x' and we're
-        # concatenating candidates only in a smarter way.
-        #self.representatives_x_x = torch.cat(self.representatives_x)
+            if len(rm) < len(add):
+                rm = [j for j in range(counts[i], min(
+                    self.class_count[i], self.num_representatives))]
+
+            for r, a in zip(rm, add):
+                self.representatives_x[i][r] = new_reps[lower:upper][a]
+
         self.representatives_y = torch.tensor(
             [
                 i
                 for i in range(self.model.num_classes)
-                for _ in range(len(self.representatives_x[i]))
+                for _ in range(min(self.class_count[i], self.num_representatives))
             ]
         )
         self.num_reps = len(self.representatives_y)
