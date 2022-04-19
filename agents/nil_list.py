@@ -84,7 +84,7 @@ class nil_list_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-    def get_representatives(self):
+    def get_samples(self):
         """Select or retrieve the representatives from the data
 
         :return: a list of num_candidates representatives.
@@ -109,7 +109,7 @@ class nil_list_agent(Agent):
     def get_memory_size(self):
         return sum(rep.get_size() for nclass in self.representatives for rep in nclass)
 
-    def pick_candidates(self, x, y):
+    def accumulate(self, x, y):
         """Modify the representatives list by selecting candidates randomly from the
         incoming data x and the current list of representatives.
 
@@ -321,7 +321,7 @@ class nil_list_agent(Agent):
 
             if training:
                 # Get the representatives
-                reps = self.get_representatives()
+                reps = self.get_samples()
                 num_reps = len(reps)
 
             # Create batch weights
@@ -370,14 +370,14 @@ class nil_list_agent(Agent):
 
                 if num_reps == 0:
                     if self.buffer_cuda:
-                        self.pick_candidates(x, y)
+                        self.accumulate(x, y)
                     else:
-                        self.pick_candidates(x.cpu(), y.cpu())
+                        self.accumulate(x.cpu(), y.cpu())
                 else:
                     if self.buffer_cuda:
-                        self.pick_candidates(x[:-num_reps], y[:-num_reps])
+                        self.accumulate(x[:-num_reps], y[:-num_reps])
                     else:
-                        self.pick_candidates(
+                        self.accumulate(
                             x[:-num_reps].cpu(), y[:-num_reps].cpu())
 
             outputs.append(output.detach())

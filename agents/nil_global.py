@@ -61,7 +61,7 @@ class nil_global_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-    def get_representatives(self):
+    def get_samples(self):
         """Select or retrieves the representatives from the data
 
         :return: a list of num_candidates representatives.
@@ -86,7 +86,7 @@ class nil_global_agent(Agent):
     def get_memory_size(self):
         return sum(x.element_size() * x.nelement() for x in self.representatives)
 
-    def pick_candidates(self, x, y):
+    def accumulate(self, x, y):
         """Create a bufferbased in random sampling
 
         :param image_batch: the list of images of a batch
@@ -392,7 +392,7 @@ class nil_global_agent(Agent):
                     rep_values,
                     rep_labels,
                     rep_weights,
-                ) = self.get_representatives()
+                ) = self.get_samples()
                 num_reps = len(rep_values)
                 if self.writer is not None and self.writer_images and num_reps > 0:
                     fig = plot_candidates(rep_values, rep_labels, 5)
@@ -445,14 +445,14 @@ class nil_global_agent(Agent):
 
                 if num_reps == 0:
                     if self.buffer_cuda:
-                        self.pick_candidates(x, y)
+                        self.accumulate(x, y)
                     else:
-                        self.pick_candidates(x.cpu(), y.cpu())
+                        self.accumulate(x.cpu(), y.cpu())
                 else:
                     if self.buffer_cuda:
-                        self.pick_candidates(x[:-num_reps], y[:-num_reps])
+                        self.accumulate(x[:-num_reps], y[:-num_reps])
                     else:
-                        self.pick_candidates(
+                        self.accumulate(
                             x[:-num_reps].cpu(), y[:-num_reps].cpu())
 
             outputs.append(output.detach())
