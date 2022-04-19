@@ -45,6 +45,7 @@ class nil_agent(Agent):
 
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
+        self.num_samples = config.get("num_samples", 20)
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
@@ -61,15 +62,15 @@ class nil_agent(Agent):
     def get_samples(self):
         """Select or retrieve the representatives from the data
 
-        :return: a list of num_candidates representatives.
+        :return: a list of num_samples representatives.
         """
         if self.num_reps == 0:
             return [], [], []
 
         repr_list = torch.randperm(self.num_reps)
-        while len(repr_list) < self.num_candidates:
+        while len(repr_list) < self.num_samples:
             repr_list = torch.cat((repr_list, torch.randperm(self.num_reps)))
-        repr_list = repr_list[: self.num_candidates]
+        repr_list = repr_list[: self.num_samples]
 
         # Accumulated sum of representative list lengths
         def len_cumsum():
