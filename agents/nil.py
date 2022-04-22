@@ -104,8 +104,9 @@ class nil_agent(Agent):
 
     def get_memory_size(self):
         for reps in self.representatives_x:
-            for rep in reps:
-                return rep.element_size() * rep.nelement() * self.num_reps
+            if reps is not None:
+                for rep in reps:
+                    return rep.element_size() * rep.nelement() * self.num_reps
         return -1
 
     def accumulate(self, x, y):
