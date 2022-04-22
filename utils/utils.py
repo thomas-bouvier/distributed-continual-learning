@@ -1,9 +1,13 @@
 import torch
+import matplotlib.pyplot as plt
+
+from six import string_types
+
 
 def get_device(use_cuda=True):
     if use_cuda and torch.cuda.is_available():
-        return 'cuda'
-    return 'cpu'
+        return "cuda"
+    return "cpu"
 
 def move_cuda(item, use_cuda=True, cuda_device=-1):
     """
@@ -15,7 +19,6 @@ def move_cuda(item, use_cuda=True, cuda_device=-1):
     Returns
         object: the same object, potentially moved to gpu.
     """
-
     if use_cuda and torch.cuda.is_available():
         if cuda_device != -1:
             item = item.to(torch.device(f"cuda:{cuda_device}"))
@@ -27,3 +30,13 @@ def eval_func(f, x):
     if isinstance(f, string_types):
         f = eval(f)
     return f(x)
+
+def plot_candidates(rep_values, rep_labels, num_cols):
+    num_candidates = len(rep_values)
+    fig, ax = plt.subplots(num_candidates // num_cols, num_cols)
+    for j in range(num_candidates // num_cols):
+        for k in range(num_cols):
+            ax[j, k].imshow(rep_values[j * num_cols + k].T, interpolation='none')
+            ax[j, k].set_title(rep_labels[j * num_cols + k].item())
+            ax[j, k].axis('off')
+    return fig

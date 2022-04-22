@@ -5,34 +5,49 @@ import pandas as pd
 import shutil
 import torch
 
-from bokeh.io import output_file, save, show
+from bokeh.io import output_file, save
 from bokeh.plotting import figure
 from bokeh.layouts import column
 from bokeh.models import Div
 from itertools import cycle
 
-def setup_logging(log_file='log.txt', dummy=False):
+
+def setup_logging(log_file="log.txt", dummy=False):
     if dummy:
-        logging.getLogger('dummy')
+        logging.getLogger("dummy")
         return
 
-    file_mode = 'a' if os.path.isfile(log_file) else 'w'
+    file_mode = "a" if os.path.isfile(log_file) else "w"
 
-    logging.basicConfig(level=logging.DEBUG,
-                        format="%(asctime)s - %(levelname)s - %(message)s",
-                        datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     fileout = logging.FileHandler(log_file, mode=file_mode)
     fileout.setLevel(logging.DEBUG)
-    fileout.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    fileout.setFormatter(logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s"))
     logging.getLogger().addHandler(fileout)
 
-def plot_figure(data, x, y, title=None, xlabel=None, ylabel=None, legend=None,
-                x_axis_type='linear', y_axis_type='linear',
-                width=800, height=400, line_width=2,
-                colors=['red', 'green', 'blue', 'orange',
-                        'black', 'purple', 'brown'],
-                tools='pan,box_zoom,wheel_zoom,box_select,hover,reset,save',
-                append_figure=None):
+
+def plot_figure(
+    data,
+    x,
+    y,
+    title=None,
+    xlabel=None,
+    ylabel=None,
+    legend=None,
+    x_axis_type="linear",
+    y_axis_type="linear",
+    width=800,
+    height=400,
+    line_width=2,
+    colors=["red", "green", "blue", "orange", "black", "purple", "brown"],
+    tools="pan,box_zoom,wheel_zoom,box_select,hover,reset,save",
+    append_figure=None,
+):
     """
     creates a new plot figures
     example:
@@ -47,25 +62,36 @@ def plot_figure(data, x, y, title=None, xlabel=None, ylabel=None, legend=None,
     if append_figure is not None:
         f = append_figure
     else:
-        f = figure(title=title, tools=tools,
-                   width=width, height=height,
-                   x_axis_label=xlabel or x,
-                   y_axis_label=ylabel or '',
-                   x_axis_type=x_axis_type,
-                   y_axis_type=y_axis_type)
+        f = figure(
+            title=title,
+            tools=tools,
+            width=width,
+            height=height,
+            x_axis_label=xlabel or x,
+            y_axis_label=ylabel or "",
+            x_axis_type=x_axis_type,
+            y_axis_type=y_axis_type,
+        )
     colors = cycle(colors)
     for i, yi in enumerate(y):
-        f.line(data[x], data[yi],
-               line_width=line_width,
-               line_color=next(colors), legend_label=legend[i])
+        f.line(
+            data[x],
+            data[yi],
+            line_width=line_width,
+            line_color=next(colors),
+            legend_label=legend[i],
+        )
     f.legend.click_policy = "hide"
     return f
 
+
 class ResultsLog(object):
 
-    supported_data_formats = ['csv', 'json']
+    supported_data_formats = ["csv", "json"]
 
-    def __init__(self, path='', title='', params=None, resume=False, data_format='json'):
+    def __init__(
+        self, path="", title="", params=None, resume=False, data_format="json"
+    ):
         """
         Parameters
         ----------
@@ -83,20 +109,24 @@ class ResultsLog(object):
             which file format to use to save the data
         """
         if data_format not in ResultsLog.supported_data_formats:
-            raise ValueError('data_format must of the following: ' +
-                             '|'.join(['{}'.format(k) for k in ResultsLog.supported_data_formats]))
+            raise ValueError(
+                "data_format must of the following: "
+                + "|".join(["{}".format(k)
+                           for k in ResultsLog.supported_data_formats])
+            )
 
-        if data_format == 'json':
-            self.data_path = '{}.json'.format(path)
+        if data_format == "json":
+            self.data_path = "{}.json".format(path)
         else:
-            self.data_path = '{}.csv'.format(path)
+            self.data_path = "{}.csv".format(path)
 
         if params is not None:
-            filename = '{}.json'.format(path)
-            with open(filename, 'w') as fp:
-                json.dump(dict(self.args._get_kwargs()), fp, sort_keys=True, indent=4)
+            filename = "{}.json".format(path)
+            with open(filename, "w") as fp:
+                json.dump(dict(self.args._get_kwargs()),
+                          fp, sort_keys=True, indent=4)
 
-        self.plot_path = '{}.html'.format(path)
+        self.plot_path = "{}.html".format(path)
         self.results = None
         self.first_save = True
         self.clear()
@@ -120,8 +150,11 @@ class ResultsLog(object):
             resultsLog.add(epoch=epoch_num, train_loss=loss,
                            test_loss=test_loss)
         """
+        # logging.debug(f"--add: adding content")
         df = pd.DataFrame([kwargs.values()], columns=kwargs.keys())
+        # logging.debug(f"df.shape: {df.shape}")
         self.results = pd.concat([self.results, df])
+        # logging.debug(f"self.results.shape: {self.results.shape}")
 
     def clear(self):
         self.figures = []
@@ -149,29 +182,57 @@ class ResultsLog(object):
                 os.remove(self.plot_path)
             if self.first_save:
                 self.first_save = False
-                print('Plot file saved at: {}'.format(
+                print("Plot file saved at: {}".format(
                     os.path.abspath(self.plot_path)))
 
             output_file(self.plot_path, title=title)
             plot = column(
-                Div(text='<h1 align="center">{}</h1>'.format(title)), *self.figures)
+                Div(text='<h1 align="center">{}</h1>'.format(title)),
+                *self.figures,
+            )
             save(plot)
             self.clear()
 
-        if self.data_format == 'json':
-            self.results.to_json(self.data_path, orient='records')
+        # https://stackoverflow.com/questions/49545985/catch-pandas-df-to-json-exception
+        if self.data_format == "json":
+            # logging.debug(f"--save:")
+            # logging.debug(f"self.results: {self.results}")
+            # Sometimes the following doesn't work for some reason, probably
+            # a memory issue.
+            # self.results.to_json(self.data_path, orient='records')
+            # Replacing that function as suggested on SO
+            holder_dictionary = self.results.to_dict(orient="records")
+            with open(self.data_path, "w") as outfile:
+                json.dump(holder_dictionary, outfile)
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
 
-def save_checkpoint(state, filename='checkpoint.pth.tar', is_initial=False, is_final=False, is_best=False, save_all=False, path='.'):
+
+def save_checkpoint(
+    state,
+    filename="checkpoint.pth.tar",
+    is_initial=False,
+    is_final=False,
+    is_best=False,
+    save_all=False,
+    path=".",
+):
     filename = os.path.join(path, filename)
     torch.save(state, filename)
     if is_initial:
-        shutil.copyfile(filename, os.path.join(path, 'checkpoint_initial.pth.tar'))
-    if is_final:
-        shutil.copyfile(filename, os.path.join(path, 'checkpoint_final.pth.tar'))
-    if is_best:
-        shutil.copyfile(filename, os.path.join(path, 'checkpoint_best.pth.tar'))
-    if save_all:
         shutil.copyfile(filename, os.path.join(
-            path, f"checkpoint_task_{state['task']}_epoch_{state['epoch']}.pth.tar"))
+            path, "checkpoint_initial.pth.tar"))
+    if is_final:
+        shutil.copyfile(filename, os.path.join(
+            path, "checkpoint_final.pth.tar"))
+    if is_best:
+        shutil.copyfile(filename, os.path.join(
+            path, "checkpoint_best.pth.tar"))
+    if save_all:
+        shutil.copyfile(
+            filename,
+            os.path.join(
+                path,
+                f"checkpoint_task_{state['task']}_epoch_{state['epoch']}.pth.tar",
+            ),
+        )

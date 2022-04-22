@@ -1,6 +1,7 @@
 import horovod.torch as hvd
 import torch
 
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -9,10 +10,10 @@ class AverageMeter(object):
         self.reset()
 
     def reset(self):
-        self.val = torch.tensor(0.)
-        self.avg = torch.tensor(0.)
-        self.sum = torch.tensor(0.)
-        self.count = torch.tensor(0.)
+        self.val = torch.tensor(0.0)
+        self.avg = torch.tensor(0.0)
+        self.sum = torch.tensor(0.0)
+        self.count = torch.tensor(0.0)
 
     def update(self, val, n=1):
         val = val.detach().cpu() if isinstance(val, torch.Tensor) else torch.tensor(val)

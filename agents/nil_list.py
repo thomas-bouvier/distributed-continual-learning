@@ -1,18 +1,48 @@
 import copy
-import horovod.torch as hvd
 import math
+import numpy as np
 import logging
+import random
 import time
 import torch
 import torch.nn as nn
-import torchvision
 
 from agents.base import Agent
 from utils.utils import get_device, move_cuda
 from utils.meters import AverageMeter, accuracy
 
 
-class nil_global_agent(Agent):
+class Representative(object):
+    """
+    Representative sample of the algorithm
+    """
+
+    def __init__(self, x, y, net_output=None):
+        """
+        Creates a Representative object
+        :param x: the value of the representative (i.e. the image)
+        :param y: the label attached to the value x
+        :param net_output: the output that the neural network gives to the sample
+        """
+        self.x = x
+        self.y = y
+        self.net_output = net_output
+        self.weight = 1.0
+
+    def __eq__(self, other):
+        if isinstance(other, Representative.__class__):
+            return self.x.__eq__(other.x)
+        return False
+
+    def get_size(self):
+        return (self.x.element_size() * self.x.nelement()) / 1000000000
+
+
+"""This implementation doesn't work because of CUDA OOM issues.
+"""
+
+
+class nil_list_agent(Agent):
     def __init__(
         self,
         model,
@@ -24,7 +54,7 @@ class nil_global_agent(Agent):
         log_interval,
         state_dict=None,
     ):
-        super(nil_global_agent, self).__init__(
+        super(nil_list_agent, self).__init__(
             model,
             config,
             optimizer,
@@ -38,23 +68,16 @@ class nil_global_agent(Agent):
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
 
-        self.num_representatives = config.get("num_representatives", 60)
+        self.num_representatives = config.get(
+            "num_representatives", 60
+        )  # number of stored examples per class
         self.num_candidates = config.get("num_candidates", 20)
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
-        self.representatives = [torch.Tensor()
-                                for _ in range(model.num_classes)]
-        self.candidates = [torch.Tensor() for _ in range(model.num_classes)]
-        self.reps_by_worker = [
-            [torch.Tensor() for _ in range(model.num_classes)]
-            for _ in range(hvd.size())
-        ]
-        self.class_count = torch.tensor([0 for _ in range(model.num_classes)])
-
-        self.global_x_reps = None
-        self.global_y_reps = None
-        self.global_w_reps = None
+        self.representatives = [[] for _ in range(model.num_classes)]
+        # self.representatives_x = ma.masked_all((model.num_classes, self.num_representatives), torch.Tensor)
+        self.class_count = [0 for _ in range(model.num_classes)]
 
         self.mask = torch.as_tensor(
             [0.0 for _ in range(self.model.num_classes)],
@@ -62,173 +85,83 @@ class nil_global_agent(Agent):
         )
 
     def get_samples(self):
-        """Select or retrieves the representatives from the data
+        """Select or retrieve the representatives from the data
 
         :return: a list of num_candidates representatives.
         """
-        if self.num_reps == 0:
-            return [], [], []
+        # Naive version
+        repr_list = [a for sublist in self.representatives for a in sublist]
+        if len(repr_list) > 0:
+            return random.sample(repr_list, min(self.num_candidates, len(repr_list)))
+        else:
+            return []
 
-        repr_list = torch.randperm(self.num_reps)
-        while len(repr_list) < self.num_candidates:
-            repr_list += torch.randperm(self.num_reps)
-        repr_list = repr_list[: self.num_candidates]
-
-        return (
-            self.global_x_reps[repr_list],
-            self.global_y_reps[repr_list],
-            self.global_w_reps[repr_list],
-        )
+        # Numpy version
+        # repr_list = self.representatives_x.compressed()
+        # if len(repr_list) > 0:
+        #    return np.random.choice(repr_list, (min(self.num_candidates, len(repr_list)),), replace=False)
+        # else:
+        #    return np.array([])
 
     def get_num_representatives(self):
-        return sum(x.size(dim=0) for x in self.representatives)
+        return sum(len(nclass) for nclass in self.representatives)
 
     def get_memory_size(self):
-        return sum(x.element_size() * x.nelement() for x in self.representatives)
+        return sum(rep.get_size() for nclass in self.representatives for rep in nclass)
 
     def accumulate(self, x, y):
-        """Create a bufferbased in random sampling
+        """Modify the representatives list by selecting candidates randomly from the
+        incoming data x and the current list of representatives.
 
-        :param image_batch: the list of images of a batch
-        :param target_batch: the list of one hot labels of a batch
-        :param iteration: current iteration of training
-        :param megabatch: current megabatch
-        :return: None
+        In this version, all c first candidates of the incoming batch x are injected
+        into the episodic memory.
         """
-        i = min(self.num_candidates, len(x))
-        rand_indices = torch.randperm(len(y))
-        x = x.clone()[rand_indices][:i]
-        y = y.clone()[rand_indices][:i]
-        labels, counts = y.unique(return_counts=True)
-        for i in range(len(labels)):
-            self.class_count[labels[i]] += counts[i]
-            self.candidates[labels[i]] = x[(
-                y == labels[i]).nonzero(as_tuple=True)[0]]
+        # Naive version
+        rand_indices = torch.from_numpy(np.random.permutation(len(x)))
+        x = x[rand_indices]
+        y = y[rand_indices]
+        for i in range(min(self.num_candidates, len(x))):
+            nclass = y[i].item()
+            self.class_count[nclass] += 1
+            if len(self.representatives[nclass]) >= self.num_representatives:
+                rand = random.randrange(len(self.representatives[nclass]))
+                self.representatives[nclass][rand] = Representative(x[i], y[i])
+            else:
+                self.representatives[nclass].append(Representative(x[i], y[i]))
 
-        rm = []
-        add = []
-        offsets = [0]
-        for i in range(self.model.num_classes):
-            offsets.append(offsets[-1] + len(self.candidates[i]))
-            rand_indices = torch.randperm(
-                len(self.representatives[i]) + len(self.candidates[i])
-            )[: self.num_representatives]
-            rm += [
-                j + self.num_representatives * i
-                for j in range(len(self.representatives[i]))
-                if j not in rand_indices
-            ]
-            add += [
-                j + self.num_candidates * i
-                for j in range(len(self.candidates[i]))
-                if j + len(self.representatives[i]) in rand_indices
-            ]
+        # for i in range(min(self.num_candidates, len(x))):
+        #    nclass = y[i].item()
+        #    self.class_count[nclass] += 1
+        #    if self.class_count[nclass] > self.num_representatives:
+        #        rand = random.randrange(self.num_representatives)
+        #        # Doesn't work
+        #        #del self.representatives_x[nclass][rand]
+        #        self.representatives_x[nclass][rand] = x[i]
+        #    else:
+        #        self.representatives_x[nclass][self.class_count[nclass]-1] = x[i]
 
-        while len(add) < self.model.num_classes * self.num_candidates:
-            add.append(-1)
-        while len(rm) < self.model.num_classes * self.num_candidates:
-            rm.append(-1)
-
-        self.share_reps(rm, add, offsets)
         self.recalculate_weights()
-        self.num_reps = len(self.global_y_reps)
-
-    def share_reps(self, rm, add, offsets):
-        """Share representatives accross workers"""
-        if sum(self.class_count) == 0:
-            return
-        self.global_class_count = hvd.allreduce(self.class_count, op=hvd.Sum)
-        rm = torch.tensor([rm])
-        rm = hvd.allgather(rm)
-        add = torch.tensor([add])
-        add = hvd.allgather(add)
-        offsets = torch.tensor([offsets])
-        offsets = hvd.allgather(offsets)
-        new_reps = hvd.allgather(torch.cat(self.candidates).unsqueeze(0))
-
-        for worker in range(hvd.size()):
-            add_w = add[worker]
-            add_w = add_w[add_w != -1]
-            rm_w = rm[worker]
-            rm_w = rm_w[rm_w != -1]
-
-            for c in range(self.model.num_classes):
-                lower = offsets[worker][c]
-                upper = offsets[worker][c + 1]
-                if lower == upper:
-                    continue
-
-                to_add = add_w
-                to_add = to_add[
-                    (to_add >= self.num_candidates * c)
-                    & (to_add < self.num_candidates * (c + 1))
-                ]
-                to_add -= self.num_candidates * c
-                if len(rm_w) > 0:
-                    to_rm = rm_w
-                    to_rm = to_rm[
-                        (to_rm >= self.num_representatives * c)
-                        & (to_rm < self.num_representatives * (c + 1))
-                    ]
-                    to_rm -= self.num_representatives * c
-
-                if len(torch.flatten(self.reps_by_worker[worker][c])) == 0:
-                    self.reps_by_worker[worker][c] = new_reps[worker][lower:upper][
-                        to_add
-                    ]
-                else:
-                    if len(rm_w) > 0 and len(to_rm) > 0:
-                        selected = [
-                            i
-                            for i in range(len(self.reps_by_worker[worker][c]))
-                            if i not in to_rm
-                        ]
-                        self.reps_by_worker[worker][c] = self.reps_by_worker[worker][c][
-                            selected
-                        ]
-                    self.reps_by_worker[worker][c] = torch.cat(
-                        (
-                            self.reps_by_worker[worker][c],
-                            new_reps[worker][lower:upper][to_add],
-                        )
-                    )
-
-        self.global_x_reps = torch.cat(
-            [torch.cat(per_worker) for per_worker in self.reps_by_worker]
-        )
-        self.candidates = [torch.Tensor()
-                           for _ in range(self.model.num_classes)]
-
-        for i in range(self.model.num_classes):
-            self.representatives[i] = self.reps_by_worker[hvd.rank()][i]
-
-        y = torch.tensor(
-            [
-                i
-                for i in range(self.model.num_classes)
-                for _ in range(len(self.representatives[i]))
-            ]
-        )
-        self.global_y_reps = hvd.allgather(y)
 
     def recalculate_weights(self):
-        """Reassign the weights of the representatives"""
-        total_count = torch.sum(self.global_class_count).item()
-        if total_count == 0:
-            return
-        # This version proposes that the total weight of representatives is calculated from the proportion of candidate
-        # representatives respect to the batch. E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
+        """
+        Reassign the weights of the representatives
+        """
+        total_count = np.sum(self.class_count)
+        # This version proposes that the total weight of representatives is
+        # calculated from the proportion of candidates with respect to the batch.
+        # E.g. a batch of 100 images and 10 are num_candidates selected, total_weight = 10
         total_weight = (self.batch_size * 1.0) / self.num_candidates
-        # The total_weight is adjusted to the proportion between candidate representatives and actual representatives
-        total_weight *= total_count / len(self.global_y_reps)
-        probs = self.global_class_count.float() / total_count
-        # probs = hvd.allreduce(probs, name='probs')
-        ws = []
-        for y in self.global_y_reps.unique():
-            y = y.item()
-            weight = max(math.log(probs[y].item() * total_weight), 1.0)
-            ws.append((self.global_y_reps == y).float() * weight)
-        self.global_w_reps = torch.sum(torch.stack(ws), 0)
+        # The total_weight is adjusted to the proportion between candidates
+        # and representatives.
+        total_weight *= total_count / \
+            np.sum([len(cls) for cls in self.representatives])
+        probs = [count / total_count for count in self.class_count]
+        for i in range(len(self.representatives)):
+            if self.class_count[i] > 0:
+                for rep in self.representatives[i]:
+                    # This version uses natural log as a stabilizer
+                    rep.weight = max(
+                        math.log(probs[i].item() * total_weight), 1.0)
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -332,8 +265,8 @@ class nil_global_agent(Agent):
                             self.global_steps,
                         )
                         self.writer.add_scalar(
-                            "num_representatives",
-                            self.get_num_representatives(),
+                            "memory_size",
+                            self.get_memory_size(),
                             self.global_steps,
                         )
                     self.writer.flush()
@@ -388,34 +321,26 @@ class nil_global_agent(Agent):
 
             if training:
                 # Get the representatives
-                (
-                    rep_values,
-                    rep_labels,
-                    rep_weights,
-                ) = self.get_samples()
-                num_reps = len(rep_values)
-                if self.writer is not None and self.writer_images and num_reps > 0:
-                    fig = plot_candidates(rep_values, rep_labels, 5)
-                    self.writer.add_figure("candidates", fig, self.global_steps)
+                reps = self.get_samples()
+                num_reps = len(reps)
 
-            # Get the respective weights
-            w = torch.ones(len(x))
+            # Create batch weights
+            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             torch.cuda.nvtx.range_push("Copy to device")
-            x, y, w = (
-                move_cuda(x, self.cuda),
-                move_cuda(y, self.cuda),
-                move_cuda(w, self.cuda),
-            )
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
             torch.cuda.nvtx.range_pop()
 
             if training and num_reps > 0:
                 torch.cuda.nvtx.range_push("Combine batches")
-                rep_values, rep_labels, rep_weights = (
-                    move_cuda(rep_values, self.cuda),
-                    move_cuda(rep_labels, self.cuda),
-                    move_cuda(rep_weights, self.cuda),
+                rep_values = move_cuda(torch.stack(
+                    [rep.x for rep in reps]), self.cuda)
+                rep_labels = move_cuda(torch.stack(
+                    [rep.y for rep in reps]), self.cuda)
+                rep_weights = torch.as_tensor(
+                    [rep.weight for rep in reps],
+                    device=torch.device(get_device(self.cuda)),
                 )
-                # Concatenates the training samples with the representatives
+                # Concatenate the training samples with the representatives
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
@@ -430,11 +355,11 @@ class nil_global_agent(Agent):
             torch.cuda.nvtx.range_pop()
 
             if training:
-                total_weight = hvd.allreduce(
-                    torch.sum(w), name="total_weight", op=hvd.Sum
-                )
-                dw = w / total_weight
-                # Faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
+                # Leads to decreased accuracy
+                # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
+                dw = w / torch.sum(w)
+                # Faster to provide the derivative of L wrt {l}^n than letting
+                # pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
                 torch.cuda.nvtx.range_push("Optimizer step")
