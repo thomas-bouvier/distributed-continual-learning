@@ -2,32 +2,52 @@ import torch
 import rehearsal
 import random
 import ctypes
+import numpy as np
 
+from torch.utils.data import Dataset, DataLoader
+
+
+
+class MyDataset(Dataset):
+    def __init__(self, values, labels):
+        super(MyDataset, self).__init__()
+        self.values = values
+        self.labels = labels
+
+    def __len__(self):
+        return len(self.values)
+
+    def __getitem__(self, index):
+        return self.values[index], self.labels[index]
+
+
+# num_candidates
 K = 5
-N = 10
+# num_samples
 R = 2
-
-def random_batch():
-    samples = torch.rand(N, 3)
-    labels = torch.randint(high=K, size=(N,))
-    return (samples, labels)
 
 
 if __name__ == "__main__":
-    sl = rehearsal.StreamLoader(K, N // 2, ctypes.c_int64(torch.random.initial_seed()).value)
+    torch.manual_seed(0)
+    random.seed(0)
+    np.random.seed(0)
 
-    aug_samples = torch.zeros(N + R, 3)
-    aug_labels = torch.randint(high=K, size=(N + R,))
-    aug_weights = torch.zeros(N + R)
+    sl = rehearsal.StreamLoader(
+        K, 128 // 2, ctypes.c_int64(torch.random.initial_seed()).value)
 
-    print("Round 1")
-    samples, labels = random_batch()
-    sl.accumulate(samples, labels, aug_samples, aug_labels, aug_weights)
-    size = sl.wait()
-    print(size, samples, aug_samples)
+    # https://github.com/pytorch/pytorch/issues/5059
+    values = np.random.rand(5000, 3)
+    labels = np.random.rand(5000)
+    dataset = MyDataset(values, labels)
+    loader = DataLoader(dataset=dataset, batch_size=128,
+                        shuffle=True, num_workers=4, pin_memory=True)
 
-    print("Round 2")
-    samples, labels = random_batch()
-    sl.accumulate(samples, labels, aug_samples, aug_labels, aug_weights)
-    size = sl.wait()
-    print(size, samples, aug_samples)
+    for epoch in range(10):
+        for inputs, target in loader:
+            N = len(inputs)
+            aug_samples = torch.zeros(N + R, 3)
+            aug_labels = torch.randint(high=K, size=(N + R,))
+            aug_weights = torch.zeros(N + R)
+            sl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
+            size = sl.wait()
+            print(size, inputs, aug_samples)
