@@ -21,10 +21,18 @@ class MyDataset(Dataset):
         return self.values[index], self.labels[index]
 
 
-# num_candidates
-K = 5
+# num_classes
+K = 100
+# num_representatives
+M = 65
 # num_samples
 R = 2
+# batch_size
+B = 128
+
+aug_samples = torch.zeros(B + R, 3, 32, 32)
+aug_labels = torch.randint(high=K, size=(B + R,))
+aug_weights = torch.zeros(B + R)
 
 
 if __name__ == "__main__":
@@ -33,10 +41,10 @@ if __name__ == "__main__":
     np.random.seed(0)
 
     sl = rehearsal.StreamLoader(
-        K, 128 // 2, ctypes.c_int64(torch.random.initial_seed()).value)
+        K, M, ctypes.c_int64(torch.random.initial_seed()).value)
 
     # https://github.com/pytorch/pytorch/issues/5059
-    values = np.random.rand(5000, 3)
+    values = np.random.rand(5000, 3, 32, 32)
     labels = np.random.rand(5000)
     dataset = MyDataset(values, labels)
     loader = DataLoader(dataset=dataset, batch_size=128,
@@ -44,10 +52,6 @@ if __name__ == "__main__":
 
     for epoch in range(10):
         for inputs, target in loader:
-            N = len(inputs)
-            aug_samples = torch.zeros(N + R, 3)
-            aug_labels = torch.randint(high=K, size=(N + R,))
-            aug_weights = torch.zeros(N + R)
             sl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
             size = sl.wait()
             print(size, inputs, aug_samples)
