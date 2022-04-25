@@ -9,7 +9,6 @@ import torch.nn as nn
 import torchvision
 
 from agents.base import Agent
-from agents.nil_list import nil_list_agent
 from agents.nil_global import nil_global_agent
 from utils.utils import get_device, move_cuda, plot_candidates
 from utils.meters import AverageMeter, accuracy
@@ -61,6 +60,10 @@ class nil_agent(Agent):
             [0.0 for _ in range(self.model.num_classes)],
             device=torch.device(get_device(self.cuda)),
         )
+
+        self.acc_get_time = 0
+        self.acc_cat_time = 0
+        self.acc_acc_time = 0
 
     def init_candidates(self, size):
         size.insert(0, 0)
@@ -321,6 +324,15 @@ class nil_agent(Agent):
             step_count += 1
         end = time.time()
 
+        logging.info(f"epoch time {end - start}")
+        logging.info(f"\tnum_representatives {self.get_num_representatives()}")
+        logging.info(f"\tget time {self.acc_get_time}")
+        logging.info(f"\tcat time {self.acc_cat_time}")
+        logging.info(f"\tacc time {self.acc_acc_time}")
+        self.acc_get_time = 0
+        self.acc_cat_time = 0
+        self.acc_acc_time = 0
+
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
@@ -355,11 +367,13 @@ class nil_agent(Agent):
 
             if training:
                 # Get the representatives
+                start_get_time = time.time()
                 (
                     rep_values,
                     rep_labels,
                     rep_weights,
                 ) = self.get_samples()
+                self.acc_get_time += time.time() - start_get_time
                 num_reps = len(rep_values)
                 if self.writer is not None and self.writer_images and num_reps > 0:
                     fig = plot_candidates(rep_values, rep_labels, 5)
@@ -380,9 +394,11 @@ class nil_agent(Agent):
                     move_cuda(rep_weights, self.cuda),
                 )
                 # Concatenate the training samples with the representatives
+                start_cat_time = time.time()
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
+                self.acc_cat_time += time.time() - start_cat_time
                 torch.cuda.nvtx.range_pop()
 
             torch.cuda.nvtx.range_push("Forward pass")
@@ -407,6 +423,7 @@ class nil_agent(Agent):
                 self.global_steps += 1
                 self.steps += 1
 
+                start_acc_time = time.time()
                 if num_reps == 0:
                     if self.buffer_cuda:
                         self.accumulate(x, y)
@@ -418,6 +435,7 @@ class nil_agent(Agent):
                     else:
                         self.accumulate(
                             x[:-num_reps].cpu(), y[:-num_reps].cpu())
+                self.acc_acc_time += time.time() - start_acc_time
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
@@ -431,8 +449,6 @@ class nil_agent(Agent):
 def nil(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval):
     implementation = config.get("implementation", "")
     agent = nil_agent
-    if implementation == "list":
-        agent = nil_list_agent
-    elif implementation == "global":
+    if implementation == "global":
         agent = nil_global_agent
     return agent(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval)
