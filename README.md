@@ -75,7 +75,15 @@ python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets
 
 #### NIL implementations
 
-**nil**: default implementation, without parallel memory management
+**nil**: local sampling
+
+**nil_global**: global sampling (representatives are shared between workers)
+
+**nil_cpp**: local sampling, representatives managed in C++
+
+##### Obsolete implementations
+
+On branch async.
 
 **nil_v1**: synchronous parallel memory management, representatives are synchronized using `Queue`s. The memory manager waits until the main process sends candidates, and the main process waits until the memory manager fills the shared buffer with new representatives. *First implementation v1*.
 
@@ -85,7 +93,6 @@ python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets
 
 **nil_v4**: **nil_v3** including batch sampling. *Second implementation*.
 
-**nil_global**: strategy where representatives are shared between workers
 #### iCaRL implementations
 
 **icarl**: default implementation, without parallel memory management
