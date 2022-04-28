@@ -8,7 +8,8 @@
 #include <random>
 
 typedef std::vector<torch::Tensor> buffer_t;
-typedef std::unordered_map<int, buffer_t> rehearsal_map_t;
+typedef std::unordered_map<int, std::pair<double, buffer_t>> rehearsal_map_t;
+typedef std::unordered_map<int, int> rehearsal_counts_t;
 
 class stream_loader_t {
     const size_t MAX_QUEUE_SIZE = 1024;
@@ -16,7 +17,8 @@ class stream_loader_t {
     unsigned int K, N;
     std::default_random_engine rand_gen;
     rehearsal_map_t rehearsal_map;
-    size_t rehearsal_size = 0;
+    rehearsal_counts_t counts;
+    size_t rehearsal_size = 0, historical_count = 0;
 
     struct queue_item_t {
 	int aug_size = 0;

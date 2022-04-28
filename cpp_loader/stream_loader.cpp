@@ -16,7 +16,7 @@ void stream_loader_t::async_process() {
     while (true) {
 	std::unique_lock<std::mutex> lock(request_mutex);
 	while (request_queue.empty())
-	    request_cond.wait(lock);
+	request_cond.wait(lock);
 	auto batch = request_queue.front();
 	request_queue.pop_front();
 	lock.unlock();
@@ -24,7 +24,7 @@ void stream_loader_t::async_process() {
 	// an empty batch is a signal for shutdown
 	if (!batch.samples.defined())
 	    break;
-        int batch_size = batch.samples.sizes()[0];
+	int batch_size = batch.samples.sizes()[0];
 	assert(batch.labels.dim() == 1 && batch_size == batch.labels.sizes()[0]
 	       && batch.aug_samples.dim() > 0 && batch.aug_labels.dim() == 1);
 	int R = batch.aug_samples.sizes()[0] - batch_size;
@@ -45,17 +45,18 @@ void stream_loader_t::async_process() {
 	while (i < batch_size + R && rehearsal_size - choices_size > 0) {
 	    auto map_it = rehearsal_map.begin();
 	    std::advance(map_it, dice(rand_gen) % rehearsal_map.size());
-	    if (map_it->second.empty())
+	    if (map_it->second.second.empty())
 		continue;
-	    int index = dice(rand_gen) % map_it->second.size();
+	    int index = dice(rand_gen) % map_it->second.second.size();
 	    auto &set = choices[map_it->first];
 	    auto set_it = set.find(index);
 	    if (set_it != set.end())
 		continue;
 	    set.emplace_hint(set_it, index);
 	    choices_size++;
-	    batch.aug_samples.index_put_({i}, map_it->second[index]);
+	    batch.aug_samples.index_put_({i}, map_it->second.second[index]);
 	    batch.aug_labels.index_put_({i}, map_it->first);
+		batch.aug_weights.index_put_({i}, map_it->second.first);
 	    i++;
 	}
 	batch.aug_size = i;
@@ -67,7 +68,7 @@ void stream_loader_t::async_process() {
 	// update the rehearsal buffer
 	for (int i = 0; i < batch_size; i++) {
 	    auto label = batch.labels[i].item<int>();
-	    auto &buffer = rehearsal_map[label];
+	    auto &buffer = rehearsal_map[label].second;
 	    if (buffer.size() < N) {
 		buffer.emplace_back(batch.samples.index({i}));
 		rehearsal_size++;
@@ -76,8 +77,14 @@ void stream_loader_t::async_process() {
 		if (index < N)
 		    buffer[index] = batch.samples.index({i});
 	    }
+		historical_count++;
+		counts[label] += 1;
 	}
-    }
+	double weight = (double) batch_size / (double) (R * rehearsal_size);
+    for (auto& map_it : rehearsal_map) {
+	map_it.second.first = std::max(std::log(counts[map_it.first] * weight), 1.0);
+	}
+	}
 }
 
 void stream_loader_t::accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
