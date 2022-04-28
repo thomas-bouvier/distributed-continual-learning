@@ -1,6 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 
+from bisect import bisect
 from six import string_types
 
 
@@ -32,6 +33,13 @@ def eval_func(f, x):
     if isinstance(f, string_types):
         f = eval(f)
     return f(x)
+
+
+# Find 2D index from accumulated list of lengths
+def find_2d_idx(c, idx):
+    i1 = bisect(c, idx)
+    i2 = (idx - c[i1 - 1]) if i1 > 0 else idx
+    return (i1, i2)
 
 
 def plot_candidates(rep_values, rep_labels, num_cols):
