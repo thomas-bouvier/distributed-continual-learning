@@ -1,11 +1,12 @@
 import torch
-import rehearsal
 import random
 import ctypes
 import numpy as np
 
 from torch.utils.data import Dataset, DataLoader
 
+from agents import nil
+from models import resnet
 
 
 class MyDataset(Dataset):
@@ -30,7 +31,7 @@ R = 20
 # batch_size
 B = 128
 
-aug_samples = torch.zeros(B + R, 3, 32, 32)
+aug_samples = torch.zeros(B + R, 3)
 aug_labels = torch.randint(high=K, size=(B + R,))
 aug_weights = torch.zeros(B + R)
 
@@ -40,9 +41,6 @@ if __name__ == "__main__":
     random.seed(0)
     np.random.seed(0)
 
-    sl = rehearsal.StreamLoader(
-        K, M, ctypes.c_int64(torch.random.initial_seed()).value)
-
     # https://github.com/pytorch/pytorch/issues/5059
     values = np.random.rand(5000, 3, 32, 32)
     labels = np.random.randint(0, K, 5000)
@@ -50,9 +48,23 @@ if __name__ == "__main__":
     loader = DataLoader(dataset=dataset, batch_size=128,
                         shuffle=True, num_workers=4, pin_memory=True)
 
+    agent = nil(
+        resnet({'dataset': 'imagenet100', }),
+        {'batch_size': B, 'num_representatives': M, 'num_samples': R, 'num_candidates': R},
+        None,
+        None,
+        False,
+        False,
+        10
+    )
+
     for epoch in range(10):
         for inputs, target in loader:
-            sl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
-            size = sl.wait()
-            print(aug_samples.shape, aug_labels.shape, aug_weights.shape)
-            print(aug_labels[-R:], aug_weights[-R:])
+            agent.accumulate(inputs, target)
+            (
+                rep_values,
+                rep_labels,
+                rep_weights,
+            ) = agent.get_samples()
+            print(rep_values.shape, rep_labels.shape, rep_weights.shape)
+            print(rep_labels, rep_weights)
