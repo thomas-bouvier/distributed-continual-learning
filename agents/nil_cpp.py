@@ -255,12 +255,11 @@ class nil_cpp_agent(Agent):
                 self.sl.wait()
                 self.acc_get_time += time.time() - start_get_time
                 self.num_reps = self.sl.get_rehearsal_size()
-                print(self.num_reps)
                 if self.writer is not None and self.writer_images and self.num_reps > 0:
                     fig = plot_representatives(
                         self.aug_x[len(x):], self.aug_y[len(x):], 5)
                     self.writer.add_figure(
-                        "candidates", fig, self.global_steps)
+                        "representatives", fig, self.global_steps)
 
             torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(self.aug_x)

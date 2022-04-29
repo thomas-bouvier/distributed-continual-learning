@@ -18,7 +18,7 @@ class stream_loader_t {
     std::default_random_engine rand_gen;
     rehearsal_map_t rehearsal_map;
     rehearsal_counts_t counts;
-    size_t rehearsal_size = 0, historical_count = 0;
+    size_t rehearsal_size = 0;
 
     struct queue_item_t {
     int aug_size = 0;

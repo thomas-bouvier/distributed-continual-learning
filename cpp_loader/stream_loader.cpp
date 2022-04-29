@@ -79,12 +79,11 @@ void stream_loader_t::async_process() {
         if (index < N)
             buffer[index] = batch.samples.index({i});
         }
-        historical_count++;
         counts[label] += 1;
     }
 
     // update weight
-    double weight = (double) batch_size / (double) (C * rehearsal_size);
+    double weight = (double) batch_size / (double) (R * rehearsal_size);
     for (auto& map_it : rehearsal_map) {
     map_it.second.first = std::max(std::log(counts[map_it.first] * weight), 1.0);
     }
