@@ -25,7 +25,9 @@ class MyDataset(Dataset):
 # num_classes
 K = 100
 # num_representatives
-M = 65
+N = 65
+# num_candidates
+C = 20
 # num_samples
 R = 20
 # batch_size
@@ -50,7 +52,8 @@ if __name__ == "__main__":
 
     agent = nil(
         resnet({'dataset': 'imagenet100', }),
-        {'batch_size': B, 'num_representatives': M, 'num_samples': R, 'num_candidates': R},
+        {'batch_size': B, 'num_representatives': N,
+            'num_samples': R, 'num_candidates': C},
         None,
         None,
         False,
@@ -66,5 +69,10 @@ if __name__ == "__main__":
                 rep_labels,
                 rep_weights,
             ) = agent.get_samples()
-            print(rep_values.shape, rep_labels.shape, rep_weights.shape)
-            print(rep_labels, rep_weights)
+
+            aug_samples = torch.cat((inputs, rep_values))
+            aug_labels = torch.cat((target, rep_labels))
+            aug_weights = torch.cat((torch.ones(len(inputs)), rep_weights))
+
+            print(aug_samples.shape, aug_labels.shape, aug_weights.shape)
+            print(aug_labels[-R:], aug_weights[-R:])

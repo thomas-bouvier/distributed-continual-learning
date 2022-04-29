@@ -14,7 +14,7 @@ typedef std::unordered_map<int, int> rehearsal_counts_t;
 class stream_loader_t {
     const size_t MAX_QUEUE_SIZE = 1024;
 
-    unsigned int K, N;
+    unsigned int K, N, C;
     std::default_random_engine rand_gen;
     rehearsal_map_t rehearsal_map;
     rehearsal_counts_t counts;
@@ -35,7 +35,7 @@ class stream_loader_t {
 
     void async_process();
 public:
-    stream_loader_t(unsigned int _K, unsigned int _N, int64_t seed);
+    stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed);
     ~stream_loader_t();
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
 		    const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);

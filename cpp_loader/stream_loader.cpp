@@ -8,8 +8,8 @@
 
 using namespace torch::indexing;
 
-stream_loader_t::stream_loader_t(unsigned int _K, unsigned int _N, int64_t seed)
-    : K(_K), N(_N), rand_gen(seed), async_thread(&stream_loader_t::async_process, this) {
+stream_loader_t::stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed)
+    : K(_K), N(_N), C(_C), rand_gen(seed), async_thread(&stream_loader_t::async_process, this) {
 }
 
 void stream_loader_t::async_process() {
@@ -40,6 +40,7 @@ void stream_loader_t::async_process() {
 	}
 
 	// selection without replacement
+	// get_samples
 	std::unordered_map<int, std::unordered_set<int>> choices;
 	int i = batch_size, choices_size = 0;
 	while (i < batch_size + R && rehearsal_size - choices_size > 0) {
@@ -66,6 +67,7 @@ void stream_loader_t::async_process() {
 	request_cond.notify_one();
 
 	// update the rehearsal buffer
+	// accumulate
 	for (int i = 0; i < batch_size; i++) {
 	    auto label = batch.labels[i].item<int>();
 	    auto &buffer = rehearsal_map[label].second;
@@ -80,7 +82,7 @@ void stream_loader_t::async_process() {
 		historical_count++;
 		counts[label] += 1;
 	}
-	double weight = (double) batch_size / (double) (R * rehearsal_size);
+	double weight = (double) batch_size / (double) (C * rehearsal_size);
     for (auto& map_it : rehearsal_map) {
 	map_it.second.first = std::max(std::log(counts[map_it.first] * weight), 1.0);
 	}

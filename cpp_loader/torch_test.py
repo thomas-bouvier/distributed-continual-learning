@@ -7,7 +7,6 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 
 
-
 class MyDataset(Dataset):
     def __init__(self, values, labels):
         super(MyDataset, self).__init__()
@@ -24,7 +23,9 @@ class MyDataset(Dataset):
 # num_classes
 K = 100
 # num_representatives
-M = 65
+N = 65
+# num_candidates
+C = 20
 # num_samples
 R = 20
 # batch_size
@@ -41,7 +42,7 @@ if __name__ == "__main__":
     np.random.seed(0)
 
     sl = rehearsal.StreamLoader(
-        K, M, ctypes.c_int64(torch.random.initial_seed()).value)
+        K, N, C, ctypes.c_int64(torch.random.initial_seed()).value)
 
     # https://github.com/pytorch/pytorch/issues/5059
     values = np.random.rand(5000, 3, 32, 32)
@@ -54,5 +55,6 @@ if __name__ == "__main__":
         for inputs, target in loader:
             sl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
             size = sl.wait()
+
             print(aug_samples.shape, aug_labels.shape, aug_weights.shape)
             print(aug_labels[-R:], aug_weights[-R:])
