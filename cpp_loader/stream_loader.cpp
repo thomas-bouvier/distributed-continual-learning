@@ -108,6 +108,10 @@ int stream_loader_t::wait() {
     return batch.aug_size;
 }
 
+size_t stream_loader_t::get_rehearsal_size() {
+	return rehearsal_size;
+}
+
 stream_loader_t::~stream_loader_t() {
     std::unique_lock<std::mutex> lock(request_mutex);
     request_queue.push_back(queue_item_t());

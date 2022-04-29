@@ -40,6 +40,7 @@ public:
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
 		    const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);
     int wait();
+    size_t get_rehearsal_size();
 };
 
 #endif
