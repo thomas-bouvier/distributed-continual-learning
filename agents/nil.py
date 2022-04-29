@@ -10,6 +10,7 @@ import torchvision
 
 from agents.base import Agent
 from agents.nil_global import nil_global_agent
+from agents.nil_cpp import nil_cpp_agent
 from utils.utils import get_device, move_cuda, plot_candidates, find_2d_idx
 from utils.meters import AverageMeter, accuracy
 
@@ -100,10 +101,9 @@ class nil_agent(Agent):
         return self.num_reps
 
     def get_memory_size(self):
-        for reps in self.representatives_x:
-            if reps is not None:
-                for rep in reps:
-                    return rep.element_size() * rep.nelement() * self.num_reps
+        for label, reps in self.representatives_x.items():
+            for rep in reps:
+                return rep.element_size() * rep.nelement() * self.num_reps
         return -1
 
     def accumulate(self, x, y):
@@ -120,50 +120,42 @@ class nil_agent(Agent):
             v = min(v, self.num_representatives)
 
         i = min(self.num_candidates, len(x))
-        rand_indices = torch.randperm(len(y))
-        x = x.clone()[rand_indices][:i]
-        y = y.clone()[rand_indices][:i]
+        rand_candidates = torch.randperm(len(y))
+        x = x.clone()[rand_candidates][:i]
+        y = y.clone()[rand_candidates][:i]
         labels, c = y.unique(return_counts=True)
+
         for i in range(len(labels)):
             label = labels[i].item()
             self.counts[label] = self.counts.get(label, 0) + c[i].item()
             self.candidates[label] = x[(y == label).nonzero(as_tuple=True)[0]]
-        new_reps = torch.cat(self.candidates)
 
-        offsets = [0]
-        for i in range(max(self.counts)+1):
-            lower = offsets[-1]
-            upper = lower + len(self.candidates[i])
-            offsets.append(upper)
-            if lower == upper:
-                continue
-            previous_count = previous_counts.get(i, 0)
-
+            representatives_count = previous_counts.get(label, 0)
             rand_indices = torch.randperm(
-                previous_count + len(self.candidates[i])
+                representatives_count + len(self.candidates[label])
             )[: self.num_representatives]
             rm = [
-                j for j in range(previous_count)
+                j for j in range(representatives_count)
                 if j not in rand_indices
             ]
             add = [
-                j for j in range(len(self.candidates[i]))
-                if j + previous_count in rand_indices
+                j for j in range(len(self.candidates[label]))
+                if j + representatives_count in rand_indices
             ]
 
-            if previous_count == 0 and len(add) > 0:
-                size = list(new_reps[lower:upper][add][0].size())
+            if representatives_count == 0 and len(add) > 0:
+                size = list(self.candidates[label][add][0].size())
                 size.insert(0, self.num_representatives)
-                self.representatives_x[i] = torch.empty(*size)
+                self.representatives_x[label] = torch.empty(*size)
 
-            # If not enough samples stored in the buffer, mark the next ones as
-            # "to be removed"
+            # If not the buffer for current label is not full yet, mark the next
+            # ones as "to be removed"
             if len(rm) < len(add):
-                rm = [j for j in range(previous_count, min(
-                    self.counts[i], self.num_representatives))]
+                rm = [j for j in range(representatives_count, min(
+                    self.counts[label], self.num_representatives))]
 
             for r, a in zip(rm, add):
-                self.representatives_x[i][r] = new_reps[lower:upper][a]
+                self.representatives_x[label][r] = self.candidates[label][a]
 
         self.representatives_y = torch.tensor(
             [
@@ -187,7 +179,8 @@ class nil_agent(Agent):
         # calculated from the proportion of candidates with respect to the batch.
         # E.g. a batch of 100 images and 10 are num_candidates selected,
         # weight = 10
-        weight = (self.batch_size * 1.0) / (self.num_candidates * len(self.representatives_y))
+        weight = (self.batch_size * 1.0) / \
+            (self.num_candidates * len(self.representatives_y))
         # The weight is adjusted to the proportion between candidates
         # and representatives.
         ws = []
