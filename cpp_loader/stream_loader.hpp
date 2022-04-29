@@ -21,12 +21,12 @@ class stream_loader_t {
     size_t rehearsal_size = 0, historical_count = 0;
 
     struct queue_item_t {
-	int aug_size = 0;
-	torch::Tensor samples, labels, aug_samples, aug_labels, aug_weights;
-	queue_item_t(const torch::Tensor &_samples, const torch::Tensor &_labels,
-		     const torch::Tensor &_aug_samples, const torch::Tensor &_aug_labels, const torch::Tensor &_aug_weights) :
-	    samples(_samples), labels(_labels), aug_samples(_aug_samples), aug_labels(_aug_labels), aug_weights(_aug_weights) { }
-	queue_item_t() { }
+    int aug_size = 0;
+    torch::Tensor samples, labels, aug_samples, aug_labels, aug_weights;
+    queue_item_t(const torch::Tensor &_samples, const torch::Tensor &_labels,
+             const torch::Tensor &_aug_samples, const torch::Tensor &_aug_labels, const torch::Tensor &_aug_weights) :
+        samples(_samples), labels(_labels), aug_samples(_aug_samples), aug_labels(_aug_labels), aug_weights(_aug_weights) { }
+    queue_item_t() { }
     };
     std::deque<queue_item_t> request_queue, response_queue;
     std::mutex request_mutex;
@@ -38,7 +38,7 @@ public:
     stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed);
     ~stream_loader_t();
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
-		    const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);
+            const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);
     int wait();
     size_t get_rehearsal_size();
 };
