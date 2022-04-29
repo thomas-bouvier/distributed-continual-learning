@@ -11,7 +11,7 @@ import torchvision
 from agents.base import Agent
 from agents.nil_global import nil_global_agent
 from agents.nil_cpp import nil_cpp_agent
-from utils.utils import get_device, move_cuda, plot_candidates, find_2d_idx
+from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx
 from utils.meters import AverageMeter, accuracy
 
 
@@ -97,15 +97,6 @@ class nil_agent(Agent):
             self.representatives_w[repr_list],
         )
 
-    def get_num_representatives(self):
-        return self.num_reps
-
-    def get_memory_size(self):
-        for label, reps in self.representatives_x.items():
-            for rep in reps:
-                return rep.element_size() * rep.nelement() * self.num_reps
-        return -1
-
     def accumulate(self, x, y):
         """Modify the representatives list by selecting candidates randomly from
         the incoming data x and the current list of representatives.
@@ -164,7 +155,6 @@ class nil_agent(Agent):
                 for _ in range(min(self.counts.get(i, 0), self.num_representatives))
             ]
         )
-        self.num_reps = len(self.representatives_y)
 
         self.recalculate_weights()
 
@@ -356,6 +346,14 @@ class nil_agent(Agent):
             torch.cuda.nvtx.range_push(f"Chunk {i}")
 
             if training:
+                start_acc_time = time.time()
+                if self.buffer_cuda:
+                    self.accumulate(x, y)
+                else:
+                    self.accumulate(x.cpu(), y.cpu())
+                self.acc_acc_time += time.time() - start_acc_time
+                self.num_reps = len(self.representatives_y)
+
                 # Get the representatives
                 start_get_time = time.time()
                 (
@@ -366,7 +364,7 @@ class nil_agent(Agent):
                 self.acc_get_time += time.time() - start_get_time
                 num_reps = len(rep_values)
                 if self.writer is not None and self.writer_images and num_reps > 0:
-                    fig = plot_candidates(rep_values, rep_labels, 5)
+                    fig = plot_representatives(rep_values, rep_labels, 5)
                     self.writer.add_figure(
                         "candidates", fig, self.global_steps)
 
@@ -413,20 +411,6 @@ class nil_agent(Agent):
                 self.global_steps += 1
                 self.steps += 1
 
-                start_acc_time = time.time()
-                if num_reps == 0:
-                    if self.buffer_cuda:
-                        self.accumulate(x, y)
-                    else:
-                        self.accumulate(x.cpu(), y.cpu())
-                else:
-                    if self.buffer_cuda:
-                        self.accumulate(x[:-num_reps], y[:-num_reps])
-                    else:
-                        self.accumulate(
-                            x[:-num_reps].cpu(), y[:-num_reps].cpu())
-                self.acc_acc_time += time.time() - start_acc_time
-
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
 
@@ -434,6 +418,15 @@ class nil_agent(Agent):
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
+
+    def get_num_representatives(self):
+        return self.num_reps
+
+    def get_memory_size(self):
+        for label, reps in self.representatives_x.items():
+            for rep in reps:
+                return rep.element_size() * rep.nelement() * self.num_reps
+        return -1
 
 
 def nil(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval):

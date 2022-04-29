@@ -42,7 +42,7 @@ def find_2d_idx(c, idx):
     return (i1, i2)
 
 
-def plot_candidates(rep_values, rep_labels, num_cols):
+def plot_representatives(rep_values, rep_labels, num_cols):
     num_candidates = len(rep_values)
     fig, ax = plt.subplots(num_candidates // num_cols, num_cols)
     for j in range(num_candidates // num_cols):
