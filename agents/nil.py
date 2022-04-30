@@ -166,12 +166,12 @@ class nil_agent(Agent):
             total_count += self.counts.get(i, 0)
 
         # This version proposes that the total weight of representatives is
-        # calculated from the proportion of candidates with respect to the batch.
-        # E.g. a batch of 100 images and 10 are num_candidates selected,
+        # calculated from the proportion of samples to augment the batch with.
+        # E.g. a batch of 100 images and 10 are num_samples selected,
         # weight = 10
         weight = (self.batch_size * 1.0) / \
-            (self.num_candidates * len(self.representatives_y))
-        # The weight is adjusted to the proportion between candidates
+            (self.num_samples * len(self.representatives_y))
+        # The weight is adjusted to the proportion between historical candidates
         # and representatives.
         ws = []
         for y in self.representatives_y.unique():
@@ -366,7 +366,7 @@ class nil_agent(Agent):
                 if self.writer is not None and self.writer_images and num_reps > 0:
                     fig = plot_representatives(rep_values, rep_labels, 5)
                     self.writer.add_figure(
-                        "candidates", fig, self.global_steps)
+                        "representatives", fig, self.global_steps)
 
             # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
