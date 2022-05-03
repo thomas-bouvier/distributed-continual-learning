@@ -48,7 +48,6 @@ class nil_agent(Agent):
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
-        self.candidates = None
         self.counts = {}
 
         self.representatives_x = {}
@@ -63,11 +62,6 @@ class nil_agent(Agent):
         self.acc_get_time = 0
         self.acc_cat_time = 0
         self.acc_acc_time = 0
-
-    def init_candidates(self, size):
-        size.insert(0, 0)
-        self.candidates = [torch.empty(*size, device=self.device)
-                           for _ in range(self.model.num_classes)]
 
     def get_samples(self):
         """Select or retrieve the representatives from the data
@@ -104,7 +98,10 @@ class nil_agent(Agent):
         In this version, we permute indices on r+c and we discard the c last
         samples.
         """
-        self.init_candidates(list(x.size())[1:])
+        size = list(x.size())[1:]
+        size.insert(0, 0)
+        candidates = [torch.empty(*size, device=self.device)
+                      for _ in range(self.model.num_classes)]
 
         previous_counts = copy.deepcopy(self.counts)
         for k, v in previous_counts.items():
@@ -119,34 +116,37 @@ class nil_agent(Agent):
         for i in range(len(labels)):
             label = labels[i].item()
             self.counts[label] = self.counts.get(label, 0) + c[i].item()
-            self.candidates[label] = x[(y == label).nonzero(as_tuple=True)[0]]
+            candidates = x[(y == label).nonzero(as_tuple=True)[0]]
 
             representatives_count = previous_counts.get(label, 0)
             rand_indices = torch.randperm(
-                representatives_count + len(self.candidates[label])
+                representatives_count + len(candidates)
             )[: self.num_representatives]
             rm = [
                 j for j in range(representatives_count)
                 if j not in rand_indices
             ]
             add = [
-                j for j in range(len(self.candidates[label]))
+                j for j in range(len(candidates))
                 if j + representatives_count in rand_indices
             ]
 
+            # If not the buffer for current label is not full yet, mark the next
+            # ones as "to be removed"
+            for j in range(max(0, len(add) - len(rm) + 1)):
+                if representatives_count+j < min(self.counts[label], self.num_representatives):
+                    rm += [representatives_count+j]
+            if len(rm) > len(add):
+                rm = rm[:len(add)]
+            assert len(rm) == len(add), f"{len(rm)} == {len(add)}"
+
             if representatives_count == 0 and len(add) > 0:
-                size = list(self.candidates[label][add][0].size())
+                size = list(candidates[add][0].size())
                 size.insert(0, self.num_representatives)
                 self.representatives_x[label] = torch.empty(*size)
 
-            # If not the buffer for current label is not full yet, mark the next
-            # ones as "to be removed"
-            if len(rm) < len(add):
-                rm = [j for j in range(representatives_count, min(
-                    self.counts[label], self.num_representatives))]
-
             for r, a in zip(rm, add):
-                self.representatives_x[label][r] = self.candidates[label][a]
+                self.representatives_x[label][r] = candidates[a]
 
         self.representatives_y = torch.tensor(
             [
@@ -155,8 +155,13 @@ class nil_agent(Agent):
                 for _ in range(min(self.counts.get(i, 0), self.num_representatives))
             ]
         )
+        self.num_reps = len(self.representatives_y)
 
         self.recalculate_weights()
+        # for k, v in self.representatives_x.items():
+        #    print(f"label {k} v {v.shape}")
+        #    print(f"counts {self.counts[k]}")
+        # input()
 
     def recalculate_weights(self):
         """Reassign the weights of the representatives
@@ -352,7 +357,6 @@ class nil_agent(Agent):
                 else:
                     self.accumulate(x.cpu(), y.cpu())
                 self.acc_acc_time += time.time() - start_acc_time
-                self.num_reps = len(self.representatives_y)
 
                 # Get the representatives
                 start_get_time = time.time()
@@ -425,7 +429,7 @@ class nil_agent(Agent):
     def get_memory_size(self):
         for label, reps in self.representatives_x.items():
             for rep in reps:
-                return rep.element_size() * rep.nelement() * self.num_reps
+                return rep.element_size() * rep.numel() * self.num_reps
         return -1
 
 
