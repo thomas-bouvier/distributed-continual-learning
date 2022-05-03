@@ -55,11 +55,11 @@ class nil_cpp_agent(Agent):
         self.sl = rehearsal.StreamLoader(
             model.num_classes, self.num_representatives, self.num_candidates, ctypes.c_int64(torch.random.initial_seed()).value)
 
-        self.aug_x = torch.zeros(
-            self.batch_size + self.num_samples, 3, 224, 224)
+        self.aug_x = None
         self.aug_y = torch.randint(high=model.num_classes, size=(
-            self.batch_size + self.num_samples,))
-        self.aug_w = torch.zeros(self.batch_size + self.num_samples)
+            self.batch_size + self.num_samples,), device=self.device)
+        self.aug_w = torch.zeros(
+            self.batch_size + self.num_samples, device=self.device)
 
         self.mask = torch.as_tensor(
             [0.0 for _ in range(self.model.num_classes)],
@@ -237,17 +237,18 @@ class nil_cpp_agent(Agent):
 
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             torch.cuda.nvtx.range_push("Copy to device")
-            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
+                y, self.cuda and self.buffer_cuda)
             torch.cuda.nvtx.range_pop()
+
+            if self.aug_x is None:
+                size = list(x.size())[1:]
+                self.aug_x = torch.zeros(
+                    self.batch_size + self.num_samples, *size, device=self.device)
 
             if training:
                 start_acc_time = time.time()
-                if self.buffer_cuda:
-                    self.sl.accumulate(
-                        x, y, self.aug_x, self.aug_y, self.aug_w)
-                else:
-                    self.sl.accumulate(
-                        x.cpu(), y.cpu(), self.aug_x, self.aug_y, self.aug_w)
+                self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
                 self.acc_acc_time += time.time() - start_acc_time
 
                 # Get the representatives
