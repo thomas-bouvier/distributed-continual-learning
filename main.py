@@ -494,6 +494,7 @@ class Experiment:
             time_metrics_path, title="Time metrics - %s" % self.args.save_dir
         )
         img_secs = []
+        evaluate_durations = []
 
         total_start = time.time()
         self.agent.before_all_tasks(self.train_data_regime)
@@ -501,6 +502,7 @@ class Experiment:
         for task_id in range(0, len(self.train_data_regime.tasksets)):
             torch.cuda.nvtx.range_push(f"Task {task_id}")
             start = time.time()
+            training_time = time.time()
             logging.info(
                 "\n==============================\nStarting task %s",
                 task_id + 1,
@@ -527,6 +529,7 @@ class Experiment:
                 torch.cuda.nvtx.range_pop()
 
                 # evaluate on test set
+                before_evaluate_time = time.time()
                 if self.args.evaluate:
                     meters = {
                         metric: AverageMeter(f"task_{metric}")
@@ -575,6 +578,7 @@ class Experiment:
                         )
 
                     torch.cuda.nvtx.range_pop()
+                evaluate_durations.append(time.time() - before_evaluate_time)
 
                 self.agent.after_every_epoch()
 
@@ -652,8 +656,12 @@ class Experiment:
         if hvd.rank() == 0:
             img_sec_mean = np.mean(img_secs)
             img_sec_conf = 1.96 * np.std(img_secs)
+            total_time = total_end - total_start
+            total_training_time = total_time - sum(evaluate_durations)
+
             logging.info("\nFINAL RESULTS:")
-            logging.info(f"Total time: {total_end - total_start}")
+            logging.info(f"Total time: {total_time}")
+            logging.info(f"Total training time: {total_training_time}")
             logging.info(
                 "Average: %.1f +-%.1f samples/sec per device"
                 % (img_sec_mean, img_sec_conf)
@@ -666,9 +674,9 @@ class Experiment:
                     hvd.size() * img_sec_conf,
                 )
             )
-
             values = {
-                "total_time": total_end - total_start,
+                "total_time": total_time,
+                "total_training_time": total_training_time,
                 "training img_sec": img_sec_mean,
                 "training total_img_sec": img_sec_mean * hvd.size(),
             }
