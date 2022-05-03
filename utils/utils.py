@@ -39,6 +39,8 @@ def eval_func(f, x):
 def find_2d_idx(c, idx):
     i1 = bisect(c, idx)
     i2 = (idx - c[i1 - 1]) if i1 > 0 else idx
+    if torch.is_tensor(i2):
+        i2 = i2.item()
     return (i1, i2)
 
 
