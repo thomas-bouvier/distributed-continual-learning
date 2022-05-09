@@ -31,7 +31,7 @@ R = 20
 # batch_size
 B = 128
 
-aug_samples = torch.zeros(B + R, 3, 32, 32)
+aug_samples = torch.zeros(B + R, 3, 224, 224)
 aug_labels = torch.randint(high=K, size=(B + R,))
 aug_weights = torch.zeros(B + R)
 
@@ -45,16 +45,14 @@ if __name__ == "__main__":
         K, N, C, ctypes.c_int64(torch.random.initial_seed()).value)
 
     # https://github.com/pytorch/pytorch/issues/5059
-    values = np.random.rand(5000, 3, 32, 32)
+    values = np.random.rand(5000, 3, 224, 224)
     labels = np.random.randint(0, K, 5000)
     dataset = MyDataset(values, labels)
     loader = DataLoader(dataset=dataset, batch_size=128,
                         shuffle=True, num_workers=4, pin_memory=True)
 
     for epoch in range(10):
-        for inputs, target in loader:
+        for i, (inputs, target) in enumerate(loader):
+            print(f"================================{i} (epoch: {epoch})")
             sl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
             size = sl.wait()
-
-            print(aug_samples.shape, aug_labels.shape, aug_weights.shape)
-            print(aug_labels[-R:], aug_weights[-R:])
