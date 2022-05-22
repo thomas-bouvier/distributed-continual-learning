@@ -68,7 +68,10 @@ void stream_loader_t::async_process() {
         
         // update the rehearsal buffer
         // accumulate in Python
+        dice.param(std::uniform_int_distribution<unsigned int>::param_type(0, batch_size - 1));
         for (int i = 0; i < batch_size; i++) {
+            if (dice(rand_gen) >= C)
+                break;
             auto label = batch.labels[i].item<int>();
             auto &buffer = rehearsal_map[label].second;
             if (buffer.size() < N) {
