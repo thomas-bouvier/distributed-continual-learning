@@ -255,7 +255,7 @@ class nil_agent(Agent):
                     "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
                     "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
                     "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                        self.epoch + 1,
+                        self.epoch,
                         i_batch,
                         len(data_regime.get_loader()),
                         phase="TRAINING" if training else "EVALUATING",
@@ -350,6 +350,12 @@ class nil_agent(Agent):
         ):
             torch.cuda.nvtx.range_push(f"Chunk {i}")
 
+            # Create batch weights
+            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
+            torch.cuda.nvtx.range_push("Copy to device")
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            torch.cuda.nvtx.range_pop()
+
             if training:
                 start_acc_time = time.time()
                 if self.buffer_cuda:
@@ -367,31 +373,27 @@ class nil_agent(Agent):
                 ) = self.get_samples()
                 self.acc_get_time += time.time() - start_get_time
                 num_reps = len(rep_values)
+
+                if num_reps > 0:
+                    torch.cuda.nvtx.range_push("Combine batches")
+                    rep_values, rep_labels, rep_weights = (
+                        move_cuda(rep_values, self.cuda),
+                        move_cuda(rep_labels, self.cuda),
+                        move_cuda(rep_weights, self.cuda),
+                    )
+                    # Concatenate the training samples with the representatives
+                    start_cat_time = time.time()
+                    w = torch.cat((w, rep_weights))
+                    x = torch.cat((x, rep_values))
+                    y = torch.cat((y, rep_labels))
+                    self.acc_cat_time += time.time() - start_cat_time
+                    torch.cuda.nvtx.range_pop()
+
+                # Log representatives
                 if self.writer is not None and self.writer_images and num_reps > 0:
                     fig = plot_representatives(rep_values, rep_labels, 5)
                     self.writer.add_figure(
                         "representatives", fig, self.global_steps)
-
-            # Create batch weights
-            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-            torch.cuda.nvtx.range_push("Copy to device")
-            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-            torch.cuda.nvtx.range_pop()
-
-            if training and num_reps > 0:
-                torch.cuda.nvtx.range_push("Combine batches")
-                rep_values, rep_labels, rep_weights = (
-                    move_cuda(rep_values, self.cuda),
-                    move_cuda(rep_labels, self.cuda),
-                    move_cuda(rep_weights, self.cuda),
-                )
-                # Concatenate the training samples with the representatives
-                start_cat_time = time.time()
-                w = torch.cat((w, rep_weights))
-                x = torch.cat((x, rep_values))
-                y = torch.cat((y, rep_labels))
-                self.acc_cat_time += time.time() - start_cat_time
-                torch.cuda.nvtx.range_pop()
 
             torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
