@@ -7,6 +7,7 @@ import time
 import torch
 import torch.nn as nn
 import torchvision
+import wandb
 
 import ctypes
 from cpp_loader import rehearsal
@@ -140,7 +141,7 @@ class nil_cpp_agent(Agent):
                     "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
                     "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
                     "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                        self.epoch + 1,
+                        self.epoch,
                         i_batch,
                         len(data_regime.get_loader()),
                         phase="TRAINING" if training else "EVALUATING",
@@ -148,6 +149,16 @@ class nil_cpp_agent(Agent):
                     )
                 )
 
+                wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                    "step": self.global_steps,
+                    "epoch": self.global_epoch,
+                    "batch": i_batch,
+                    f"{prefix}_prec1": meters["prec1"].avg,
+                    f"{prefix}_prec5": meters["prec5"].avg})
+                if training:
+                    wandb.log({"lr": self.optimizer.get_lr()[0],
+                        "step": self.global_steps,
+                        "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
                         f"{prefix}_loss", meters["loss"].avg, self.global_steps
@@ -193,6 +204,9 @@ class nil_cpp_agent(Agent):
             torch.cuda.nvtx.range_pop()
             step_count += 1
         end = time.time()
+
+        if training:
+            self.global_epoch += 1
 
         logging.info(f"epoch time {end - start}")
         logging.info(f"\tnum_representatives {self.get_num_representatives()}")
@@ -256,6 +270,8 @@ class nil_cpp_agent(Agent):
                 self.sl.wait()
                 self.acc_get_time += time.time() - start_get_time
                 self.num_reps = self.sl.get_rehearsal_size()
+
+                # Log representatives
                 if self.writer is not None and self.writer_images and self.num_reps > 0:
                     fig = plot_representatives(
                         self.aug_x[len(x):], self.aug_y[len(x):], 5)

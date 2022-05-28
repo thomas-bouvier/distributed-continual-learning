@@ -9,6 +9,7 @@ import os
 import time
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
+import wandb
 
 from ast import literal_eval
 from datetime import datetime
@@ -252,10 +253,6 @@ def main():
 
     mp.set_start_method("spawn")
 
-    time_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    if args.save_dir == "":
-        args.save_dir = time_stamp
-
     params = vars(args)
     yparams = YParams(os.path.abspath(args.yaml_config), args.config)
     for k, v in params.items():
@@ -277,21 +274,27 @@ def main():
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
-    save_path = path.join(args.results_dir, args.save_dir)
     if hvd.local_rank() == 0:
+        wandb.init(project="distributed-continual-learning")
+        run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
+        wandb.run.name = run_name
+
+        if args.save_dir == "":
+            args.save_dir = run_name
+        save_path = path.join(args.results_dir, args.save_dir)
         if not path.exists(save_path):
             makedirs(save_path)
 
-    setup_logging(path.join(save_path, "log.txt"), dummy=hvd.local_rank() > 0)
+        with open(path.join(save_path, "args.json"), "w") as f:
+            json.dump(args.__dict__, f, indent=2)
+        wandb.config.update(args)
+
+        setup_logging(path.join(save_path, "log.txt"), dummy=hvd.local_rank() > 0)
+        logging.info(f"Saving to {save_path}")
 
     device = "GPU" if args.cuda else "CPU"
     logging.info(f"Number of {device}s: {hvd.size()}")
-    logging.info(f"Saving to {save_path}")
     logging.info(f"Run arguments: {args}")
-
-    if hvd.rank() == 0:
-        with open(path.join(save_path, "args.json"), "w") as f:
-            json.dump(args.__dict__, f, indent=2)
 
     xp = Experiment(save_path, args)
     xp.run()
@@ -505,10 +508,10 @@ class Experiment:
             training_time = time.time()
             logging.info(
                 "\n==============================\nStarting task %s",
-                task_id + 1,
+                task_id,
             )
 
-            task_metrics = {"task_id": task_id + 1, "test_task_metrics": []}
+            task_metrics = {"task_id": task_id, "test_task_metrics": []}
 
             self.train_data_regime.set_task_id(task_id)
             self.agent.before_every_task(task_id, self.train_data_regime)
@@ -517,7 +520,7 @@ class Experiment:
 
             for i_epoch in range(0, self.args.epochs):
                 torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
-                logging.info(f"Starting task {task_id+1}, epoch: {i_epoch+1}")
+                logging.info(f"Starting task {task_id}, epoch: {i_epoch}")
                 self.agent.epoch = i_epoch
 
                 # Horovod: set epoch to sampler for shuffling
@@ -539,7 +542,7 @@ class Experiment:
                     if self.args.agent == "icarl":
                         self.agent.update_exemplars(
                             self.agent.nc, training=False)
-                    for test_task_id in range(0, task_id + 1):
+                    for test_task_id in range(0, task_id+1):
                         self.test_data_regime.set_task_id(test_task_id)
                         self.test_data_regime.get_loader(True)
                         self.test_data_regime.set_epoch(i_epoch)
@@ -594,7 +597,7 @@ class Experiment:
                         "Average: {} samples/sec per device\n"
                         "Average on {} device(s): {} samples/sec\n"
                         "Training loss: {train[loss]:.4f}\n".format(
-                            i_epoch + 1,
+                            i_epoch,
                             hvd.size(),
                             train_results["time"],
                             img_sec,
@@ -604,14 +607,16 @@ class Experiment:
                         )
                     )
 
-                    global_epoch = i_epoch + 1 + task_id * self.args.epochs
+                    wandb.log({"epoch": self.agent.global_epoch,
+                        "epoch_time": train_results["time"],
+                        "img_sec": img_sec * hvd.size()})
                     if self.agent.writer is not None:
                         self.agent.writer.add_scalar(
-                            "img_sec", img_sec * hvd.size(), global_epoch
+                            "img_sec", img_sec * hvd.size(), self.agent.global_epoch
                         )
                     dl_metrics_values = dict(
-                        task_id=task_id + 1,
-                        epoch=global_epoch,
+                        task_id=task_id,
+                        epoch=self.agent.global_epoch,
                         steps=self.agent.global_steps,
                     )
                     dl_metrics_values.update(

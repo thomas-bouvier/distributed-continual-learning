@@ -12,4 +12,4 @@ tqdm
 torchsummary
 pandas
 pybind11
-pytorch-lightning
+wandb

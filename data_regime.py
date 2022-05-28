@@ -168,7 +168,7 @@ class DataRegime(object):
 
     def set_epoch(self, epoch):
         logging.debug(
-            f"DATA REGIME {self.config['data']['split']} - set epoch: {epoch+1}"
+            f"DATA REGIME {self.config['data']['split']} - set epoch: {epoch}"
         )
         self.epoch = epoch
         if self.sampler is not None and hasattr(self.sampler, "set_epoch"):
@@ -176,7 +176,7 @@ class DataRegime(object):
 
     def set_task_id(self, task_id):
         logging.debug(
-            f"DATA REGIME {self.config['data']['split']} - set task id: {task_id+1}"
+            f"DATA REGIME {self.config['data']['split']} - set task id: {task_id}"
         )
         if self.task_id != task_id:
             self.task_id = task_id

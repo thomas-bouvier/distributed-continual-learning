@@ -5,6 +5,7 @@ import time
 import torch
 import torch.multiprocessing as mp
 import torch.nn as nn
+import wandb
 
 from agents.base import Agent
 from utils.utils import move_cuda
@@ -177,7 +178,7 @@ class icarl_v1_agent(Agent):
                     "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
                     "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
                     "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                        self.epoch + 1,
+                        self.epoch,
                         i_batch,
                         len(data_regime.get_loader()),
                         phase="TRAINING" if training else "EVALUATING",
@@ -185,6 +186,16 @@ class icarl_v1_agent(Agent):
                     )
                 )
 
+                wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                    "step": self.global_steps,
+                    "epoch": self.global_epoch,
+                    "batch": i_batch,
+                    f"{prefix}_prec1": meters["prec1"].avg,
+                    f"{prefix}_prec5": meters["prec5"].avg})
+                if training:
+                    wandb.log({"lr": self.optimizer.get_lr()[0],
+                        "step": self.global_steps,
+                        "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
                         f"{prefix}_loss", meters["loss"].avg, self.global_steps
@@ -224,6 +235,9 @@ class icarl_v1_agent(Agent):
         if self.should_distill:
             self.p.join()
         end = time.time()
+
+        if training:
+            self.global_epoch += 1
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]

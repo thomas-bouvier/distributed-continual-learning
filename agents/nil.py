@@ -7,6 +7,7 @@ import time
 import torch
 import torch.nn as nn
 import torchvision
+import wandb
 
 from agents.base import Agent
 from agents.nil_global import nil_global_agent
@@ -263,6 +264,16 @@ class nil_agent(Agent):
                     )
                 )
 
+                wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                    "step": self.global_steps,
+                    "epoch": self.global_epoch,
+                    "batch": i_batch,
+                    f"{prefix}_prec1": meters["prec1"].avg,
+                    f"{prefix}_prec5": meters["prec5"].avg})
+                if training:
+                    wandb.log({"lr": self.optimizer.get_lr()[0],
+                        "step": self.global_steps,
+                        "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
                         f"{prefix}_loss", meters["loss"].avg, self.global_steps
@@ -308,6 +319,9 @@ class nil_agent(Agent):
             torch.cuda.nvtx.range_pop()
             step_count += 1
         end = time.time()
+
+        if training:
+            self.global_epoch += 1
 
         logging.info(f"epoch time {end - start}")
         logging.info(f"\tnum_representatives {self.get_num_representatives()}")
