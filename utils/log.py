@@ -90,7 +90,7 @@ class ResultsLog(object):
     supported_data_formats = ["csv", "json"]
 
     def __init__(
-        self, path="", title="", params=None, resume=False, data_format="json"
+        self, save_path, title="", params=None, data_format="json", dummy=False
     ):
         """
         Parameters
@@ -108,41 +108,37 @@ class ResultsLog(object):
         data_format: str('csv'|'json')
             which file format to use to save the data
         """
+        self.results = pd.DataFrame()
+        self.first_save = True
+        self.title = title
+        self.data_format = data_format
+        self.dummy = dummy
+        self.clear()
+
         if data_format not in ResultsLog.supported_data_formats:
             raise ValueError(
                 "data_format must of the following: "
                 + "|".join(["{}".format(k)
                            for k in ResultsLog.supported_data_formats])
             )
+        
+        if self.dummy:
+            return;
 
         if data_format == "json":
-            self.data_path = "{}.json".format(path)
+            self.data_path = f"{save_path}.json"
         else:
-            self.data_path = "{}.csv".format(path)
+            self.data_path = f"{save_path}.csv"
 
         if params is not None:
-            filename = "{}.json".format(path)
+            filename = f"{save_path}.json"
             with open(filename, "w") as fp:
                 json.dump(dict(self.args._get_kwargs()),
                           fp, sort_keys=True, indent=4)
-
-        self.plot_path = "{}.html".format(path)
-        self.results = None
-        self.first_save = True
-        self.clear()
+        self.plot_path = f"{save_path}.html"
 
         if os.path.isfile(self.data_path):
-            if resume:
-                self.load(self.data_path)
-                self.first_save = False
-            else:
-                os.remove(self.data_path)
-                self.results = pd.DataFrame()
-        else:
-            self.results = pd.DataFrame()
-
-        self.title = title
-        self.data_format = data_format
+            os.remove(self.data_path)
 
     def add(self, **kwargs):
         """Add a new row to the dataframe
@@ -171,11 +167,14 @@ class ResultsLog(object):
 
     def save(self, title=None):
         """save the json file.
-        Parameters
-        ----------
+
         title: string
             title of the HTML file
         """
+        if self.dummy:
+            self.clear()
+            return
+
         title = title or self.title
         if len(self.figures) > 0:
             if os.path.isfile(self.plot_path):
@@ -210,29 +209,33 @@ class ResultsLog(object):
 
 def save_checkpoint(
     state,
+    save_path,
     filename="checkpoint.pth.tar",
     is_initial=False,
     is_final=False,
     is_best=False,
     save_all=False,
-    path=".",
+    dummy=False
 ):
-    filename = os.path.join(path, filename)
+    if dummy:
+        return
+
+    filename = os.path.join(save_path, filename)
     torch.save(state, filename)
     if is_initial:
         shutil.copyfile(filename, os.path.join(
-            path, "checkpoint_initial.pth.tar"))
+            save_path, "checkpoint_initial.pth.tar"))
     if is_final:
         shutil.copyfile(filename, os.path.join(
-            path, "checkpoint_final.pth.tar"))
+            save_path, "checkpoint_final.pth.tar"))
     if is_best:
         shutil.copyfile(filename, os.path.join(
-            path, "checkpoint_best.pth.tar"))
+            save_path, "checkpoint_best.pth.tar"))
     if save_all:
         shutil.copyfile(
             filename,
             os.path.join(
-                path,
+                save_path,
                 f"checkpoint_task_{state['task']}_epoch_{state['epoch']}.pth.tar",
             ),
         )

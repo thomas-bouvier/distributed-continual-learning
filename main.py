@@ -274,7 +274,8 @@ def main():
     # Horovod: limit # of CPU threads to be used per worker.
     torch.set_num_threads(1)
 
-    if hvd.local_rank() == 0:
+    save_path = ""
+    if hvd.rank() == 0 and hvd.local_rank() == 0:
         wandb.init(project="distributed-continual-learning")
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
         wandb.run.name = run_name
@@ -296,14 +297,14 @@ def main():
     logging.info(f"Number of {device}s: {hvd.size()}")
     logging.info(f"Run arguments: {args}")
 
-    xp = Experiment(save_path, args)
+    xp = Experiment(args, save_path)
     xp.run()
 
 
 class Experiment:
-    def __init__(self, save_path, args):
-        self.save_path = save_path
+    def __init__(self, args, save_path=""):
         self.args = args
+        self.save_path = save_path
 
         self._create_agent()
         self._prepare_dataset()
@@ -350,8 +351,9 @@ class Experiment:
                 "model_config": self.args.model_config,
                 "state_dict": model.state_dict(),
             },
+            self.save_path,
             is_initial=True,
-            path=self.save_path,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
         logging.info(
             f"Created model {self.args.model} with configuration: {model_config}"
@@ -422,14 +424,16 @@ class Experiment:
 
         if self.args.tensorboard:
             self.agent.set_tensorboard_writer(
-                save_path=self.save_path, dummy=hvd.local_rank() > 0, images=self.args.buffer_tensorboard
+                save_path=self.save_path,
+                images=self.args.buffer_tensorboard,
+                dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
             )
         if self.args.tensorwatch:
             self.agent.set_tensorwatch_watcher(
                 filename=path.abspath(
                     path.join(self.save_path, "tensorwatch.log")),
                 port=self.args.tensorwatch_port,
-                dummy=hvd.local_rank() > 0,
+                dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
             )
 
     def _prepare_dataset(self):
@@ -607,9 +611,10 @@ class Experiment:
                         )
                     )
 
-                    wandb.log({"epoch": self.agent.global_epoch,
-                        "epoch_time": train_results["time"],
-                        "img_sec": img_sec * hvd.size()})
+                    if hvd.rank() == 0 and hvd.local_rank() == 0:
+                        wandb.log({"epoch": self.agent.global_epoch,
+                            "epoch_time": train_results["time"],
+                            "img_sec": img_sec * hvd.size()})
                     if self.agent.writer is not None:
                         self.agent.writer.add_scalar(
                             "img_sec", img_sec * hvd.size(), self.agent.global_epoch
@@ -696,8 +701,9 @@ class Experiment:
                 "model_config": self.args.model_config,
                 "state_dict": self.agent.model.state_dict(),
             },
+            self.save_path,
             is_final=True,
-            path=self.save_path,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
 
 
