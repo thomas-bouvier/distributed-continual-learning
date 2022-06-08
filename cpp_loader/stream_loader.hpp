@@ -18,6 +18,7 @@ class stream_loader_t {
     std::default_random_engine rand_gen;
     rehearsal_map_t rehearsal_map;
     rehearsal_counts_t counts;
+    size_t history_count = 0;
     size_t rehearsal_size = 0;
 
     struct queue_item_t {
@@ -41,6 +42,7 @@ public:
             const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);
     int wait();
     size_t get_rehearsal_size();
+    size_t get_history_count();
 };
 
 #endif

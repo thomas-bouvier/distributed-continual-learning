@@ -272,6 +272,7 @@ class nil_cpp_agent(Agent):
                 self.sl.wait()
                 self.acc_get_time += time.time() - start_get_time
                 self.num_reps = self.sl.get_rehearsal_size()
+                history_count = self.sl.get_history_count()
 
                 # Log representatives
                 if self.writer is not None and self.writer_images and self.num_reps > 0:

@@ -10,5 +10,6 @@ PYBIND11_MODULE(rehearsal, m) {
         .def(py::init<unsigned int, unsigned int, unsigned int, int64_t>())
     .def("accumulate", &stream_loader_t::accumulate, py::call_guard<py::gil_scoped_release>())
     .def("wait", &stream_loader_t::wait, py::call_guard<py::gil_scoped_release>())
-    .def("get_rehearsal_size", &stream_loader_t::get_rehearsal_size);
+    .def("get_rehearsal_size", &stream_loader_t::get_rehearsal_size)
+    .def("get_history_count", &stream_loader_t::get_history_count);
 }

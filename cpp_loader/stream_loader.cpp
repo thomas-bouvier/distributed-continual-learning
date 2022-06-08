@@ -82,7 +82,8 @@ void stream_loader_t::async_process() {
                 if (index < N)
                     buffer[index] = batch.samples.index({i});
             }
-            counts[label] += 1;
+            counts[label]++;
+            history_count++;
         }
 
         // update weight
@@ -114,6 +115,10 @@ int stream_loader_t::wait() {
 
 size_t stream_loader_t::get_rehearsal_size() {
     return rehearsal_size;
+}
+
+size_t stream_loader_t::get_history_count() {
+    return history_count;
 }
 
 stream_loader_t::~stream_loader_t() {
