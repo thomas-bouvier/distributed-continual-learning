@@ -446,7 +446,7 @@ class Experiment:
         defaults = {
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
-            "distributed": True,
+            "distributed": hvd.rank() > 0 or hvd.local_rank() > 0,
             "pin_memory": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
