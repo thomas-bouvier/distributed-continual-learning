@@ -65,7 +65,7 @@ void stream_loader_t::async_process() {
         response_queue.emplace_back(batch);
         lock.unlock();
         request_cond.notify_one();
-        
+
         // update the rehearsal buffer
         // accumulate in Python
         dice.param(std::uniform_int_distribution<unsigned int>::param_type(0, batch_size - 1));

@@ -290,7 +290,8 @@ def main():
             json.dump(args.__dict__, f, indent=2)
         wandb.config.update(args)
 
-        setup_logging(path.join(save_path, "log.txt"), dummy=hvd.local_rank() > 0)
+        setup_logging(path.join(save_path, "log.txt"),
+                      dummy=hvd.local_rank() > 0)
         logging.info(f"Saving to {save_path}")
 
     device = "GPU" if args.cuda else "CPU"
@@ -507,7 +508,7 @@ class Experiment:
         self.agent.before_all_tasks(self.train_data_regime)
 
         for task_id in range(0, len(self.train_data_regime.tasksets)):
-            torch.cuda.nvtx.range_push(f"Task {task_id}")
+            #torch.cuda.nvtx.range_push(f"Task {task_id}")
             start = time.time()
             training_time = time.time()
             logging.info(
@@ -523,7 +524,7 @@ class Experiment:
                 self.train_data_regime.get_loader())
 
             for i_epoch in range(0, self.args.epochs):
-                torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
+                #torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
                 logging.info(f"Starting task {task_id}, epoch: {i_epoch}")
                 self.agent.epoch = i_epoch
 
@@ -531,9 +532,9 @@ class Experiment:
                 self.train_data_regime.set_epoch(i_epoch)
 
                 # train for one epoch
-                torch.cuda.nvtx.range_push("Train")
+                # torch.cuda.nvtx.range_push("Train")
                 train_results = self.agent.train(self.train_data_regime)
-                torch.cuda.nvtx.range_pop()
+                # torch.cuda.nvtx.range_pop()
 
                 # evaluate on test set
                 before_evaluate_time = time.time()
@@ -542,7 +543,7 @@ class Experiment:
                         metric: AverageMeter(f"task_{metric}")
                         for metric in ["loss", "prec1", "prec5"]
                     }
-                    torch.cuda.nvtx.range_push("Test")
+                    # torch.cuda.nvtx.range_push("Test")
                     if self.args.agent == "icarl":
                         self.agent.update_exemplars(
                             self.agent.nc, training=False)
@@ -573,7 +574,7 @@ class Experiment:
                             task_metrics["test_task_metrics"].append(
                                 task_metrics_values
                             )
-                    torch.cuda.nvtx.range_pop()
+                    # torch.cuda.nvtx.range_pop()
 
                     if meters["loss"].avg < self.agent.minimal_eval_loss:
                         logging.debug(
@@ -584,7 +585,7 @@ class Experiment:
                             self.agent.model.state_dict()
                         )
 
-                    torch.cuda.nvtx.range_pop()
+                    # torch.cuda.nvtx.range_pop()
                 evaluate_durations.append(time.time() - before_evaluate_time)
 
                 self.agent.after_every_epoch()
@@ -613,8 +614,8 @@ class Experiment:
 
                     if hvd.rank() == 0 and hvd.local_rank() == 0:
                         wandb.log({"epoch": self.agent.global_epoch,
-                            "epoch_time": train_results["time"],
-                            "img_sec": img_sec * hvd.size()})
+                                   "epoch_time": train_results["time"],
+                                   "img_sec": img_sec * hvd.size()})
                     if self.agent.writer is not None:
                         self.agent.writer.add_scalar(
                             "img_sec", img_sec * hvd.size(), self.agent.global_epoch
@@ -658,7 +659,7 @@ class Experiment:
             tasks_metrics.save()
 
             self.agent.after_every_task()
-            torch.cuda.nvtx.range_pop()
+            # torch.cuda.nvtx.range_pop()
 
         self.agent.after_all_tasks()
         total_end = time.time()

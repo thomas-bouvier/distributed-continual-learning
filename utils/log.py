@@ -121,9 +121,9 @@ class ResultsLog(object):
                 + "|".join(["{}".format(k)
                            for k in ResultsLog.supported_data_formats])
             )
-        
+
         if self.dummy:
-            return;
+            return
 
         if data_format == "json":
             self.data_path = f"{save_path}.json"

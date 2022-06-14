@@ -187,7 +187,7 @@ class nil_global_agent(Agent):
         self.recalculate_weights()
 
     def share_representatives(self, candidates, offsets, rm_targets, add_targets):
-        torch.cuda.nvtx.range_push("Share representatives")
+        #torch.cuda.nvtx.range_push("Share representatives")
 
         self.global_counts = hvd.allgather(self.counts.unsqueeze(0))
         global_candidates = hvd.allgather(torch.cat(candidates).unsqueeze(0))
@@ -229,7 +229,7 @@ class nil_global_agent(Agent):
             ]
         ).unsqueeze(0))
         self.num_reps = self.global_representatives_y.numel()
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_pop()
 
     def recalculate_weights(self):
         """Reassign the weights of the representatives
@@ -256,9 +256,9 @@ class nil_global_agent(Agent):
         self.steps = 0
 
         # Distribute the data
-        torch.cuda.nvtx.range_push("Distribute dataset")
+        #torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
             logging.debug(
@@ -275,11 +275,11 @@ class nil_global_agent(Agent):
             self.optimizer.reset(self.model.parameters())
 
         # Add the new classes to the mask
-        torch.cuda.nvtx.range_push("Create mask")
+        #torch.cuda.nvtx.range_push("Create mask")
         nc = set([data[1] for data in train_data_regime.get_data()])
         for y in nc:
             self.mask[y] = 1.0
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_pop()
 
         self.criterion = nn.CrossEntropyLoss(
             weight=self.mask, reduction="none")
@@ -298,7 +298,7 @@ class nil_global_agent(Agent):
         step_count = 0
 
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
-            torch.cuda.nvtx.range_push(f"Batch {i_batch}")
+            #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
@@ -332,15 +332,15 @@ class nil_global_agent(Agent):
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                        "step": self.global_steps,
-                        "epoch": self.global_epoch,
-                        "batch": i_batch,
-                        f"{prefix}_prec1": meters["prec1"].avg,
-                        f"{prefix}_prec5": meters["prec5"].avg})
+                               "step": self.global_steps,
+                               "epoch": self.global_epoch,
+                               "batch": i_batch,
+                               f"{prefix}_prec1": meters["prec1"].avg,
+                               f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
                         wandb.log({"lr": self.optimizer.get_lr()[0],
-                            "step": self.global_steps,
-                            "epoch": self.global_epoch})
+                                   "step": self.global_steps,
+                                   "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
                         f"{prefix}_loss", meters["loss"].avg, self.global_steps
@@ -383,7 +383,7 @@ class nil_global_agent(Agent):
                             "lr",
                             (self.global_steps, self.optimizer.get_lr()[0]),
                         )
-            torch.cuda.nvtx.range_pop()
+            # torch.cuda.nvtx.range_pop()
             step_count += 1
         end = time.time()
 
@@ -401,8 +401,8 @@ class nil_global_agent(Agent):
     def _step(
         self,
         i_batch,
-        inputs_batch,
-        target_batch,
+        inputs,
+        target,
         training=False,
         average_output=False,
         chunk_batch=1,
@@ -414,14 +414,8 @@ class nil_global_agent(Agent):
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.steps)
 
-        for i, (x, y) in enumerate(
-            zip(
-                inputs_batch.chunk(chunk_batch, dim=0),
-                target_batch.chunk(chunk_batch, dim=0),
-            )
-        ):
-            torch.cuda.nvtx.range_push(f"Chunk {i}")
-
+        for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
+                                       target.chunk(chunk_batch, dim=0))):
             if training:
                 if self.buffer_cuda:
                     self.accumulate(x, y)
@@ -441,12 +435,12 @@ class nil_global_agent(Agent):
                         "representatives", fig, self.global_steps)
 
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-            torch.cuda.nvtx.range_push("Copy to device")
+            #torch.cuda.nvtx.range_push("Copy to device")
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-            torch.cuda.nvtx.range_pop()
+            # torch.cuda.nvtx.range_pop()
 
             if training and num_reps > 0:
-                torch.cuda.nvtx.range_push("Combine batches")
+                #torch.cuda.nvtx.range_push("Combine batches")
                 rep_values, rep_labels, rep_weights = (
                     move_cuda(rep_values, self.cuda),
                     move_cuda(rep_labels, self.cuda),
@@ -458,15 +452,15 @@ class nil_global_agent(Agent):
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
                 self.acc_cat_time += time.time() - start_cat_time
-                torch.cuda.nvtx.range_pop()
+                # torch.cuda.nvtx.range_pop()
 
-            torch.cuda.nvtx.range_push("Forward pass")
+            #torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
             if training:
                 loss = self.criterion(output, y)
             else:
                 loss = nn.CrossEntropyLoss()(output, y)
-            torch.cuda.nvtx.range_pop()
+            # torch.cuda.nvtx.range_pop()
 
             if training:
                 total_weight = hvd.allreduce(
@@ -476,16 +470,14 @@ class nil_global_agent(Agent):
                 # Faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
                 loss.backward(dw)
                 # SGD step
-                torch.cuda.nvtx.range_push("Optimizer step")
+                #torch.cuda.nvtx.range_push("Optimizer step")
                 self.optimizer.step()
-                torch.cuda.nvtx.range_pop()
+                # torch.cuda.nvtx.range_pop()
                 self.global_steps += 1
                 self.steps += 1
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
-
-            torch.cuda.nvtx.range_pop()
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss

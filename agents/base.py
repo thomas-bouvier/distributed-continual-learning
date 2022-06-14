@@ -24,7 +24,7 @@ class Agent:
         state_dict=None,
     ):
         super(Agent, self).__init__()
-        self.model = model
+        self.model = move_cuda(model, cuda)
         self.config = config
         self.optimizer = optimizer
         self.criterion = criterion
@@ -41,9 +41,6 @@ class Agent:
         self.writer_images = False
         self.watcher = None
         self.streams = {}
-
-        # Move model to GPU.
-        move_cuda(self.model, cuda)
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -65,7 +62,7 @@ class Agent:
         step_count = 0
 
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
-            torch.cuda.nvtx.range_push(f"Batch {i_batch}")
+            #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
@@ -96,15 +93,15 @@ class Agent:
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                        "step": self.global_steps,
-                        "epoch": self.global_epoch,
-                        "batch": i_batch,
-                        f"{prefix}_prec1": meters["prec1"].avg,
-                        f"{prefix}_prec5": meters["prec5"].avg})
+                               "step": self.global_steps,
+                               "epoch": self.global_epoch,
+                               "batch": i_batch,
+                               f"{prefix}_prec1": meters["prec1"].avg,
+                               f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
                         wandb.log({"lr": self.optimizer.get_lr()[0],
-                            "step": self.global_steps,
-                            "epoch": self.global_epoch})
+                                   "step": self.global_steps,
+                                   "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
                         f"{prefix}_loss", meters["loss"].avg, self.global_steps
@@ -132,7 +129,7 @@ class Agent:
                             "lr",
                             (self.global_steps, self.optimizer.get_lr()[0]),
                         )
-            torch.cuda.nvtx.range_pop()
+            # torch.cuda.nvtx.range_pop()
             step_count += 1
         end = time.time()
 
@@ -150,8 +147,8 @@ class Agent:
     def _step(
         self,
         i_batch,
-        inputs_batch,
-        target_batch,
+        inputs,
+        target,
         training=False,
         average_output=False,
         chunk_batch=1,
@@ -163,38 +160,29 @@ class Agent:
             self.optimizer.zero_grad()
             self.optimizer.update(self.epoch, self.steps)
 
-        for i, (inputs, target) in enumerate(
-            zip(
-                inputs_batch.chunk(chunk_batch, dim=0),
-                target_batch.chunk(chunk_batch, dim=0),
-            )
-        ):
-            torch.cuda.nvtx.range_push(f"Chunk {i}")
+        for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
+                                       target.chunk(chunk_batch, dim=0))):
+            #torch.cuda.nvtx.range_push("Copy to device")
+            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            # torch.cuda.nvtx.range_pop()
 
-            torch.cuda.nvtx.range_push("Copy to device")
-            inputs, target = move_cuda(
-                inputs, self.cuda), move_cuda(target, self.cuda)
-            torch.cuda.nvtx.range_pop()
-
-            torch.cuda.nvtx.range_push("Forward pass")
-            output = self.model(inputs)
-            loss = self.criterion(output, target)
-            torch.cuda.nvtx.range_pop()
+            #torch.cuda.nvtx.range_push("Forward pass")
+            output = self.model(x)
+            loss = self.criterion(output, y)
+            # torch.cuda.nvtx.range_pop()
 
             if training:
                 # accumulate gradient
                 loss.backward()
                 # SGD step
-                torch.cuda.nvtx.range_push("Optimizer step")
+                #torch.cuda.nvtx.range_push("Optimizer step")
                 self.optimizer.step()
-                torch.cuda.nvtx.range_pop()
+                # torch.cuda.nvtx.range_pop()
                 self.global_steps += 1
                 self.steps += 1
 
             outputs.append(output.detach())
             total_loss += loss.item()
-
-            torch.cuda.nvtx.range_pop()
 
         outputs = torch.cat(outputs, dim=0)
         return outputs, total_loss
@@ -221,9 +209,9 @@ class Agent:
         self.steps = 0
 
         # Distribute the data
-        torch.cuda.nvtx.range_push("Distribute dataset")
+        #torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
-        torch.cuda.nvtx.range_pop()
+        # torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
             logging.debug(
