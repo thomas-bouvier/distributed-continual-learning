@@ -10,6 +10,8 @@ import torch.nn as nn
 import torchvision
 import wandb
 
+from apex import amp
+
 from agents.base import Agent
 from agents.nil_global import nil_global_agent
 from agents.nil_cpp import nil_cpp_agent
@@ -21,8 +23,9 @@ class nil_agent(Agent):
     def __init__(
         self,
         model,
+        use_amp,
         config,
-        optimizer,
+        optimizer_regime,
         criterion,
         cuda,
         buffer_cuda,
@@ -31,8 +34,9 @@ class nil_agent(Agent):
     ):
         super(nil_agent, self).__init__(
             model,
+            use_amp,
             config,
-            optimizer,
+            optimizer_regime,
             criterion,
             cuda,
             buffer_cuda,
@@ -61,9 +65,9 @@ class nil_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-        self.acc_get_time = 0
-        self.acc_cat_time = 0
-        self.acc_acc_time = 0
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
 
     def get_samples(self):
         """Select or retrieve the representatives from the data
@@ -207,7 +211,7 @@ class nil_agent(Agent):
                 logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
-            self.optimizer.reset(self.model.parameters())
+            self.optimizer_regime.reset(self.model.parameters())
 
         # Add the new classes to the mask
         #torch.cuda.nvtx.range_push("Create mask")
@@ -235,9 +239,11 @@ class nil_agent(Agent):
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
+            batch_start = time.time()
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
             )
+            batch_end = time.time()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(
@@ -264,6 +270,7 @@ class nil_agent(Agent):
                         meters=meters,
                     )
                 )
+                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -273,7 +280,7 @@ class nil_agent(Agent):
                                f"{prefix}_prec1": meters["prec1"].avg,
                                f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
-                        wandb.log({"lr": self.optimizer.get_lr()[0],
+                        wandb.log({"lr": self.optimizer_regime.get_lr()[0],
                                    "step": self.global_steps,
                                    "epoch": self.global_epoch})
                 if self.writer is not None:
@@ -292,7 +299,7 @@ class nil_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
                         )
                         self.writer.add_scalar(
                             "num_representatives",
@@ -309,14 +316,14 @@ class nil_agent(Agent):
                     self.observe(
                         trainer=self,
                         model=self.model,
-                        optimizer=self.optimizer,
+                        optimizer=self.optimizer_regime.optimizer,
                         data=(x, y),
                     )
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer.get_lr()[0]),
+                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
@@ -327,12 +334,12 @@ class nil_agent(Agent):
 
         logging.info(f"epoch time {end - start}")
         logging.info(f"\tnum_representatives {self.get_num_representatives()}")
-        logging.info(f"\tget time {self.acc_get_time}")
-        logging.info(f"\tcat time {self.acc_cat_time}")
-        logging.info(f"\tacc time {self.acc_acc_time}")
-        self.acc_get_time = 0
-        self.acc_cat_time = 0
-        self.acc_acc_time = 0
+        logging.info(f"\tepoch get time {self.epoch_acc_get_time}")
+        logging.info(f"\tepoch cat time {self.epoch_acc_cat_time}")
+        logging.info(f"\tepoc acc time {self.epoch_acc_acc_time}")
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]
@@ -355,8 +362,8 @@ class nil_agent(Agent):
         total_loss = 0
 
         if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.steps)
+            self.optimizer_regime.zero_grad()
+            self.optimizer_regime.update(self.epoch, self.steps)
 
         for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
                                        target.chunk(chunk_batch, dim=0))):
@@ -372,7 +379,7 @@ class nil_agent(Agent):
                     self.accumulate(x, y)
                 else:
                     self.accumulate(x.cpu(), y.cpu())
-                self.acc_acc_time += time.time() - start_acc_time
+                self.epoch_acc_acc_time += time.time() - start_acc_time
 
                 # Get the representatives
                 start_get_time = time.time()
@@ -381,7 +388,7 @@ class nil_agent(Agent):
                     rep_labels,
                     rep_weights,
                 ) = self.get_samples()
-                self.acc_get_time += time.time() - start_get_time
+                self.epoch_acc_get_time += time.time() - start_get_time
                 num_reps = len(rep_values)
 
                 if num_reps > 0:
@@ -396,7 +403,7 @@ class nil_agent(Agent):
                     w = torch.cat((w, rep_weights))
                     x = torch.cat((x, rep_values))
                     y = torch.cat((y, rep_labels))
-                    self.acc_cat_time += time.time() - start_cat_time
+                    self.epoch_acc_cat_time += time.time() - start_cat_time
                     # torch.cuda.nvtx.range_pop()
 
                 # Log representatives
@@ -417,12 +424,18 @@ class nil_agent(Agent):
                 # Leads to decreased accuracy
                 # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
                 dw = w / torch.sum(w)
-                # Faster to provide the derivative of L wrt {l}^n than letting
-                # pytorch computing it by itself
-                loss.backward(dw)
-                # SGD step
                 #torch.cuda.nvtx.range_push("Optimizer step")
-                self.optimizer.step()
+                if self.use_amp:
+                    with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
+                        scaled_loss.backward(dw)
+                        self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.optimizer_regime.step()
+                else:
+                    # Faster to provide the derivative of L wrt {l}^n than letting
+                    # pytorch computing it by itself
+                    loss.backward(dw)
+                    self.optimizer_regime.step()
                 # torch.cuda.nvtx.range_pop()
                 self.global_steps += 1
                 self.steps += 1
@@ -443,11 +456,11 @@ class nil_agent(Agent):
         return -1
 
 
-def nil(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval):
+def nil(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval):
     implementation = config.get("implementation", "")
     agent = nil_agent
     if implementation == "global":
         agent = nil_global_agent
     elif implementation == "cpp":
         agent = nil_cpp_agent
-    return agent(model, config, optimizer, criterion, cuda, buffer_cuda, log_interval)
+    return agent(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval)

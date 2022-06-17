@@ -3,7 +3,8 @@ import logging
 import torch
 
 from regime import Regime
-from regularizer import Regularizer
+
+from apex import amp
 
 _OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
 
@@ -12,6 +13,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
     def __init__(
         self,
         model,
+        use_amp,
         compression,
         reduction,
         batches_per_allreduce,
@@ -20,31 +22,33 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         defaults={},
     ):
         super(OptimizerRegime, self).__init__(regime, defaults)
-        self.model = model
         self.parameters = list(model.parameters())
-        self.regularizer = Regularizer(model)
         self.compression = compression
         self.reduction = reduction
         self.batches_per_allreduce = batches_per_allreduce
         self.gradient_predivide_factor = gradient_predivide_factor
 
-        self.optimizer = self._create_optimizer()
-
-    def _create_optimizer(self):
         optimizer = torch.optim.SGD(self.parameters, lr=0)
 
-        # Horovod: broadcast optimizer state.
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
-
         # Horovod: wrap optimizer with DistributedOptimizer.
-        return hvd.DistributedOptimizer(
+        optimizer = hvd.DistributedOptimizer(
             optimizer,
-            named_parameters=self.model.named_parameters(),
+            named_parameters=model.named_parameters(),
             compression=self.compression,
             op=self.reduction,
             backward_passes_per_step=self.batches_per_allreduce,
             gradient_predivide_factor=self.gradient_predivide_factor,
         )
+
+        # Horovod: broadcast optimizer state and parameters
+        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+
+        if use_amp:
+            self.model, self.optimizer = amp.initialize(model, optimizer, opt_level="O1")
+        else:
+            self.model = model
+            self.optimizer = optimizer
 
     def update(self, epoch=None, steps=None):
         """Adjust optimizer according to current epoch or steps and training regime."""
@@ -77,9 +81,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
 
     def step(self, *args, **kwargs):
         """Performs a single optimization step (parameter update)."""
-        self.regularizer.pre_step()
         self.optimizer.step(*args, **kwargs)
-        self.regularizer.post_step()
 
     def __getstate__(self):
         return {

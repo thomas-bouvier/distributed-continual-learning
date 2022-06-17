@@ -10,6 +10,8 @@ import torch.nn as nn
 import torchvision
 import wandb
 
+from apex import amp
+
 import ctypes
 from cpp_loader import rehearsal
 
@@ -68,9 +70,9 @@ class nil_cpp_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-        self.acc_get_time = 0
-        self.acc_cat_time = 0
-        self.acc_acc_time = 0
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -120,9 +122,11 @@ class nil_cpp_agent(Agent):
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
+            batch_start = time.time()
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
             )
+            batch_end = time.time()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(
@@ -149,6 +153,7 @@ class nil_cpp_agent(Agent):
                         meters=meters,
                     )
                 )
+                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -158,7 +163,7 @@ class nil_cpp_agent(Agent):
                                f"{prefix}_prec1": meters["prec1"].avg,
                                f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
-                        wandb.log({"lr": self.optimizer.get_lr()[0],
+                        wandb.log({"lr": self.optimizer_regime.get_lr()[0],
                                    "step": self.global_steps,
                                    "epoch": self.global_epoch})
                 if self.writer is not None:
@@ -177,7 +182,7 @@ class nil_cpp_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
                         )
                         self.writer.add_scalar(
                             "num_representatives",
@@ -194,14 +199,14 @@ class nil_cpp_agent(Agent):
                     self.observe(
                         trainer=self,
                         model=self.model,
-                        optimizer=self.optimizer,
+                        optimizer=self.optimizer_regime.optimizer,
                         data=(x, y),
                     )
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer.get_lr()[0]),
+                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
@@ -212,12 +217,12 @@ class nil_cpp_agent(Agent):
 
         logging.info(f"epoch time {end - start}")
         logging.info(f"\tnum_representatives {self.get_num_representatives()}")
-        logging.info(f"\tget time {self.acc_get_time}")
-        logging.info(f"\tcat time {self.acc_cat_time}")
-        logging.info(f"\tacc time {self.acc_acc_time}")
-        self.acc_get_time = 0
-        self.acc_cat_time = 0
-        self.acc_acc_time = 0
+        logging.info(f"\tepoch get time {self.epoch_acc_get_time}")
+        logging.info(f"\tepoch cat time {self.epoch_acc_cat_time}")
+        logging.info(f"\tepoch acc time {self.epoch_acc_acc_time}")
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]
@@ -240,8 +245,8 @@ class nil_cpp_agent(Agent):
         total_loss = 0
 
         if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.steps)
+            self.optimizer_regime.zero_grad()
+            self.optimizer_regime.update(self.epoch, self.steps)
 
         for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
                                        target.chunk(chunk_batch, dim=0))):
@@ -260,12 +265,12 @@ class nil_cpp_agent(Agent):
                 start_acc_time = time.time()
                 self.sl.accumulate(x.detach().clone(), y.detach(
                 ).clone(), self.aug_x, self.aug_y, self.aug_w)
-                self.acc_acc_time += time.time() - start_acc_time
+                self.epoch_acc_acc_time += time.time() - start_acc_time
 
                 # Get the representatives
                 start_get_time = time.time()
                 self.sl.wait()
-                self.acc_get_time += time.time() - start_get_time
+                self.epoch_acc_get_time += time.time() - start_get_time
                 self.num_reps = self.sl.get_rehearsal_size()
                 history_count = self.sl.get_history_count()
 
@@ -288,12 +293,18 @@ class nil_cpp_agent(Agent):
                 # Leads to decreased accuracy
                 # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
                 dw = self.aug_w / torch.sum(self.aug_w)
-                # Faster to provide the derivative of L wrt {l}^n than letting
-                # pytorch computing it by itself
-                loss.backward(dw)
-                # SGD step
                 #torch.cuda.nvtx.range_push("Optimizer step")
-                self.optimizer.step()
+                if self.use_amp:
+                    with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
+                        scaled_loss.backward(dw)
+                        self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.optimizer_regime.step()
+                else:
+                    # Faster to provide the derivative of L wrt {l}^n than letting
+                    # pytorch computing it by itself
+                    loss.backward(dw)
+                    self.optimizer_regime.step()
                 # torch.cuda.nvtx.range_pop()
                 self.global_steps += 1
                 self.steps += 1

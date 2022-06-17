@@ -10,6 +10,8 @@ import torch.nn as nn
 import torchvision
 import wandb
 
+from apex import amp
+
 from agents.base import Agent
 from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx
 from utils.meters import AverageMeter, accuracy
@@ -19,8 +21,9 @@ class nil_global_agent(Agent):
     def __init__(
         self,
         model,
+        use_amp,
         config,
-        optimizer,
+        optimizer_regime,
         criterion,
         cuda,
         buffer_cuda,
@@ -29,8 +32,9 @@ class nil_global_agent(Agent):
     ):
         super(nil_global_agent, self).__init__(
             model,
+            use_amp,
             config,
-            optimizer,
+            optimizer_regime,
             criterion,
             cuda,
             buffer_cuda,
@@ -63,9 +67,9 @@ class nil_global_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-        self.acc_get_time = 0
-        self.acc_cat_time = 0
-        self.acc_acc_time = 0
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
 
     def get_samples(self):
         """Select or retrieves the representatives from the data
@@ -272,7 +276,7 @@ class nil_global_agent(Agent):
                 logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
-            self.optimizer.reset(self.model.parameters())
+            self.optimizer_regime.reset(self.model.parameters())
 
         # Add the new classes to the mask
         #torch.cuda.nvtx.range_push("Create mask")
@@ -300,9 +304,11 @@ class nil_global_agent(Agent):
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
 
+            batch_start = time.time()
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
             )
+            batch_end = time.time()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(
@@ -329,6 +335,7 @@ class nil_global_agent(Agent):
                         meters=meters,
                     )
                 )
+                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -338,7 +345,7 @@ class nil_global_agent(Agent):
                                f"{prefix}_prec1": meters["prec1"].avg,
                                f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
-                        wandb.log({"lr": self.optimizer.get_lr()[0],
+                        wandb.log({"lr": self.optimizer_regime.get_lr()[0],
                                    "step": self.global_steps,
                                    "epoch": self.global_epoch})
                 if self.writer is not None:
@@ -357,7 +364,7 @@ class nil_global_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
                         )
                         self.writer.add_scalar(
                             "num_representatives",
@@ -374,14 +381,14 @@ class nil_global_agent(Agent):
                     self.observe(
                         trainer=self,
                         model=self.model,
-                        optimizer=self.optimizer,
+                        optimizer=self.optimizer_regime.optimizer,
                         data=(x, y),
                     )
                     self.stream_meters(meters, prefix=prefix)
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer.get_lr()[0]),
+                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
@@ -389,6 +396,15 @@ class nil_global_agent(Agent):
 
         if training:
             self.global_epoch += 1
+
+        logging.info(f"epoch time {end - start}")
+        logging.info(f"\tnum_representatives {self.get_num_representatives()}")
+        logging.info(f"\tepoch get time {self.epoch_acc_get_time}")
+        logging.info(f"\tepoch cat time {self.epoch_acc_cat_time}")
+        logging.info(f"\tepoch acc time {self.epoch_acc_acc_time}")
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]
@@ -411,48 +427,54 @@ class nil_global_agent(Agent):
         total_loss = 0
 
         if training:
-            self.optimizer.zero_grad()
-            self.optimizer.update(self.epoch, self.steps)
+            self.optimizer_regime.zero_grad()
+            self.optimizer_regime.update(self.epoch, self.steps)
 
         for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
                                        target.chunk(chunk_batch, dim=0))):
+            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
+            #torch.cuda.nvtx.range_push("Copy to device")
+            x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
+                y, self.cuda and self.buffer_cuda)            # torch.cuda.nvtx.range_pop()
+            
             if training:
+                start_acc_time = time.time()
                 if self.buffer_cuda:
                     self.accumulate(x, y)
                 else:
                     self.accumulate(x.cpu(), y.cpu())
+                self.epoch_acc_acc_time += time.time() - start_acc_time
 
                 # Get the representatives
+                start_get_time = time.time()
                 (
                     rep_values,
                     rep_labels,
                     rep_weights,
                 ) = self.get_samples()
+                self.epoch_acc_get_time += time.time() - start_get_time
                 num_reps = len(rep_values)
+
+                if num_reps > 0:
+                    #torch.cuda.nvtx.range_push("Combine batches")
+                    rep_values, rep_labels, rep_weights = (
+                        move_cuda(rep_values, self.cuda),
+                        move_cuda(rep_labels, self.cuda),
+                        move_cuda(rep_weights, self.cuda),
+                    )
+                    # Concatenates the training samples with the representatives
+                    start_cat_time = time.time()
+                    w = torch.cat((w, rep_weights))
+                    x = torch.cat((x, rep_values))
+                    y = torch.cat((y, rep_labels))
+                    self.epoch_acc_cat_time += time.time() - start_cat_time
+                    # torch.cuda.nvtx.range_pop()
+
+                # Log representatives
                 if self.writer is not None and self.writer_images and num_reps > 0:
                     fig = plot_representatives(rep_values, rep_labels, 5)
                     self.writer.add_figure(
                         "representatives", fig, self.global_steps)
-
-            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-            #torch.cuda.nvtx.range_push("Copy to device")
-            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-            # torch.cuda.nvtx.range_pop()
-
-            if training and num_reps > 0:
-                #torch.cuda.nvtx.range_push("Combine batches")
-                rep_values, rep_labels, rep_weights = (
-                    move_cuda(rep_values, self.cuda),
-                    move_cuda(rep_labels, self.cuda),
-                    move_cuda(rep_weights, self.cuda),
-                )
-                # Concatenates the training samples with the representatives
-                start_cat_time = time.time()
-                w = torch.cat((w, rep_weights))
-                x = torch.cat((x, rep_values))
-                y = torch.cat((y, rep_labels))
-                self.acc_cat_time += time.time() - start_cat_time
-                # torch.cuda.nvtx.range_pop()
 
             #torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(x)
@@ -467,11 +489,18 @@ class nil_global_agent(Agent):
                     torch.sum(w), name="total_weight", op=hvd.Sum
                 )
                 dw = w / total_weight
-                # Faster to provide the derivative of L wrt {l}^b than letting pytorch computing it by itself
-                loss.backward(dw)
-                # SGD step
                 #torch.cuda.nvtx.range_push("Optimizer step")
-                self.optimizer.step()
+                if self.use_amp:
+                    with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
+                        scaled_loss.backward(dw)
+                        self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.optimizer_regime.step()
+                else:
+                    # Faster to provide the derivative of L wrt {l}^n than letting
+                    # pytorch computing it by itself
+                    loss.backward(dw)
+                    self.optimizer_regime.step()
                 # torch.cuda.nvtx.range_pop()
                 self.global_steps += 1
                 self.steps += 1

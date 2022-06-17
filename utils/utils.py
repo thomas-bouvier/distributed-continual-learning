@@ -6,7 +6,7 @@ from six import string_types
 
 
 def get_device(use_cuda=True):
-    if use_cuda and torch.cuda.is_available():
+    if use_cuda:
         return "cuda"
     return "cpu"
 
@@ -21,7 +21,7 @@ def move_cuda(item, use_cuda=True, cuda_device=-1):
     Returns
         object: the same object, potentially moved to gpu.
     """
-    if use_cuda and torch.cuda.is_available():
+    if use_cuda:
         if cuda_device != -1:
             item = item.to(torch.device(f"cuda:{cuda_device}"))
         else:

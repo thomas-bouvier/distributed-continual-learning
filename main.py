@@ -25,6 +25,7 @@ from optimizer_regime import OptimizerRegime
 from utils.log import save_checkpoint, setup_logging, ResultsLog
 from utils.meters import AverageMeter
 from utils.yaml_params import YParams
+from utils.utils import move_cuda
 
 model_names = sorted(
     name
@@ -194,6 +195,12 @@ parser.add_argument(
     help="how many batches to wait before logging training status",
 )
 parser.add_argument(
+    "--use-amp",
+    action="store_true",
+    default=False,
+    help="enable Automatic Mixed Precision training",
+)
+parser.add_argument(
     "--fp16-allreduce",
     action="store_true",
     default=False,
@@ -331,7 +338,6 @@ class Experiment:
         if self.args.model_config != "":
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
-
         model = model_name(model_config)
 
         if self.args.checkpoint:
@@ -359,11 +365,9 @@ class Experiment:
         logging.info(
             f"Created model {self.args.model} with configuration: {model_config}"
         )
-        # Horovod: broadcast parameters.
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-
         num_parameters = sum([l.nelement() for l in model.parameters()])
         logging.info(f"Number of parameters: {num_parameters}")
+        model = move_cuda(model, self.args.cuda)
 
         # Horovod: scale learning rate by lr_scaler.
         optim_regime = getattr(
@@ -381,19 +385,16 @@ class Experiment:
         )
         logging.info(f"Optimizer regime: {optim_regime}")
 
-        # Distributed training parameters
-        compression = (
-            hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none
-        )
-        reduction = hvd.Adasum if self.args.use_adasum else hvd.Average
         self.optimizer_regime = OptimizerRegime(
             model,
-            compression,
-            reduction,
+            self.args.use_amp,
+            hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
+            hvd.Adasum if self.args.use_adasum else hvd.Average,
             self.args.batches_per_allreduce,
             self.args.gradient_predivide_factor,
             optim_regime,
         )
+        model = self.optimizer_regime.model
 
         loss_params = {}
         self.criterion = getattr(
@@ -413,6 +414,7 @@ class Experiment:
                 agent_config, **literal_eval(self.args.agent_config))
         self.agent = agent(
             model,
+            self.args.use_amp,
             agent_config,
             self.optimizer_regime,
             self.criterion,
@@ -447,7 +449,7 @@ class Experiment:
         defaults = {
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
-            "distributed": hvd.rank() > 0 or hvd.local_rank() > 0,
+            "distributed": hvd.size() > 0,
             "pin_memory": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
