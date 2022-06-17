@@ -26,8 +26,9 @@ class nil_cpp_agent(Agent):
     def __init__(
         self,
         model,
+        use_amp,
         config,
-        optimizer,
+        optimizer_regime,
         criterion,
         cuda,
         buffer_cuda,
@@ -36,8 +37,9 @@ class nil_cpp_agent(Agent):
     ):
         super(nil_cpp_agent, self).__init__(
             model,
+            use_amp,
             config,
-            optimizer,
+            optimizer_regime,
             criterion,
             cuda,
             buffer_cuda,
@@ -94,7 +96,7 @@ class nil_cpp_agent(Agent):
                 logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
-            self.optimizer.reset(self.model.parameters())
+            self.optimizer_regime.reset(self.model.parameters())
 
         # Add the new classes to the mask
         #torch.cuda.nvtx.range_push("Create mask")
