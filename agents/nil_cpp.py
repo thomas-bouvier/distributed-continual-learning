@@ -168,11 +168,16 @@ class nil_cpp_agent(Agent):
                 )
 
                 logging.info(f"batch {i_batch} time {batch_time} sec")
-                logging.info(f"\tbatch aug time {self.last_batch_aug_time} sec ({self.last_batch_aug_time*100/batch_time}%)")
-                logging.info(f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
-                logging.info(f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/batch_time}%)")
-                logging.info(f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/batch_time}%)")
-                logging.info(f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch aug time {self.last_batch_aug_time} sec ({self.last_batch_aug_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/batch_time}%)")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -201,7 +206,8 @@ class nil_cpp_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[
+                                0], self.global_steps
                         )
                         self.writer.add_scalar(
                             "num_representatives",
@@ -225,7 +231,8 @@ class nil_cpp_agent(Agent):
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
+                            (self.global_steps,
+                             self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
@@ -235,13 +242,19 @@ class nil_cpp_agent(Agent):
         if training:
             self.global_epoch += 1
             logging.info(f"\nCUMULATED VALUES:")
-            logging.info(f"\tnum_representatives {self.get_num_representatives()}")
+            logging.info(
+                f"\tnum_representatives {self.get_num_representatives()}")
             logging.info(f"epoch time {epoch_time} sec")
-            logging.info(f"\tepoch aug time {self.epoch_aug_time} sec ({self.epoch_aug_time*100/epoch_time}%)")
-            logging.info(f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
-            logging.info(f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
-            logging.info(f"\tepoch cat time {self.epoch_cat_time} sec ({self.epoch_cat_time*100/epoch_time}%)")
-            logging.info(f"\tepoch acc time {self.epoch_acc_time} sec ({self.epoch_acc_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch aug time {self.epoch_aug_time} sec ({self.epoch_aug_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch cat time {self.epoch_cat_time} sec ({self.epoch_cat_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch acc time {self.epoch_acc_time} sec ({self.epoch_acc_time*100/epoch_time}%)")
         self.epoch_aug_time = 0
         self.epoch_move_time = 0
         self.epoch_wait_time = 0
@@ -287,27 +300,14 @@ class nil_cpp_agent(Agent):
                 size = list(x.size())[1:]
                 self.aug_x = torch.zeros(
                     self.batch_size + self.num_samples, *size, device=self.device)
+                self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
             if training:
-                start_acc_time = time.time()
-                self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-                self.last_batch_acc_time = time.time() - start_acc_time
-                self.epoch_acc_time += self.last_batch_acc_time
-
                 # Get the representatives
                 start_wait_time = time.time()
                 self.sl.wait()
                 self.last_batch_wait_time = time.time() - start_wait_time
                 self.epoch_wait_time += self.last_batch_wait_time
-                self.num_reps = self.sl.get_rehearsal_size()
-                history_count = self.sl.get_history_count()
-
-                # Log representatives
-                if self.writer is not None and self.writer_images and self.num_reps > 0:
-                    fig = plot_representatives(
-                        self.aug_x[len(x):], self.aug_y[len(x):], 5)
-                    self.writer.add_figure(
-                        "representatives", fig, self.global_steps)
 
             #torch.cuda.nvtx.range_push("Forward pass")
             output = self.model(self.aug_x)
@@ -334,8 +334,22 @@ class nil_cpp_agent(Agent):
                     loss.backward(dw)
                     self.optimizer_regime.step()
                 # torch.cuda.nvtx.range_pop()
+
+                start_acc_time = time.time()
+                self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+                self.last_batch_acc_time = time.time() - start_acc_time
+                self.epoch_acc_time += self.last_batch_acc_time
+
                 self.global_steps += 1
                 self.steps += 1
+                self.num_reps = self.sl.get_rehearsal_size()
+
+                # Log representatives
+                if self.writer is not None and self.writer_images and self.num_reps > 0:
+                    fig = plot_representatives(
+                        self.aug_x[len(x):], self.aug_y[len(x):], 5)
+                    self.writer.add_figure(
+                        "representatives", fig, self.global_steps)
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
