@@ -65,9 +65,16 @@ class nil_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-        self.epoch_acc_get_time = 0
-        self.epoch_acc_cat_time = 0
-        self.epoch_acc_acc_time = 0
+        self.epoch_aug_time = 0
+        self.epoch_move_time = 0
+        self.epoch_wait_time = 0
+        self.epoch_cat_time = 0
+        self.epoch_acc_time = 0
+        self.last_batch_aug_time = 0
+        self.last_batch_move_time = 0
+        self.last_batch_wait_time = 0
+        self.last_batch_cat_time = 0
+        self.last_batch_acc_time = 0
 
     def get_samples(self):
         """Select or retrieve the representatives from the data
@@ -233,17 +240,22 @@ class nil_agent(Agent):
             metric: AverageMeter(f"{prefix}_{metric}")
             for metric in ["loss", "prec1", "prec5"]
         }
-        start = time.time()
+        epoch_time = 0
         step_count = 0
 
+        start_batch_time = time.time()
+        start_aug_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
+            self.last_batch_aug_time = time.time() - start_aug_time
+            self.epoch_aug_time += self.last_batch_aug_time
 
             batch_start = time.time()
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
             )
-            batch_end = time.time()
+            batch_time = time.time() - start_batch_time
+            epoch_time += batch_time
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(
@@ -270,7 +282,13 @@ class nil_agent(Agent):
                         meters=meters,
                     )
                 )
-                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
+
+                logging.info(f"batch {i_batch} time {batch_time} sec")
+                logging.info(f"\tbatch aug time {self.last_batch_aug_time} sec ({self.last_batch_aug_time*100/batch_time}%)")
+                logging.info(f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+                logging.info(f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/batch_time}%)")
+                logging.info(f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/batch_time}%)")
+                logging.info(f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/batch_time}%)")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -327,24 +345,29 @@ class nil_agent(Agent):
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
-        end = time.time()
+            start_batch_time = time.time()
+            start_aug_time = start_batch_time
 
         if training:
             self.global_epoch += 1
-
-        logging.info(f"epoch time {end - start}")
-        logging.info(f"\tnum_representatives {self.get_num_representatives()}")
-        logging.info(f"\tepoch get time {self.epoch_acc_get_time}")
-        logging.info(f"\tepoch cat time {self.epoch_acc_cat_time}")
-        logging.info(f"\tepoc acc time {self.epoch_acc_acc_time}")
-        self.epoch_acc_get_time = 0
-        self.epoch_acc_cat_time = 0
-        self.epoch_acc_acc_time = 0
+            logging.info(f"\nCUMULATED VALUES:")
+            logging.info(f"\tnum_representatives {self.get_num_representatives()}")
+            logging.info(f"epoch time {epoch_time} sec")
+            logging.info(f"\tepoch aug time {self.epoch_aug_time} sec ({self.epoch_aug_time*100/epoch_time}%)")
+            logging.info(f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
+            logging.info(f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
+            logging.info(f"\tepoch cat time {self.epoch_cat_time} sec ({self.epoch_cat_time*100/epoch_time}%)")
+            logging.info(f"\tepoch acc time {self.epoch_acc_time} sec ({self.epoch_acc_time*100/epoch_time}%)")
+        self.epoch_aug_time = 0
+        self.epoch_move_time = 0
+        self.epoch_wait_time = 0
+        self.epoch_cat_time = 0
+        self.epoch_acc_time = 0
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
-        meters["time"] = end - start
+        meters["time"] = epoch_time
         meters["step_count"] = step_count
 
         return meters
@@ -370,7 +393,10 @@ class nil_agent(Agent):
             # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             #torch.cuda.nvtx.range_push("Copy to device")
+            start_move_time = time.time()
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            self.last_batch_move_time = time.time() - start_move_time
+            self.epoch_move_time += self.last_batch_move_time
             # torch.cuda.nvtx.range_pop()
 
             if training:
@@ -379,31 +405,34 @@ class nil_agent(Agent):
                     self.accumulate(x, y)
                 else:
                     self.accumulate(x.cpu(), y.cpu())
-                self.epoch_acc_acc_time += time.time() - start_acc_time
+                self.last_batch_acc_time = time.time() - start_acc_time
+                self.epoch_acc_time += time.time() - self.last_batch_acc_time
 
                 # Get the representatives
-                start_get_time = time.time()
+                start_wait_time = time.time()
                 (
                     rep_values,
                     rep_labels,
                     rep_weights,
                 ) = self.get_samples()
-                self.epoch_acc_get_time += time.time() - start_get_time
+                self.last_batch_wait_time = time.time() - start_wait_time
+                self.epoch_wait_time += self.last_batch_wait_time
                 num_reps = len(rep_values)
 
                 if num_reps > 0:
                     #torch.cuda.nvtx.range_push("Combine batches")
+                    start_cat_time = time.time()
                     rep_values, rep_labels, rep_weights = (
                         move_cuda(rep_values, self.cuda),
                         move_cuda(rep_labels, self.cuda),
                         move_cuda(rep_weights, self.cuda),
                     )
                     # Concatenate the training samples with the representatives
-                    start_cat_time = time.time()
                     w = torch.cat((w, rep_weights))
                     x = torch.cat((x, rep_values))
                     y = torch.cat((y, rep_labels))
-                    self.epoch_acc_cat_time += time.time() - start_cat_time
+                    self.last_batch_cat_time = time.time() - start_cat_time
+                    self.epoch_cat_time += self.last_batch_cat_time
                     # torch.cuda.nvtx.range_pop()
 
                 # Log representatives
