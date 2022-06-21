@@ -10,7 +10,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from data import get_dataset
-from preprocess import get_transform
+from data_loader_dali import DaliDataLoader
+from data_loader import get_transform
 from regime import Regime
 from sampler import MyDistributedSampler
 
@@ -44,7 +45,7 @@ _CONTINUAL_ARGS = {
     "concatenate_tasksets",
 }
 _TRANSFORM_ARGS = {"transform_name"}
-_OTHER_ARGS = {"distributed", "shard"}
+_OTHER_ARGS = {"use_dali", "distributed", "shard"}
 
 
 class DataRegime(object):
@@ -75,17 +76,6 @@ class DataRegime(object):
 
     def get_loader(self, force_update=False):
         if self.loader is None or force_update:
-            if self.config["others"].get("distributed", False):
-                if self.config["others"].get("shard", False):
-                    self.config["loader"]["sampler"] = MyDistributedSampler(
-                        self._data, num_replicas=hvd.size(), rank=hvd.rank()
-                    )
-                else:
-                    self.config["loader"]["sampler"] = DistributedSampler(
-                        self._data, num_replicas=hvd.size(), rank=hvd.rank()
-                    )
-            self.sampler = self.config["loader"].get("sampler", None)
-
             # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
             # issues with Infiniband implementations that are not fork-safe
             if (
@@ -96,7 +86,21 @@ class DataRegime(object):
             ):
                 self.config["loader"]["multiprocessing_context"] = "forkserver"
 
-            self.loader = DataLoader(self._data, **self.config["loader"])
+            if self.config["others"].get("use_dali", False):
+                self.loader = DaliDataLoader(
+                    self._data, self.task_id, **self.config["loader"])
+            else:
+                if self.config["others"].get("distributed", False):
+                    if self.config["others"].get("shard", False):
+                        self.config["loader"]["sampler"] = MyDistributedSampler(
+                            self._data, num_replicas=hvd.size(), rank=hvd.rank()
+                        )
+                    else:
+                        self.config["loader"]["sampler"] = DistributedSampler(
+                            self._data, num_replicas=hvd.size(), rank=hvd.rank()
+                        )
+                    self.sampler = self.config["loader"]["sampler"]
+                self.loader = DataLoader(self._data, **self.config["loader"])
             logging.debug(
                 f"DATA REGIME {self.config['data']['split']} - distributed")
 

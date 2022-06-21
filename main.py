@@ -149,7 +149,7 @@ parser.add_argument(
     help="number of epochs to train (default: 10)",
 )
 parser.add_argument(
-    "--no-evaluate",
+    "--training-only",
     action="store_true",
     help="don't validate between training phases",
 )
@@ -193,6 +193,12 @@ parser.add_argument(
     default=10,
     metavar="N",
     help="how many batches to wait before logging training status",
+)
+parser.add_argument(
+    "--use-dali",
+    action="store_true",
+    default=False,
+    help="use DALI to load data",
 )
 parser.add_argument(
     "--use-amp",
@@ -256,7 +262,7 @@ def main():
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     args.buffer_cuda = args.buffer_cuda and args.cuda
     args.buffer_tensorboard = args.buffer_tensorboard and args.tensorboard
-    args.evaluate = not args.no_evaluate
+    args.evaluate = not args.training_only
 
     mp.set_start_method("spawn")
 
@@ -450,6 +456,7 @@ class Experiment:
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
             "distributed": hvd.size() > 0,
+            "use_dali": self.args.use_dali,
             "pin_memory": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
