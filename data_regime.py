@@ -45,7 +45,7 @@ _CONTINUAL_ARGS = {
     "concatenate_tasksets",
 }
 _TRANSFORM_ARGS = {"transform_name"}
-_OTHER_ARGS = {"use_dali", "distributed", "shard"}
+_OTHER_ARGS = {"use_dali", "use_dali_cuda", "distributed", "shard"}
 
 
 class DataRegime(object):
@@ -88,7 +88,10 @@ class DataRegime(object):
 
             if self.config["others"].get("use_dali", False):
                 self.loader = DaliDataLoader(
-                    self._data, self.task_id, **self.config["loader"])
+                    self._data, self.task_id,
+                    self.config["others"].get("use_dali_cuda", False),
+                    device_id=hvd.local_rank(), shard_id=hvd.rank(),
+                    num_shards=hvd.size(), **self.config["loader"])
             else:
                 if self.config["others"].get("distributed", False):
                     if self.config["others"].get("shard", False):

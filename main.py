@@ -457,6 +457,7 @@ class Experiment:
             "dataset_dir": self.args.dataset_dir,
             "distributed": hvd.size() > 0,
             "use_dali": self.args.use_dali,
+            "use_dali_cuda": self.args.use_dali and self.args.cuda,
             "pin_memory": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
