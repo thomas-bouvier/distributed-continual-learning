@@ -42,7 +42,7 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
-        if self.use_amp:
+        if use_amp:
             try:
                 global amp
                 from apex import amp

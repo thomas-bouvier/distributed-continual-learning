@@ -252,13 +252,14 @@ class nil_agent(Agent):
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
+            torch.cuda.synchronize()
             self.last_batch_load_time = time.time() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
 
-            batch_start = time.time()
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
             )
+            torch.cuda.synchronize()
             batch_time = time.time() - start_batch_time
             epoch_time += batch_time
 
@@ -353,6 +354,7 @@ class nil_agent(Agent):
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
+            torch.cuda.synchronize()
             start_batch_time = time.time()
             start_load_time = start_batch_time
 
