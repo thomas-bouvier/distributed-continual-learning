@@ -4,8 +4,6 @@ import torch
 
 from regime import Regime
 
-from apex import amp
-
 _OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
 
 
@@ -44,8 +42,14 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         hvd.broadcast_parameters(model.state_dict(), root_rank=0)
         hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
-        if use_amp:
-            self.model, self.optimizer = amp.initialize(model, optimizer, opt_level="O1")
+        if self.use_amp:
+            try:
+                global amp
+                from apex import amp
+            except ImportError:
+                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+            self.model, self.optimizer = amp.initialize(
+                model, optimizer, opt_level="O1")
         else:
             self.model = model
             self.optimizer = optimizer

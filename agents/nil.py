@@ -10,8 +10,6 @@ import torch.nn as nn
 import torchvision
 import wandb
 
-from apex import amp
-
 from agents.base import Agent
 from agents.nil_global import nil_global_agent
 from agents.nil_cpp import nil_cpp_agent
@@ -44,6 +42,13 @@ class nil_agent(Agent):
             state_dict,
         )
 
+        if self.use_amp:
+            try:
+                global amp
+                from apex import amp
+            except ImportError:
+                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+
         self.device = "cuda" if self.buffer_cuda else 'cpu'
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -65,12 +70,12 @@ class nil_agent(Agent):
             device=torch.device(get_device(self.cuda)),
         )
 
-        self.epoch_aug_time = 0
+        self.epoch_load_time = 0
         self.epoch_move_time = 0
         self.epoch_wait_time = 0
         self.epoch_cat_time = 0
         self.epoch_acc_time = 0
-        self.last_batch_aug_time = 0
+        self.last_batch_load_time = 0
         self.last_batch_move_time = 0
         self.last_batch_wait_time = 0
         self.last_batch_cat_time = 0
@@ -244,11 +249,11 @@ class nil_agent(Agent):
         step_count = 0
 
         start_batch_time = time.time()
-        start_aug_time = start_batch_time
+        start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
-            self.last_batch_aug_time = time.time() - start_aug_time
-            self.epoch_aug_time += self.last_batch_aug_time
+            self.last_batch_load_time = time.time() - start_load_time
+            self.epoch_load_time += self.last_batch_load_time
 
             batch_start = time.time()
             output, loss = self._step(
@@ -258,11 +263,7 @@ class nil_agent(Agent):
             epoch_time += batch_time
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(
-                output[: y.size(0)],
-                y,
-                topk=(1, min(self.model.num_classes, 5)),
-            )
+            prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
             meters["loss"].update(loss)
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
@@ -284,11 +285,16 @@ class nil_agent(Agent):
                 )
 
                 logging.info(f"batch {i_batch} time {batch_time} sec")
-                logging.info(f"\tbatch aug time {self.last_batch_aug_time} sec ({self.last_batch_aug_time*100/batch_time}%)")
-                logging.info(f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
-                logging.info(f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/batch_time}%)")
-                logging.info(f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/batch_time}%)")
-                logging.info(f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/batch_time}%)")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -317,7 +323,8 @@ class nil_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[
+                                0], self.global_steps
                         )
                         self.writer.add_scalar(
                             "num_representatives",
@@ -341,24 +348,31 @@ class nil_agent(Agent):
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
+                            (self.global_steps,
+                             self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
             start_batch_time = time.time()
-            start_aug_time = start_batch_time
+            start_load_time = start_batch_time
 
         if training:
             self.global_epoch += 1
             logging.info(f"\nCUMULATED VALUES:")
-            logging.info(f"\tnum_representatives {self.get_num_representatives()}")
+            logging.info(
+                f"\tnum_representatives {self.get_num_representatives()}")
             logging.info(f"epoch time {epoch_time} sec")
-            logging.info(f"\tepoch aug time {self.epoch_aug_time} sec ({self.epoch_aug_time*100/epoch_time}%)")
-            logging.info(f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
-            logging.info(f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
-            logging.info(f"\tepoch cat time {self.epoch_cat_time} sec ({self.epoch_cat_time*100/epoch_time}%)")
-            logging.info(f"\tepoch acc time {self.epoch_acc_time} sec ({self.epoch_acc_time*100/epoch_time}%)")
-        self.epoch_aug_time = 0
+            logging.info(
+                f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch cat time {self.epoch_cat_time} sec ({self.epoch_cat_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch acc time {self.epoch_acc_time} sec ({self.epoch_acc_time*100/epoch_time}%)")
+        self.epoch_load_time = 0
         self.epoch_move_time = 0
         self.epoch_wait_time = 0
         self.epoch_cat_time = 0

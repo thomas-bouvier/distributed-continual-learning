@@ -7,8 +7,6 @@ import torch
 import torch.nn as nn
 import wandb
 
-from apex import amp
-
 from agents.base import Agent
 from utils.utils import move_cuda
 from utils.meters import AverageMeter, accuracy
@@ -38,6 +36,9 @@ class icarl_agent(Agent):
             log_interval,
             state_dict,
         )
+
+        if self.use_amp:
+            from apex import amp
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -167,7 +168,8 @@ class icarl_agent(Agent):
                         meters=meters,
                     )
                 )
-                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
+                logging.info(
+                    f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -196,7 +198,8 @@ class icarl_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[
+                                0], self.global_steps
                         )
                     self.writer.flush()
                 if self.watcher is not None:
@@ -210,7 +213,8 @@ class icarl_agent(Agent):
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
+                            (self.global_steps,
+                             self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1

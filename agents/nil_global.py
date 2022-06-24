@@ -10,8 +10,6 @@ import torch.nn as nn
 import torchvision
 import wandb
 
-from apex import amp
-
 from agents.base import Agent
 from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx
 from utils.meters import AverageMeter, accuracy
@@ -41,6 +39,13 @@ class nil_global_agent(Agent):
             log_interval,
             state_dict,
         )
+
+        if self.use_amp:
+            try:
+                global amp
+                from apex import amp
+            except ImportError:
+                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
         if state_dict is not None:
@@ -311,11 +316,7 @@ class nil_global_agent(Agent):
             batch_end = time.time()
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(
-                output[: y.size(0)],
-                y,
-                topk=(1, min(self.model.num_classes, 5)),
-            )
+            prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
             meters["loss"].update(loss)
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
@@ -335,7 +336,8 @@ class nil_global_agent(Agent):
                         meters=meters,
                     )
                 )
-                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
+                logging.info(
+                    f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -364,7 +366,8 @@ class nil_global_agent(Agent):
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[
+                                0], self.global_steps
                         )
                         self.writer.add_scalar(
                             "num_representatives",
@@ -388,7 +391,8 @@ class nil_global_agent(Agent):
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
+                            (self.global_steps,
+                             self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
@@ -436,7 +440,7 @@ class nil_global_agent(Agent):
             #torch.cuda.nvtx.range_push("Copy to device")
             x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
                 y, self.cuda and self.buffer_cuda)            # torch.cuda.nvtx.range_pop()
-            
+
             if training:
                 start_acc_time = time.time()
                 if self.buffer_cuda:

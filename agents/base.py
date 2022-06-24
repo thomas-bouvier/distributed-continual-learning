@@ -6,8 +6,6 @@ import time
 import torch
 import wandb
 
-from apex import amp
-
 from torch.utils.tensorboard import SummaryWriter
 from utils.meters import AverageMeter, accuracy
 from utils.utils import move_cuda
@@ -46,37 +44,52 @@ class Agent:
         self.watcher = None
         self.streams = {}
 
+        if self.use_amp:
+            try:
+                global amp
+                from apex import amp
+            except ImportError:
+                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
             self.initial_snapshot = copy.deepcopy(state_dict)
         else:
             self.initial_snapshot = copy.deepcopy(self.model.state_dict())
 
+        self.epoch_load_time = 0
+        self.epoch_move_time = 0
+        self.last_batch_load_time = 0
+        self.last_batch_move_time = 0
+
     """
     Forward pass for the current epoch
     """
-
     def loop(self, data_regime, average_output=False, training=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
             for metric in ["loss", "prec1", "prec5"]
         }
-        start = time.time()
+        epoch_time = 0
         step_count = 0
 
+        start_batch_time = time.time()
+        start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
+            self.last_batch_load_time = time.time() - start_load_time
+            self.epoch_load_time += self.last_batch_load_time
 
             batch_start = time.time()
             output, loss = self._step(
                 i_batch, x, y, training=training, average_output=average_output
             )
-            batch_end = time.time()
+            batch_time = time.time() - start_batch_time
+            epoch_time += batch_time
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output, y, topk=(
-                1, min(self.model.num_classes, 5)))
+            prec1, prec5 = accuracy(output, y, topk=(1, 5))
             meters["loss"].update(loss)
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
@@ -96,7 +109,12 @@ class Agent:
                         meters=meters,
                     )
                 )
-                logging.info(f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
+
+                logging.info(f"batch {i_batch} time {batch_time} sec")
+                logging.info(
+                    f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/batch_time}%)")
+                logging.info(
+                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
@@ -120,7 +138,8 @@ class Agent:
                     )
                     if training:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[0], self.global_steps
+                            "lr", self.optimizer_regime.get_lr()[
+                                0], self.global_steps
                         )
                     self.writer.flush()
                 if self.watcher is not None:
@@ -134,19 +153,29 @@ class Agent:
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps, self.optimizer_regime.get_lr()[0]),
+                            (self.global_steps,
+                             self.optimizer_regime.get_lr()[0]),
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
-        end = time.time()
+            start_batch_time = time.time()
+            start_load_time = start_batch_time
 
         if training:
             self.global_epoch += 1
+            logging.info(f"\nCUMULATED VALUES:")
+            logging.info(f"epoch time {epoch_time} sec")
+            logging.info(
+                f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
+            logging.info(
+                f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
+        self.epoch_load_time = 0
+        self.epoch_move_time = 0
 
         meters = {name: meter.avg.item() for name, meter in meters.items()}
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
-        meters["time"] = end - start
+        meters["time"] = epoch_time
         meters["step_count"] = step_count
 
         return meters
@@ -170,7 +199,10 @@ class Agent:
         for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
                                        target.chunk(chunk_batch, dim=0))):
             #torch.cuda.nvtx.range_push("Copy to device")
+            start_move_time = time.time()
             x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            self.last_batch_move_time = time.time() - start_move_time
+            self.epoch_move_time += self.last_batch_move_time
             # torch.cuda.nvtx.range_pop()
 
             #torch.cuda.nvtx.range_push("Forward pass")
@@ -178,26 +210,22 @@ class Agent:
             loss = self.criterion(output, y)
             # torch.cuda.nvtx.range_pop()
 
-            if training:
-                #torch.cuda.nvtx.range_push("Optimizer step")
-                if self.use_amp:
-                    with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                        self.optimizer_regime.optimizer.synchronize()
-                    with self.optimizer_regime.optimizer.skip_synchronize():
-                        self.optimizer_regime.step()
-                else:
-                    loss.backward()
+        if training:
+            #torch.cuda.nvtx.range_push("Optimizer step")
+            if self.use_amp:
+                with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
+                    scaled_loss.backward()
+                    self.optimizer_regime.optimizer.synchronize()
+                with self.optimizer_regime.optimizer.skip_synchronize():
                     self.optimizer_regime.step()
-                # torch.cuda.nvtx.range_pop()
-                self.global_steps += 1
-                self.steps += 1
+            else:
+                loss.backward()
+                self.optimizer_regime.step()
+            # torch.cuda.nvtx.range_pop()
+            self.global_steps += 1
+            self.steps += 1
 
-            outputs.append(output.detach())
-            total_loss += loss.item()
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
+        return output, loss
 
     def train(self, data_regime, average_output=False):
         # switch to train mode
