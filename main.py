@@ -15,7 +15,8 @@ from ast import literal_eval
 from datetime import datetime
 from os import path, makedirs
 
-import models
+import torchvision.models as models
+#import models
 import agents
 
 from argparse import Namespace
