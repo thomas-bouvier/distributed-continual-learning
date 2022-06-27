@@ -16,6 +16,7 @@ https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/frameworks/py
 https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/general/data_loading/parallel_external_source.html
 """
 
+# TODO: pipeline validation
 
 class ExternalInputCallable:
     def __init__(self, taskset, task_id, batch_size, shard_id, num_shards):
@@ -57,8 +58,10 @@ class ExternalInputCallable:
 
 class DaliDataLoader(object):
     def __init__(self, dataset, task_id, cuda, batch_size=1, num_workers=1,
-                 device_id=1, shard_id=0, num_shards=1, **kwargs):
+                 device_id=1, shard_id=0, num_shards=1, precision=32, **kwargs):
         decoder_device, device = ("mixed", "gpu") if cuda else ("cpu", "cpu")
+        img_type = types.FLOAT16 if precision == 16 else types.FLOAT
+
         self.external_data = ExternalInputCallable(
             dataset, task_id, batch_size, shard_id, num_shards)
 
@@ -73,13 +76,13 @@ class DaliDataLoader(object):
             images = fn.random_resized_crop(
                 images, device=device, size=224, random_area=[0.08, 1.25])
             images = fn.crop_mirror_normalize(images, device=device,
-                                              dtype=types.FLOAT,
+                                              dtype=img_type,
                                               output_layout=types.NCHW,
                                               mean=[0.485 * 255, 0.456 *
                                                     255, 0.406 * 255],
                                               std=[0.229 * 255, 0.224 * 255, 0.225 * 255])
             images = fn.random.coin_flip(images, probability=0.5)
-            images = fn.cast(images, dtype=types.FLOAT)
+            images = fn.cast(images, dtype=img_type)
             return images, target, task_ids
 
         pipeline = callable_pipeline()

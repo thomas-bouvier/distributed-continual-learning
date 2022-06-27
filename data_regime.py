@@ -46,6 +46,7 @@ _CONTINUAL_ARGS = {
 }
 _TRANSFORM_ARGS = {"transform_name"}
 _OTHER_ARGS = {
+    "use_amp",
     "use_dali",
     "use_dali_cuda",
     "distributed",
@@ -93,11 +94,12 @@ class DataRegime(object):
                 self.config["loader"]["multiprocessing_context"] = "forkserver"
 
             if self.config["others"].get("use_dali", False):
+                precision = 16 if self.config["others"].get("use_amp", False) else 32
                 self.loader = DaliDataLoader(
                     self._data, self.task_id,
                     self.config["others"].get("use_dali_cuda", False),
                     device_id=hvd.local_rank(), shard_id=hvd.rank(),
-                    num_shards=hvd.size(), precision=32,
+                    num_shards=hvd.size(), precision=precision,
                     **self.config["loader"])
             else:
                 if self.config["others"].get("distributed", False):
