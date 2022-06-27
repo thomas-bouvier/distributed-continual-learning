@@ -55,15 +55,10 @@ class icarl_v1_agent(Agent):
                 global amp
                 from apex import amp
             except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+                raise ImportError(
+                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
 
-        if state_dict is not None:
-            self.model.load_state_dict(state_dict)
-
-        # Modified parameters
         self.num_exemplars = 0
-        self.memory_size = config.get(
-            "num_representatives", 6000) * model.num_classes
         self.num_candidates = config.get("num_candidates", 20)
 
         # memory
@@ -77,6 +72,11 @@ class icarl_v1_agent(Agent):
         self.kl = nn.KLDivLoss(reduction="batchmean")
         self.lsm = nn.LogSoftmax(dim=1)
         self.sm = nn.Softmax(dim=1)
+
+    def before_all_tasks(self, train_data_regime):
+        self.num_classes = train_data_regime.num_classes
+        self.memory_size = config.get(
+            "num_representatives", 6000) * self.num_classes
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -102,7 +102,7 @@ class icarl_v1_agent(Agent):
         # Create mask so the loss is only used for classes learnt during this task
         #torch.cuda.nvtx.range_push("Create mask")
         self.nc = set([data[1] for data in train_data_regime.get_data()])
-        mask = torch.tensor([False for _ in range(self.model.num_classes)])
+        mask = torch.tensor([False for _ in range(self.num_classes)])
         for y in self.nc:
             mask[y] = True
         self.mask = move_cuda(mask.float(), self.cuda)
@@ -129,7 +129,7 @@ class icarl_v1_agent(Agent):
     Forward pass for the current epoch
     """
 
-    def loop(self, data_regime, average_output=False, training=False):
+    def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -171,7 +171,7 @@ class icarl_v1_agent(Agent):
 
             batch_start = time.time()
             output, loss = self._step(
-                i_batch, x, y, training=training, average_output=average_output
+                i_batch, x, y, training=training
             )
             batch_end = time.time()
 
@@ -270,7 +270,6 @@ class icarl_v1_agent(Agent):
         target,
         training=False,
         distill=False,
-        average_output=False,
         chunk_batch=1,
     ):
         outputs = []
@@ -363,7 +362,7 @@ class icarl_v1_agent(Agent):
             for ss in range(ns):
                 classpred[ss] = torch.argmin(dist[ss])
 
-            out = move_cuda(torch.zeros(ns, self.model.num_classes), self.cuda)
+            out = move_cuda(torch.zeros(ns, self.num_classes), self.cuda)
             for ss in range(ns):
                 out[ss, classpred[ss]] = 1
             return out

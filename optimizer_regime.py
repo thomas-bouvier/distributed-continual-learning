@@ -47,7 +47,8 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
                 global amp
                 from apex import amp
             except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+                raise ImportError(
+                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
             self.model, self.optimizer = amp.initialize(
                 model, optimizer, opt_level="O1")
         else:

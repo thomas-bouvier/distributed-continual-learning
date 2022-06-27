@@ -45,22 +45,27 @@ class nil_global_agent(Agent):
                 global amp
                 from apex import amp
             except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+                raise ImportError(
+                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
-        if state_dict is not None:
-            self.model.load_state_dict(state_dict)
-
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
-        self.counts = torch.tensor([0 for _ in range(model.num_classes)])
+
+        self.epoch_acc_get_time = 0
+        self.epoch_acc_cat_time = 0
+        self.epoch_acc_acc_time = 0
+
+    def before_all_tasks(self, train_data_regime):
+        self.num_classes = train_data_regime.num_classes
+        self.counts = torch.tensor([0 for _ in range(self.num_classes)])
 
         self.global_representatives_x = [
-            [torch.Tensor() for _ in range(model.num_classes)]
+            [torch.Tensor() for _ in range(self.num_classes)]
             for _ in range(hvd.size())
         ]
         self.global_representatives_y = None
@@ -68,13 +73,9 @@ class nil_global_agent(Agent):
         self.global_counts = None
 
         self.mask = torch.as_tensor(
-            [0.0 for _ in range(self.model.num_classes)],
+            [0.0 for _ in range(self.num_classes)],
             device=torch.device(get_device(self.cuda)),
         )
-
-        self.epoch_acc_get_time = 0
-        self.epoch_acc_cat_time = 0
-        self.epoch_acc_acc_time = 0
 
     def get_samples(self):
         """Select or retrieves the representatives from the data
@@ -105,7 +106,7 @@ class nil_global_agent(Agent):
         # representatives for each worker. Indices are ranks.
         global_counts = torch.sum(self.global_counts, dim=1)
         accumulated_counts = len_cumsum(
-            global_counts, self.num_representatives*self.model.num_classes)
+            global_counts, self.num_representatives * self.num_classes)
 
         # [(worker, representative count)]
         idx_worker = [find_2d_idx(accumulated_counts, i.item())
@@ -135,7 +136,7 @@ class nil_global_agent(Agent):
         size = list(x.size())[1:]
         size.insert(0, 0)
         candidates = [torch.empty(*size, device=self.device)
-                      for _ in range(self.model.num_classes)]
+                      for _ in range(self.num_classes)]
 
         previous_counts = copy.deepcopy(self.counts)
         for i in range(len(previous_counts)):
@@ -160,7 +161,7 @@ class nil_global_agent(Agent):
         rm_targets = []
         add_targets = []
         offsets = [0]
-        for label in range(self.model.num_classes):
+        for label in range(self.num_classes):
             offsets.append(offsets[-1] + len(candidates[label]))
 
             representatives_count = previous_counts[label]
@@ -212,7 +213,7 @@ class nil_global_agent(Agent):
             add_targets = global_add_targets[w]
             add_targets = add_targets[add_targets != -1]
 
-            for label in range(self.model.num_classes):
+            for label in range(self.num_classes):
                 lower = offsets[label]
                 upper = offsets[label + 1]
                 if lower == upper:
@@ -233,7 +234,7 @@ class nil_global_agent(Agent):
         self.global_representatives_y = hvd.allgather(torch.tensor(
             [
                 i
-                for i in range(self.model.num_classes)
+                for i in range(self.num_classes)
                 for _ in range(min(self.counts[i], self.num_representatives))
             ]
         ).unsqueeze(0))
@@ -297,7 +298,7 @@ class nil_global_agent(Agent):
     Forward pass for the current epoch
     """
 
-    def loop(self, data_regime, average_output=False, training=False):
+    def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -310,14 +311,14 @@ class nil_global_agent(Agent):
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
 
             output, loss = self._step(
-                i_batch, x, y, training=training, average_output=average_output
+                i_batch, x, y, training=training
             )
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             batch_time = time.time() - start_batch_time
             epoch_time += batch_time
 
@@ -412,7 +413,7 @@ class nil_global_agent(Agent):
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             start_batch_time = time.time()
             start_load_time = start_batch_time
 
@@ -452,7 +453,6 @@ class nil_global_agent(Agent):
         inputs,
         target,
         training=False,
-        average_output=False,
         chunk_batch=1,
     ):
         outputs = []

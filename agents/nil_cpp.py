@@ -50,11 +50,10 @@ class nil_cpp_agent(Agent):
                 global amp
                 from apex import amp
             except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+                raise ImportError(
+                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
-        if state_dict is not None:
-            self.model.load_state_dict(state_dict)
 
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
@@ -62,20 +61,6 @@ class nil_cpp_agent(Agent):
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
-
-        self.sl = rehearsal.StreamLoader(
-            model.num_classes, self.num_representatives, self.num_candidates, ctypes.c_int64(torch.random.initial_seed()).value)
-
-        self.aug_x = None
-        self.aug_y = torch.randint(high=model.num_classes, size=(
-            self.batch_size + self.num_samples,), device=self.device)
-        self.aug_w = torch.zeros(
-            self.batch_size + self.num_samples, device=self.device)
-
-        self.mask = torch.as_tensor(
-            [0.0 for _ in range(self.model.num_classes)],
-            device=torch.device(get_device(self.cuda)),
-        )
 
         self.epoch_load_time = 0
         self.epoch_move_time = 0
@@ -87,6 +72,22 @@ class nil_cpp_agent(Agent):
         self.last_batch_wait_time = 0
         self.last_batch_cat_time = 0
         self.last_batch_acc_time = 0
+
+    def before_all_tasks(self, train_data_regime):
+        self.num_classes = train_data_regime.num_classes
+        self.sl = rehearsal.StreamLoader(
+            self.num_classes, self.num_representatives, self.num_candidates, ctypes.c_int64(torch.random.initial_seed()).value)
+
+        self.aug_x = None
+        self.aug_y = torch.randint(high=self.num_classes, size=(
+            self.batch_size + self.num_samples,), device=self.device)
+        self.aug_w = torch.zeros(
+            self.batch_size + self.num_samples, device=self.device)
+
+        self.mask = torch.as_tensor(
+            [0.0 for _ in range(self.num_classes)],
+            device=torch.device(get_device(self.cuda)),
+        )
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -124,7 +125,7 @@ class nil_cpp_agent(Agent):
     Forward pass for the current epoch
     """
 
-    def loop(self, data_regime, average_output=False, training=False):
+    def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -137,14 +138,14 @@ class nil_cpp_agent(Agent):
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
 
             output, loss = self._step(
-                i_batch, x, y, training=training, average_output=average_output
+                i_batch, x, y, training=training
             )
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             batch_time = time.time() - start_batch_time
             epoch_time += batch_time
 
@@ -239,7 +240,7 @@ class nil_cpp_agent(Agent):
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             start_batch_time = time.time()
             start_load_time = start_batch_time
 
@@ -279,7 +280,6 @@ class nil_cpp_agent(Agent):
         inputs,
         target,
         training=False,
-        average_output=False,
         chunk_batch=1,
     ):
         outputs = []

@@ -321,10 +321,10 @@ class Experiment:
         self.args = args
         self.save_path = save_path
 
-        self._create_agent()
-        self._prepare_dataset()
+        num_classes = self.prepare_dataset()
+        self.create_agent(num_classes)
 
-    def _create_agent(self):
+    def create_agent(self, num_classes=1000):
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
         lr_scaler = (
@@ -339,8 +339,7 @@ class Experiment:
 
         model_name = models.__dict__[self.args.model]
         model_config = {
-            "dataset": self.args.dataset,
-            "lr": self.args.lr * lr_scaler,
+            "num_classes": num_classes,
         }
         if self.args.model_config != "":
             model_config = dict(
@@ -446,7 +445,7 @@ class Experiment:
                 dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
             )
 
-    def _prepare_dataset(self):
+    def prepare_dataset(self):
         tasksets_config = {"continual": bool(self.args.tasksets_config)}
         if self.args.tasksets_config != "":
             tasksets_config = dict(
@@ -474,7 +473,6 @@ class Experiment:
         allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data_regime = DataRegime(
             hvd,
-            getattr(self.agent, "data_regime", None),
             defaults={
                 **defaults,
                 "split": "train",
@@ -486,7 +484,6 @@ class Experiment:
 
         self.test_data_regime = DataRegime(
             hvd,
-            getattr(self.agent, "data_eval_regime", None),
             defaults={
                 **defaults,
                 "split": "validate",
@@ -497,6 +494,8 @@ class Experiment:
         )
         logging.info("Created test data regime: %s",
                      repr(self.test_data_regime))
+
+        return self.train_data_regime.num_classes
 
     @nvtx.annotate("run")
     def run(self):

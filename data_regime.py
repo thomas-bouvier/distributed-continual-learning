@@ -45,17 +45,23 @@ _CONTINUAL_ARGS = {
     "concatenate_tasksets",
 }
 _TRANSFORM_ARGS = {"transform_name"}
-_OTHER_ARGS = {"use_dali", "use_dali_cuda", "distributed", "shard"}
+_OTHER_ARGS = {
+    "use_dali",
+    "use_dali_cuda",
+    "distributed",
+    "shard"
+}
 
 
 class DataRegime(object):
-    def __init__(self, hvd, regime, defaults={}):
-        self.regime = Regime(regime, deepcopy(defaults))
+    def __init__(self, hvd, defaults={}):
+        self.regime = Regime(None, deepcopy(defaults))
         self.hvd = hvd
         self.epoch = 0
         self.task_id = 0
         self.steps = None
         self.tasksets = None
+        self.num_classes = 0
         self.concat_taskset = None
         self.continual_test_taskset = []
         self.sampler = None
@@ -91,7 +97,8 @@ class DataRegime(object):
                     self._data, self.task_id,
                     self.config["others"].get("use_dali_cuda", False),
                     device_id=hvd.local_rank(), shard_id=hvd.rank(),
-                    num_shards=hvd.size(), **self.config["loader"])
+                    num_shards=hvd.size(), precision=32,
+                    **self.config["loader"])
             else:
                 if self.config["others"].get("distributed", False):
                     if self.config["others"].get("shard", False):
@@ -148,6 +155,8 @@ class DataRegime(object):
         return current_taskset
 
     def prepare_tasksets(self):
+        dataset = get_dataset(**self.config["data"])
+        self.num_classes = dataset.num_classes
         if self.config["data"].get("continual", False):
             continual_config = self.config["continual"]
             if continual_config.get("scenario") == "class":
@@ -155,20 +164,20 @@ class DataRegime(object):
                 i = continual_config.get("increment")
 
                 self.tasksets = ClassIncremental(
-                    get_dataset(**self.config["data"]),
+                    dataset,
                     initial_increment=ii,
                     increment=i,
                     transformations=[self.config["data"]["transform"]],
                 )
             else:
                 self.tasksets = InstanceIncremental(
-                    get_dataset(**self.config["data"]),
+                    dataset,
                     nb_tasks=continual_config.get("num_tasks"),
                     transformations=[self.config["data"]["transform"]],
                 )
         else:
             self.tasksets = [
-                get_dataset(**self.config["data"]).to_taskset(
+                dataset.to_taskset(
                     trsf=[self.config["data"]["transform"]]
                 )
             ]

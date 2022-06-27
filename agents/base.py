@@ -8,7 +8,7 @@ import wandb
 
 from torch.utils.tensorboard import SummaryWriter
 from utils.meters import AverageMeter, accuracy
-from utils.utils import move_cuda
+from utils.utils import move_cuda, synchronize_cuda
 
 
 class Agent:
@@ -49,7 +49,8 @@ class Agent:
                 global amp
                 from apex import amp
             except ImportError:
-                raise ImportError("Please install apex from https://www.github.com/nvidia/apex to run this app.")
+                raise ImportError(
+                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -65,7 +66,8 @@ class Agent:
     """
     Forward pass for the current epoch
     """
-    def loop(self, data_regime, average_output=False, training=False):
+
+    def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -78,14 +80,14 @@ class Agent:
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
 
             output, loss = self._step(
-                i_batch, x, y, training=training, average_output=average_output
+                i_batch, x, y, training=training
             )
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             batch_time = time.time() - start_batch_time
             epoch_time += batch_time
 
@@ -159,7 +161,7 @@ class Agent:
                         )
             # torch.cuda.nvtx.range_pop()
             step_count += 1
-            torch.cuda.synchronize()
+            synchronize_cuda(self.cuda)
             start_batch_time = time.time()
             start_load_time = start_batch_time
 
@@ -188,7 +190,6 @@ class Agent:
         inputs,
         target,
         training=False,
-        average_output=False,
         chunk_batch=1,
     ):
         outputs = []
@@ -229,17 +230,17 @@ class Agent:
 
         return output, loss
 
-    def train(self, data_regime, average_output=False):
+    def train(self, data_regime):
         # switch to train mode
         self.model.train()
         self.write_stream("epoch", (self.global_steps, self.epoch))
-        return self.loop(data_regime, average_output=average_output, training=True)
+        return self.loop(data_regime, training=True)
 
-    def validate(self, data_regime, average_output=False):
+    def validate(self, data_regime):
         # switch to evaluate mode
         self.model.eval()
         with torch.no_grad():
-            return self.loop(data_regime, average_output=average_output, training=False)
+            return self.loop(data_regime, training=False)
 
     def before_all_tasks(self, train_data_regime):
         pass
