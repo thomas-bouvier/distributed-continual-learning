@@ -344,7 +344,7 @@ class Experiment:
         if self.args.model_config != "":
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
-        model = model_name(model_config)
+        model = model_name(**model_config)
 
         if self.args.checkpoint:
             if not path.isfile(self.args.checkpoint):

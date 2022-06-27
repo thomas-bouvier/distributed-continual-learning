@@ -74,7 +74,7 @@ class icarl_v1_agent(Agent):
         self.sm = nn.Softmax(dim=1)
 
     def before_all_tasks(self, train_data_regime):
-        self.num_classes = train_data_regime.num_classes
+        super().before_all_tasks(train_data_regime)
         self.memory_size = config.get(
             "num_representatives", 6000) * self.num_classes
 

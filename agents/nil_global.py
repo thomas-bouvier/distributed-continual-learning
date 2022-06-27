@@ -61,7 +61,7 @@ class nil_global_agent(Agent):
         self.epoch_acc_acc_time = 0
 
     def before_all_tasks(self, train_data_regime):
-        self.num_classes = train_data_regime.num_classes
+        super().before_all_tasks(train_data_regime)
         self.counts = torch.tensor([0 for _ in range(self.num_classes)])
 
         self.global_representatives_x = [

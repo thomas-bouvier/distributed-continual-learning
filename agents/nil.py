@@ -76,8 +76,7 @@ class nil_agent(Agent):
         self.last_batch_acc_time = 0
 
     def before_all_tasks(self, train_data_regime):
-        self.num_classes = train_data_regime.num_classes
-
+        super().before_all_tasks(train_data_regime)
         self.mask = torch.as_tensor(
             [0.0 for _ in range(self.num_classes)],
             device=torch.device(get_device(self.cuda)),

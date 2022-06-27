@@ -74,7 +74,7 @@ class nil_cpp_agent(Agent):
         self.last_batch_acc_time = 0
 
     def before_all_tasks(self, train_data_regime):
-        self.num_classes = train_data_regime.num_classes
+        super().before_all_tasks(train_data_regime)
         self.sl = rehearsal.StreamLoader(
             self.num_classes, self.num_representatives, self.num_candidates, ctypes.c_int64(torch.random.initial_seed()).value)
 

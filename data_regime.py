@@ -156,7 +156,6 @@ class DataRegime(object):
 
     def prepare_tasksets(self):
         dataset = get_dataset(**self.config["data"])
-        self.num_classes = dataset.num_classes
         if self.config["data"].get("continual", False):
             continual_config = self.config["continual"]
             if continual_config.get("scenario") == "class":
@@ -181,6 +180,7 @@ class DataRegime(object):
                     trsf=[self.config["data"]["transform"]]
                 )
             ]
+        self.num_classes = self.tasksets[0].nb_classes
 
     def set_epoch(self, epoch):
         logging.debug(
