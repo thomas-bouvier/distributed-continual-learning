@@ -100,6 +100,7 @@ class DataRegime(object):
                     self.config["others"].get("use_dali_cuda", False),
                     device_id=hvd.local_rank(), shard_id=hvd.rank(),
                     num_shards=hvd.size(), precision=precision,
+                    training=self.config["data"].get("split", True) == "train",
                     **self.config["loader"])
             else:
                 if self.config["others"].get("distributed", False):

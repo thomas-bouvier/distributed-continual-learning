@@ -6,3 +6,4 @@ trace.json
 args.json
 min*.py
 *.so
+*.jpg

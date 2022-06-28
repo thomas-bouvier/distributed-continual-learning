@@ -7,8 +7,9 @@ import torch
 import wandb
 
 from torch.utils.tensorboard import SummaryWriter
+
 from utils.meters import AverageMeter, accuracy
-from utils.utils import move_cuda, synchronize_cuda
+from utils.utils import move_cuda, synchronize_cuda, display
 
 
 class Agent:
@@ -79,6 +80,7 @@ class Agent:
         start_batch_time = time.time()
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
+            #display(x, 128, captions=y, cuda=self.cuda)
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
