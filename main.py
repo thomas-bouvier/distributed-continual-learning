@@ -462,6 +462,7 @@ class Experiment:
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
             "shard": self.args.shard,
+            "shuffle": True,
             "continual": tasksets_config.get("continual"),
             "scenario": tasksets_config.get("scenario", "class"),
             "initial_increment": tasksets_config.get("initial_increment", 0),

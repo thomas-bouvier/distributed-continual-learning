@@ -221,7 +221,6 @@ class DataRegime(object):
                             v in config.items() if k in _TRANSFORM_ARGS}
         other_config = {k: v for k, v in config.items() if k in _OTHER_ARGS}
 
-        loader_config.setdefault("shuffle", None)
         transform_config.setdefault("transform_name", data_config["dataset"])
 
         return {
