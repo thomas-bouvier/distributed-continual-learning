@@ -12,10 +12,26 @@ HOROVOD_WITH_PYTORCH=1 HOROVOD_WITH_MPI=1 pip install --no-cache-dir horovod[pyt
 horovodrun --check-build
 ```
 
+Install Thallium dependencies:
+
+```
+git clone -c feature.manyFiles=true https://github.com/spack/spack.git
+```
+
 Datasets should be added in `datasets/`, or using the following:
 
 ```
 ln -s /home/tbouvier/Documents/datasets/ datasets
+```
+
+## Compilation
+
+Compile shared library for use with Python:
+
+```
+. spack/share/spack/setup-env.sh
+spack load mochi-thallium
+make -C cpp_loader/
 ```
 
 ## Usage
