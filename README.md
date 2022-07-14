@@ -4,16 +4,20 @@ Distributed continual learning with Horovod + PyTorch.
 
 ## Installation
 
+Using conda:
+
 ```
-# In your conda env:
+conda create --name horovod-py39 python=3.9
+conda activate horovod-py39
 pip install -r requirements.txt
 pip uninstall horovod
-HOROVOD_WITH_PYTORCH=1 HOROVOD_WITH_MPI=1 pip install --no-cache-dir horovod[pytorch]
+conda install openmpi-mpicc
+HOROVOD_WITHOUT_GLOO=1 HOROVOD_WITHOUT_TENSORFLOW=1 HOROVOD_WITHOUT_MXNET=1 HOROVOD_WITH_MPI=1 HOROVOD_WITH_PYTORCH=1 pip install --no-cache-dir horovod[pytorch]
 horovodrun --check-build
-LD_LIBRARY_PATH=$HOME/.conda/envs/horovod/lib/python3.8/site-packages/torch/lib:$LD_LIBRARY_PATH
+LD_LIBRARY_PATH=$HOME/.conda/envs/horovod-py39/lib/python3.9/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
-Install Thallium dependencies:
+Install Thallium dependencies using spack:
 
 ```
 git clone -c feature.manyFiles=true https://github.com/spack/spack.git --depth 1

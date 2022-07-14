@@ -2,7 +2,7 @@
 #include <iostream>
 #include <tuple>
 
-#include "distributed_stream_loader.hpp"
+#include "stream_loader_provider.hpp"
 
 unsigned int K = 5;
 unsigned int N = 10;
@@ -15,8 +15,6 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: " << argv[0] << " <server_id> [.. <address> <provider_id>]" << std::endl;
         exit(0);
     }
-    tl::engine myClient("tcp://127.0.0.1:1234", THALLIUM_CLIENT_MODE);
-    std::cout << "after client" << std::endl;
     uint16_t server_id = atoi(argv[1]);
     tl::engine myServer("tcp://127.0.0.1:1235", THALLIUM_SERVER_MODE);
     std::cout << "Server running at address " << myServer.self()
@@ -40,7 +38,7 @@ int main(int argc, char** argv) {
         std::cout << "Endpoint " << address << ", " << provider_id << std::endl;
         std::cin.clear();
     }
-    distributed_stream_loader_t sl(myServer, server_id, K, N, C, seed, endpoints);
+    stream_loader_provider_t sl(myServer, server_id, K, N, C, seed, endpoints);
 
     torch::Tensor aug_samples = torch::zeros({N + R, 3, 224, 224});
     torch::Tensor aug_labels = torch::randint(K, {N + R});
