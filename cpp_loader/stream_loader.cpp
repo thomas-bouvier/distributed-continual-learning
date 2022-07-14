@@ -28,7 +28,7 @@ void stream_loader_t::async_process() {
         assert(batch.labels.dim() == 1 && batch_size == batch.labels.sizes()[0]
             && batch.aug_samples.dim() > 0 && batch.aug_labels.dim() == 1);
         int R = batch.aug_samples.sizes()[0] - batch_size;
-        std::uniform_int_distribution<unsigned int> dice(0, N + R);
+        // TODO: N+R seems wrong
         assert(R > 0 && R + batch_size == batch.aug_labels.sizes()[0]
             && R + batch_size == batch.aug_weights.sizes()[0]);
 
@@ -41,6 +41,7 @@ void stream_loader_t::async_process() {
 
         // selection without replacement
         // get_samples in Python
+        std::uniform_int_distribution<unsigned int> dice(0, N + R);
         std::unordered_map<int, std::unordered_set<int>> choices;
         int i = batch_size, choices_size = 0;
         while (i < batch_size + R && rehearsal_size - choices_size > 0) {
@@ -61,6 +62,7 @@ void stream_loader_t::async_process() {
             i++;
         }
         batch.aug_size = i;
+
         lock.lock();
         response_queue.emplace_back(batch);
         lock.unlock();

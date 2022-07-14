@@ -10,12 +10,24 @@ pip install -r requirements.txt
 pip uninstall horovod
 HOROVOD_WITH_PYTORCH=1 HOROVOD_WITH_MPI=1 pip install --no-cache-dir horovod[pytorch]
 horovodrun --check-build
+LD_LIBRARY_PATH=$HOME/.conda/envs/horovod/lib/python3.8/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
 Install Thallium dependencies:
 
 ```
-git clone -c feature.manyFiles=true https://github.com/spack/spack.git
+git clone -c feature.manyFiles=true https://github.com/spack/spack.git --depth 1
+. spack/share/spack/setup-env.sh
+spack load mochi-thallium
+```
+
+Install Open Fabric Interfaces:
+
+```
+git clone https://github.com/ofiwg/libfabric.git --depth 1
+./autogen.sh
+./configure --prefix=/opt/libfabric --enable-debug --enable-tcp=dl --enable-rxm=dl && make -j 32 && sudo make install
+LD_LIBRARY_PATH=/opt/libfabric/lib:/opt/libfabric/lib/libfabric:$LD_LIBRARY_PATH
 ```
 
 Datasets should be added in `datasets/`, or using the following:

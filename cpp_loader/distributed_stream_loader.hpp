@@ -1,17 +1,19 @@
-#ifndef __STREAM_LOADER
-#define __STREAM_LOADER
+#ifndef __distributed_stream_loader
+#define __distributed_stream_loader
 
 #include <torch/extension.h>
+#include <thallium.hpp>
 #include <unordered_map>
 #include <iostream>
-#include <tuple>
 #include <random>
+
+namespace tl = thallium;
 
 typedef std::vector<torch::Tensor> buffer_t;
 typedef std::unordered_map<int, std::pair<double, buffer_t>> rehearsal_map_t;
 typedef std::unordered_map<int, int> rehearsal_counts_t;
 
-class stream_loader_t {
+class distributed_stream_loader_t : public tl::provider<distributed_stream_loader_t> {
     const size_t MAX_QUEUE_SIZE = 1024;
 
     unsigned int K, N, C;
@@ -34,11 +36,20 @@ class stream_loader_t {
     std::condition_variable request_cond;
     std::thread async_thread;
 
-    void async_process();
-public:
-    stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed);
-    ~stream_loader_t();
+    rehearsal_map_t selected_samples;
+    std::vector<tl::endpoint> provider_handles;
+    tl::remote_procedure get_samples_procedure;
 
+    void async_process();
+
+public:
+    distributed_stream_loader_t(tl::engine& e, uint16_t provider_id,
+        unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed,
+        const std::vector<std::pair<std::string, int>>& endpoints);
+    ~distributed_stream_loader_t();
+
+    void get_remote_samples(const tl::request& req, unsigned int index);
+    void get_samples(unsigned int index);
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
             const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);
     int wait();
