@@ -2,7 +2,7 @@
 #include <iostream>
 #include <tuple>
 
-#include "stream_loader_provider.hpp"
+#include "distributed_stream_loader.hpp"
 
 unsigned int K = 5;
 unsigned int N = 10;
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
         std::cout << "Endpoint " << address << ", " << provider_id << std::endl;
         std::cin.clear();
     }
-    stream_loader_provider_t sl(myServer, server_id, K, N, C, seed, endpoints);
+    distributed_stream_loader_t sl(myServer, server_id, K, N, C, seed, endpoints);
 
     torch::Tensor aug_samples = torch::zeros({N + R, 3, 224, 224});
     torch::Tensor aug_labels = torch::randint(K, {N + R});
