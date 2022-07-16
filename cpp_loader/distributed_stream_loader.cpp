@@ -6,7 +6,7 @@
 #include <thallium/serialization/stl/unordered_map.hpp>
 #include <thallium/serialization/stl/pair.hpp>
 #include <thallium/serialization/stl/vector.hpp>
-//#include <torch/serialize.h>
+#include <cereal/types/string.hpp>
 
 #define __DEBUG
 #include "debug.hpp"
@@ -205,15 +205,16 @@ distributed_stream_loader_t::~distributed_stream_loader_t() {
 }
 
 namespace cereal {
-template<typename A>
-void save(A& ar, const torch::Tensor& x) {
-    ar(x);
-    //torch::save(x, ar);
+template<typename A> void save(A& ar, const torch::Tensor& t) {
+    std::stringstream ss;
+    torch::save(t, ss);
+    ar(ss.str());
 }
 
-template<typename A>
-void load(A& ar, torch::Tensor& x) {
-    ar(x);
-    //torch::load(x, ar);
+template<typename A> void load(A& ar, torch::Tensor& t) {
+    std::string s;
+    ar(s);
+    std::stringstream ss(s);
+    torch::load(t, ss);
 }
 }
