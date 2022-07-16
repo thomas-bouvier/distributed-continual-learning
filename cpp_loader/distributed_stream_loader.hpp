@@ -36,8 +36,6 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
     std::condition_variable request_cond;
     std::thread async_thread;
 
-    tl::engine myServer;
-
     rehearsal_map_t selected_samples;
     std::vector<tl::endpoint> provider_handles;
     tl::remote_procedure get_samples_procedure;
@@ -47,9 +45,8 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
     void async_process();
 
 public:
-    distributed_stream_loader_t(tl::engine& e, uint16_t provider_id,
-        unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed,
-        const std::vector<std::pair<std::string, int>>& endpoints);
+    distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed,
+        uint16_t server_id, const std::vector<std::pair<std::string, int>>& endpoints);
     ~distributed_stream_loader_t();
 
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,

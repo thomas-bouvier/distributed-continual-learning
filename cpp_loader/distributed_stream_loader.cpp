@@ -13,12 +13,15 @@
 
 using namespace torch::indexing;
 
-distributed_stream_loader_t::distributed_stream_loader_t(tl::engine& e,
-    uint16_t server_id, unsigned int _K, unsigned int _N, unsigned int _C,
-    int64_t seed, const std::vector<std::pair<std::string, int>>& endpoints)
-        : tl::provider<distributed_stream_loader_t>(e, server_id), K(_K), N(_N),
+tl::engine myServer("tcp", THALLIUM_SERVER_MODE);
+
+distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C,
+    int64_t seed, uint16_t server_id, const std::vector<std::pair<std::string, int>>& endpoints)
+        : tl::provider<distributed_stream_loader_t>(myServer, server_id), K(_K), N(_N),
         C(_C), rand_gen(seed),
         async_thread(&distributed_stream_loader_t::async_process, this) {
+    std::cout << "Server running at address " << myServer.self()
+        << " with provider id " << server_id << std::endl;
     define("get_samples", &distributed_stream_loader_t::get_remote_samples);
 
     if (endpoints.size() > 0) {

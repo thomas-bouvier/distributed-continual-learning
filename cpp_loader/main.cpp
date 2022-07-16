@@ -16,10 +16,6 @@ int main(int argc, char** argv) {
         exit(0);
     }
     uint16_t server_id = atoi(argv[1]);
-    tl::engine myServer("tcp://127.0.0.1:1235", THALLIUM_SERVER_MODE);
-    std::cout << "Server running at address " << myServer.self()
-        << " with provider id " << server_id << std::endl;
-
     std::vector<std::pair<std::string, int>> endpoints;
     for (int i = 2; i < argc; i += 2) {
         auto endpoint = std::make_pair<>(std::string(argv[i]), atoi(argv[i + 1]));
@@ -38,7 +34,7 @@ int main(int argc, char** argv) {
         std::cout << "Endpoint " << address << ", " << provider_id << std::endl;
         std::cin.clear();
     }
-    distributed_stream_loader_t sl(myServer, server_id, K, N, C, seed, endpoints);
+    distributed_stream_loader_t sl(K, N, C, seed, server_id, endpoints);
 
     torch::Tensor aug_samples = torch::zeros({N + R, 3, 224, 224});
     torch::Tensor aug_labels = torch::randint(K, {N + R});
@@ -50,25 +46,25 @@ int main(int argc, char** argv) {
         return std::make_tuple<>(samples, labels);
     };
 
-    std::cout << myServer.self() << ": Round 1" << std::endl;
+    std::cout << "Round 1" << std::endl;
     auto batch = random_batch();
     sl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
-    int size = sl.wait();
+    //int size = sl.wait();
     //std::cout << "size: " << size << std::endl;
     //std::cout << size << ", " << std::get<0>(batch) << ", " << aug_samples << std::endl;
 
-    std::cout << myServer.self() << ": Round 2" << std::endl;
+    std::cout << "Round 2" << std::endl;
     batch = random_batch();
     sl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
-    size = sl.wait();
+    //size = sl.wait();
     //std::cout << "size: " << size << std::endl;
     //std::cout << size << ", " << std::get<0>(batch) << ", " << aug_samples << std::endl;
 
     for (int i = 3; i < 1000; i++) {
-        std::cout << myServer.self() << ": Round " << i << std::endl;
+        std::cout << "Round " << i << std::endl;
         batch = random_batch();
         sl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
-        size = sl.wait();
+        //size = sl.wait();
         //std::cout << "size: " << size << std::endl;
     }
 
