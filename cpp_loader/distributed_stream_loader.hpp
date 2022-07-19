@@ -32,13 +32,15 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
         queue_item_t() { }
     };
     std::deque<queue_item_t> request_queue, response_queue;
-    std::mutex request_mutex;
-    std::condition_variable request_cond;
-    std::thread async_thread;
+    tl::mutex request_mutex;
+    tl::condition_variable request_cond;
+    tl::managed<tl::xstream> xstream;
+    tl::managed<tl::thread> async_thread;
 
     rehearsal_map_t selected_samples;
-    std::vector<tl::endpoint> provider_handles;
+    std::vector<tl::provider_handle> provider_handles;
     tl::remote_procedure get_samples_procedure;
+
     void get_samples(unsigned int index);
     void get_remote_samples(const tl::request& req, unsigned int index);
 
@@ -48,6 +50,7 @@ public:
     distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed,
         uint16_t server_id, const std::vector<std::pair<std::string, int>>& endpoints);
     ~distributed_stream_loader_t();
+    void add_endpoints(const std::vector<std::pair<std::string, int>>& endpoints);
 
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
             const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);

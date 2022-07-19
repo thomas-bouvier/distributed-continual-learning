@@ -22,6 +22,8 @@ int main(int argc, char** argv) {
         endpoints.push_back(endpoint);
         std::cout << "Endpoint " << endpoint.first << ", " << endpoint.second << std::endl;
     }
+    distributed_stream_loader_t dsl(K, N, C, seed, server_id, endpoints);
+
     while (true) {
         std::string address;
         int provider_id;
@@ -34,7 +36,7 @@ int main(int argc, char** argv) {
         std::cout << "Endpoint " << address << ", " << provider_id << std::endl;
         std::cin.clear();
     }
-    distributed_stream_loader_t sl(K, N, C, seed, server_id, endpoints);
+    dsl.add_endpoints(endpoints);\
 
     torch::Tensor aug_samples = torch::zeros({N + R, 3, 224, 224});
     torch::Tensor aug_labels = torch::randint(K, {N + R});
@@ -48,24 +50,23 @@ int main(int argc, char** argv) {
 
     std::cout << "Round 1" << std::endl;
     auto batch = random_batch();
-    sl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
-    //int size = sl.wait();
-    //std::cout << "size: " << size << std::endl;
-    //std::cout << size << ", " << std::get<0>(batch) << ", " << aug_samples << std::endl;
+
+    dsl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
+    int size = dsl.wait();
+    std::cout << "size: " << size << std::endl;
 
     std::cout << "Round 2" << std::endl;
     batch = random_batch();
-    sl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
-    //size = sl.wait();
-    //std::cout << "size: " << size << std::endl;
-    //std::cout << size << ", " << std::get<0>(batch) << ", " << aug_samples << std::endl;
+    dsl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
+    size = dsl.wait();
+    std::cout << "size: " << size << std::endl;
 
     for (int i = 3; i < 1000; i++) {
         std::cout << "Round " << i << std::endl;
         batch = random_batch();
-        sl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
-        //size = sl.wait();
-        //std::cout << "size: " << size << std::endl;
+        dsl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
+        size = dsl.wait();
+        std::cout << "size: " << size << std::endl;
     }
 
     return 0;

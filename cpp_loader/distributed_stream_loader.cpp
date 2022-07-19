@@ -18,30 +18,38 @@ tl::engine myServer("tcp", THALLIUM_SERVER_MODE);
 distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C,
     int64_t seed, uint16_t server_id, const std::vector<std::pair<std::string, int>>& endpoints)
         : tl::provider<distributed_stream_loader_t>(myServer, server_id), K(_K), N(_N),
-        C(_C), rand_gen(seed),
-        async_thread(&distributed_stream_loader_t::async_process, this) {
+        C(_C), rand_gen(seed) {
     std::cout << "Server running at address " << myServer.self()
         << " with provider id " << server_id << std::endl;
     define("get_samples", &distributed_stream_loader_t::get_remote_samples);
 
-    if (endpoints.size() > 0) {
-        provider_handles.reserve(endpoints.size());
-        std::cout << "before myClient" << std::endl;
-        tl::engine myClient("tcp", THALLIUM_CLIENT_MODE);
-        std::cout << "myClient" << std::endl;
-        get_samples_procedure = myClient.define("get_samples");
+    tl::managed<tl::xstream> es = tl::xstream::create();
+    xstream = std::move(es);
+    tl::managed<tl::thread> thread = xstream->make_thread([this]() {
+        async_process();
+    });
+    async_thread = std::move(thread);
 
-        for (const auto& endpoint : endpoints) {
-            std::cout << "Looking up " << endpoint.first << ", " << endpoint.second << std::endl;
-            tl::endpoint server = myClient.lookup(endpoint.first);
-            provider_handles.push_back(tl::provider_handle(server, endpoint.second));
-        }
+    if (endpoints.size() > 0) {
+        add_endpoints(endpoints);
+    }
+}
+
+void distributed_stream_loader_t::add_endpoints(const std::vector<std::pair<std::string, int>>& endpoints) {
+    if (provider_handles.size() == 0) {
+        get_samples_procedure = myServer.define("get_samples");
+    }
+    provider_handles.reserve(provider_handles.size() + endpoints.size());
+    for (auto endpoint : endpoints) {
+        std::cout << "Looking up " << endpoint.first << ", " << endpoint.second << std::endl;
+        tl::endpoint server = myServer.lookup(endpoint.first);
+        provider_handles.emplace_back(tl::provider_handle(server, endpoint.second));
     }
 }
 
 void distributed_stream_loader_t::async_process() {
     while (true) {
-        std::unique_lock<std::mutex> lock(request_mutex);
+        std::unique_lock<tl::mutex> lock(request_mutex);
         while (request_queue.empty())
             request_cond.wait(lock);
         auto batch = request_queue.front();
@@ -84,11 +92,12 @@ void distributed_stream_loader_t::async_process() {
         for (size_t i = 0; i < choices.size(); i++) {
             int global_index = choices[i];
             int local_index = global_index % (K * N);
-            size_t remote_node = global_index / (K * N);
-            assert(remote_node >= 0 && remote_node < (provider_handles.size() + 1));
+            size_t node = global_index / (K * N);
+            assert(node >= 0 && node < (provider_handles.size() + 1));
             // choose remote node
-            if (remote_node > 0) {
-                tl::provider_handle ph = provider_handles[remote_node];
+            if (node > 0) {
+                size_t remote_index = node - 1;
+                tl::provider_handle& ph = provider_handles[remote_index];
                 rehearsal_map_t samples = get_samples_procedure.on(ph)(local_index);
                 for (const auto& it : samples) {
                     for (const auto& sample : it.second.second) {
@@ -145,6 +154,7 @@ void distributed_stream_loader_t::async_process() {
 }
 
 void distributed_stream_loader_t::get_remote_samples(const tl::request& req, unsigned int index) {
+    std::cout << "Sending samples to remote node" << std::endl;
     get_samples(index);
     req.respond(selected_samples);
 }
@@ -169,7 +179,7 @@ void distributed_stream_loader_t::get_samples(unsigned int index) {
 
 void distributed_stream_loader_t::accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
                  const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights) {
-    std::unique_lock<std::mutex> lock(request_mutex);
+    std::unique_lock<tl::mutex> lock(request_mutex);
     while (request_queue.size() == MAX_QUEUE_SIZE)
         request_cond.wait(lock);
     request_queue.emplace_back(queue_item_t(samples, labels, aug_samples, aug_labels, aug_weights));
@@ -178,7 +188,7 @@ void distributed_stream_loader_t::accumulate(const torch::Tensor &samples, const
 }
 
 int distributed_stream_loader_t::wait() {
-    std::unique_lock<std::mutex> lock(request_mutex);
+    std::unique_lock<tl::mutex> lock(request_mutex);
     while (response_queue.empty())
         request_cond.wait(lock);
     auto batch = response_queue.front();
@@ -195,11 +205,11 @@ size_t distributed_stream_loader_t::get_history_count() {
 }
 
 distributed_stream_loader_t::~distributed_stream_loader_t() {
-    std::unique_lock<std::mutex> lock(request_mutex);
+    std::unique_lock<tl::mutex> lock(request_mutex);
     request_queue.push_back(queue_item_t());
     lock.unlock();
     request_cond.notify_one();
-    async_thread.join();
+    async_thread->join();
 
     get_engine().wait_for_finalize();
 }
