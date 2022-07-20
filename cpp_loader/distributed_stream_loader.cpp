@@ -13,14 +13,17 @@
 
 using namespace torch::indexing;
 
-tl::engine myServer("tcp", THALLIUM_SERVER_MODE);
 
 distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C,
-    int64_t seed, uint16_t server_id, const std::vector<std::pair<std::string, int>>& endpoints)
-        : tl::provider<distributed_stream_loader_t>(myServer, server_id), K(_K), N(_N),
+    int64_t seed, uint16_t server_id, const std::string& server_address,
+    const std::vector<std::pair<int, std::string>>& endpoints)
+        : tl::provider<distributed_stream_loader_t>([](uint16_t provider_id, const std::string& address) -> tl::engine& {
+            static tl::engine myServer(address, THALLIUM_SERVER_MODE);
+            std::cout << "Server running at address " << myServer.self()
+                << " with provider id " << provider_id << std::endl;
+            return myServer;
+        }(server_id, server_address), server_id), K(_K), N(_N),
         C(_C), rand_gen(seed) {
-    std::cout << "Server running at address " << myServer.self()
-        << " with provider id " << server_id << std::endl;
     define("get_samples", &distributed_stream_loader_t::get_remote_samples);
 
     tl::managed<tl::xstream> es = tl::xstream::create();
@@ -29,21 +32,20 @@ distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsign
         async_process();
     });
     async_thread = std::move(thread);
-
     if (endpoints.size() > 0) {
         add_endpoints(endpoints);
     }
 }
 
-void distributed_stream_loader_t::add_endpoints(const std::vector<std::pair<std::string, int>>& endpoints) {
+void distributed_stream_loader_t::add_endpoints(const std::vector<std::pair<int, std::string>>& endpoints) {
     if (provider_handles.size() == 0) {
-        get_samples_procedure = myServer.define("get_samples");
+        get_samples_procedure = get_engine().define("get_samples");
     }
     provider_handles.reserve(provider_handles.size() + endpoints.size());
     for (auto endpoint : endpoints) {
-        std::cout << "Looking up " << endpoint.first << ", " << endpoint.second << std::endl;
-        tl::endpoint server = myServer.lookup(endpoint.first);
-        provider_handles.emplace_back(tl::provider_handle(server, endpoint.second));
+        std::cout << "Looking up " << endpoint.second << ", " << endpoint.first << std::endl;
+        tl::endpoint server = get_engine().lookup(endpoint.second);
+        provider_handles.emplace_back(tl::provider_handle(server, endpoint.first));
     }
 }
 

@@ -1,6 +1,6 @@
 MAIN=rehearsal
 SOURCES=rehearsal.cpp stream_loader.cpp distributed_stream_loader.cpp
-FLAGS=-O3 -Wall -shared -std=c++14 -fPIC
+FLAGS=-O3 -Wall -std=c++14 -fPIC -D_GLIBCXX_USE_CXX11_ABI=0
 
 # Bogdan:
 #TORCH_ROOT?=$(HOME)/.local/lib/python3.10/site-packages/torch
@@ -12,13 +12,13 @@ THALLIUM_INCLUDE?=$(shell pkg-config --cflags-only-I thallium)
 THALLIUM_LIBS?=$(shell pkg-config --libs thallium)
 
 INCLUDES=$(shell python -m pybind11 --includes) $(TORCH_INCLUDE) $(THALLIUM_INCLUDE)
-LIBS=-L$(TORCH_ROOT)/lib -ltorch $(THALLIUM_LIBS)
+LIBS=-L$(TORCH_ROOT)/lib -ltorch $(THALLIUM_LIBS) -lc10 -ltorch_cpu
 EXT=$(shell python3-config --extension-suffix)
 CC=g++
 
 all:
-	$(CC) $(FLAGS) $(INCLUDES) $(SOURCES) -o $(MAIN)$(EXT) $(LIBS)
+	$(CC) -shared $(FLAGS) $(INCLUDES) $(SOURCES) -o $(MAIN)$(EXT) $(LIBS)
 test:
-	$(CC) -O3 -Wall -g -std=c++14 -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 $(INCLUDES) distributed_stream_loader.cpp main.cpp -o $(MAIN) $(LIBS) -lc10 -ltorch_cpu
+	$(CC) -g $(FLAGS) $(INCLUDES) distributed_stream_loader.cpp main.cpp -o $(MAIN) $(LIBS)
 clean:
 	rm -rf $(MAIN)*.so *~

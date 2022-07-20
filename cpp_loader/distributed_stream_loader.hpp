@@ -48,9 +48,10 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
 
 public:
     distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed,
-        uint16_t server_id, const std::vector<std::pair<std::string, int>>& endpoints);
+        uint16_t server_id, const std::string& server_address,
+        const std::vector<std::pair<int, std::string>>& endpoints);
     ~distributed_stream_loader_t();
-    void add_endpoints(const std::vector<std::pair<std::string, int>>& endpoints);
+    void add_endpoints(const std::vector<std::pair<int, std::string>>& endpoints);
 
     void accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
             const torch::Tensor &aug_samples, const torch::Tensor &aug_labels, const torch::Tensor &aug_weights);
