@@ -10,7 +10,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from data import get_dataset
-from data_loader_dali import DaliDataLoader
 from data_loader import get_transform
 from regime import Regime
 from sampler import MyDistributedSampler
@@ -69,6 +68,15 @@ class DataRegime(object):
         self.loader = None
         self.config = self.get_config()
         self.get_data(True)
+
+        if self.config["others"].get("use_dali", False):
+            try:
+                global DaliDataLoader
+                from data_loader_dali import DaliDataLoader
+            except ImportError:
+                raise ImportError(
+                    "Please install NVIDIA DALI to run this app.")
+
 
     def get_data(self, force_update=False):
         if force_update or self.regime.update(self.epoch, self.steps):

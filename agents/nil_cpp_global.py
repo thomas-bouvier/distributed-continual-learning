@@ -10,15 +10,17 @@ import torch.nn as nn
 import torchvision
 import wandb
 
+import ctypes
+from cpp_loader import rehearsal
+
 from agents.base import Agent
-from agents.nil_cpp import nil_cpp_agent
-from agents.nil_global import nil_global_agent
-from agents.nil_cpp_global import nil_cpp_global_agent
-from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx
+from utils.utils import get_device, move_cuda, plot_representatives
 from utils.meters import AverageMeter, accuracy
 
+from bisect import bisect
 
-class nil_agent(Agent):
+
+class nil_cpp_global_agent(Agent):
     def __init__(
         self,
         model,
@@ -31,7 +33,7 @@ class nil_agent(Agent):
         log_interval,
         state_dict=None,
     ):
-        super(nil_agent, self).__init__(
+        super(nil_cpp_global_agent, self).__init__(
             model,
             use_amp,
             config,
@@ -59,11 +61,6 @@ class nil_agent(Agent):
         self.batch_size = config.get("batch_size")
 
         self.num_reps = 0
-        self.counts = {}
-
-        self.representatives_x = {}
-        self.representatives_y = None
-        self.representatives_w = None
 
         self.epoch_load_time = 0
         self.epoch_move_time = 0
@@ -78,132 +75,35 @@ class nil_agent(Agent):
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
+
+        port = 1234 + hvd.rank()
+        remote_nodes = []
+        remote_ips = self.config.get("remote_nodes", "")
+        if remote_ips:
+            for ip in remote_ips.split(','):
+                address_and_port = ip.split(':')
+                if len(address_and_port) == 3 and int(address_and_port[2]) == port:
+                    continue
+                remote_nodes.append((int(address_and_port[2]) - 1234, ip))
+        logging.debug(f"Remote nodes to sample from: {remote_nodes}")
+        self.dsl = rehearsal.DistributedStreamLoader(
+            self.num_classes, self.num_representatives, self.num_candidates,
+            ctypes.c_int64(torch.random.initial_seed()).value,
+            ctypes.c_uint16(hvd.rank()).value,
+            f"tcp://127.0.0.1:{port}",
+            remote_nodes
+        )
+
+        self.aug_x = None
+        self.aug_y = torch.randint(high=self.num_classes, size=(
+            self.batch_size + self.num_samples,), device=self.device)
+        self.aug_w = torch.zeros(
+            self.batch_size + self.num_samples, device=self.device)
+
         self.mask = torch.as_tensor(
             [0.0 for _ in range(self.num_classes)],
             device=torch.device(get_device(self.cuda)),
         )
-
-    def get_samples(self):
-        """Select or retrieve the representatives from the data
-
-        :return: a list of num_samples representatives.
-        """
-        if self.num_reps == 0:
-            return [], [], []
-
-        repr_list = torch.randperm(self.num_reps)
-        while len(repr_list) < self.num_samples:
-            repr_list = torch.cat((repr_list, torch.randperm(self.num_reps)))
-        repr_list = repr_list[: self.num_samples]
-
-        # Accumulated sum of representative list lengths
-        def len_cumsum():
-            counts = copy.deepcopy(self.counts)
-            all_classes = [0 for _ in range(max(counts)+1)]
-            for k, v in counts.items():
-                all_classes[k] = min(v, self.num_representatives)
-            return list(itertools.accumulate(all_classes))
-
-        idx_2d = [find_2d_idx(len_cumsum(), i.item()) for i in repr_list]
-        return (
-            torch.stack([self.representatives_x[i1][i2] for i1, i2 in idx_2d]),
-            self.representatives_y[repr_list],
-            self.representatives_w[repr_list],
-        )
-
-    def accumulate(self, x, y):
-        """Modify the representatives list by selecting candidates randomly from
-        the incoming data x and the current list of representatives.
-
-        In this version, we permute indices on r+c and we discard the c last
-        samples.
-        """
-        size = list(x.size())[1:]
-        size.insert(0, 0)
-        candidates = [torch.empty(*size, device=self.device)
-                      for _ in range(self.num_classes)]
-
-        previous_counts = copy.deepcopy(self.counts)
-        for k, v in previous_counts.items():
-            v = min(v, self.num_representatives)
-
-        i = min(self.num_candidates, len(x))
-        rand_candidates = torch.randperm(len(y))
-        x = x.clone()[rand_candidates][:i]
-        y = y.clone()[rand_candidates][:i]
-        labels, c = y.unique(return_counts=True)
-
-        for i in range(len(labels)):
-            label = labels[i].item()
-            self.counts[label] = self.counts.get(label, 0) + c[i].item()
-            candidates = x[(y == label).nonzero(as_tuple=True)[0]]
-
-            representatives_count = previous_counts.get(label, 0)
-            rand_indices = torch.randperm(
-                representatives_count + len(candidates)
-            )[: self.num_representatives]
-            rm = [
-                j for j in range(representatives_count)
-                if j not in rand_indices
-            ]
-            add = [
-                j for j in range(len(candidates))
-                if j + representatives_count in rand_indices
-            ]
-
-            # If not the buffer for current label is not full yet, mark the next
-            # ones as "to be removed"
-            for j in range(max(0, len(add) - len(rm) + 1)):
-                if representatives_count+j < min(self.counts[label], self.num_representatives):
-                    rm += [representatives_count+j]
-            if len(rm) > len(add):
-                rm = rm[:len(add)]
-            assert len(rm) == len(add), f"{len(rm)} == {len(add)}"
-
-            if representatives_count == 0 and len(add) > 0:
-                size = list(candidates[add][0].size())
-                size.insert(0, self.num_representatives)
-                self.representatives_x[label] = torch.empty(*size)
-
-            for r, a in zip(rm, add):
-                self.representatives_x[label][r] = candidates[a]
-
-        self.representatives_y = torch.tensor(
-            [
-                i
-                for i in range(max(self.counts)+1)
-                for _ in range(min(self.counts.get(i, 0), self.num_representatives))
-            ]
-        )
-        self.num_reps = len(self.representatives_y)
-
-        self.recalculate_weights()
-        # for k, v in self.representatives_x.items():
-        #    print(f"label {k} v {v.shape}")
-        #    print(f"counts {self.counts[k]}")
-        # input()
-
-    def recalculate_weights(self):
-        """Reassign the weights of the representatives
-        """
-        total_count = 0
-        for i in range(max(self.counts)+1):
-            total_count += self.counts.get(i, 0)
-
-        # This version proposes that the total weight of representatives is
-        # calculated from the proportion of samples to augment the batch with.
-        # E.g. a batch of 100 images and 10 are num_samples selected,
-        # weight = 10
-        weight = (self.batch_size * 1.0) / \
-            (self.num_samples * len(self.representatives_y))
-        # The weight is adjusted to the proportion between historical candidates
-        # and representatives.
-        ws = []
-        for y in self.representatives_y.unique():
-            y = y.item()
-            w = max(math.log(self.counts[y] * weight), 1.0)
-            ws.append((self.representatives_y == y).float() * w)
-        self.representatives_w = torch.sum(torch.stack(ws), 0)
 
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
@@ -407,69 +307,40 @@ class nil_agent(Agent):
 
         for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
                                        target.chunk(chunk_batch, dim=0))):
-            # Create batch weights
             w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
             #torch.cuda.nvtx.range_push("Copy to device")
             start_move_time = time.time()
-            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+            x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
+                y, self.cuda and self.buffer_cuda)
             self.last_batch_move_time = time.time() - start_move_time
             self.epoch_move_time += self.last_batch_move_time
             # torch.cuda.nvtx.range_pop()
 
-            if training:
-                start_acc_time = time.time()
-                if self.buffer_cuda:
-                    self.accumulate(x, y)
-                else:
-                    self.accumulate(x.cpu(), y.cpu())
-                self.last_batch_acc_time = time.time() - start_acc_time
-                self.epoch_acc_time += time.time() - self.last_batch_acc_time
+            if self.aug_x is None:
+                size = list(x.size())[1:]
+                self.aug_x = torch.zeros(
+                    self.batch_size + self.num_samples, *size, device=self.device)
+                self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
+            if training:
                 # Get the representatives
                 start_wait_time = time.time()
-                (
-                    rep_values,
-                    rep_labels,
-                    rep_weights,
-                ) = self.get_samples()
+                self.dsl.wait()
                 self.last_batch_wait_time = time.time() - start_wait_time
                 self.epoch_wait_time += self.last_batch_wait_time
-                num_reps = len(rep_values)
-
-                if num_reps > 0:
-                    #torch.cuda.nvtx.range_push("Combine batches")
-                    start_cat_time = time.time()
-                    rep_values, rep_labels, rep_weights = (
-                        move_cuda(rep_values, self.cuda),
-                        move_cuda(rep_labels, self.cuda),
-                        move_cuda(rep_weights, self.cuda),
-                    )
-                    # Concatenate the training samples with the representatives
-                    w = torch.cat((w, rep_weights))
-                    x = torch.cat((x, rep_values))
-                    y = torch.cat((y, rep_labels))
-                    self.last_batch_cat_time = time.time() - start_cat_time
-                    self.epoch_cat_time += self.last_batch_cat_time
-                    # torch.cuda.nvtx.range_pop()
-
-                # Log representatives
-                if self.writer is not None and self.writer_images and num_reps > 0:
-                    fig = plot_representatives(rep_values, rep_labels, 5)
-                    self.writer.add_figure(
-                        "representatives", fig, self.global_steps)
 
             #torch.cuda.nvtx.range_push("Forward pass")
-            output = self.model(x)
+            output = self.model(self.aug_x)
             if training:
-                loss = self.criterion(output, y)
+                loss = self.criterion(output, self.aug_y)
             else:
-                loss = nn.CrossEntropyLoss()(output, y)
+                loss = nn.CrossEntropyLoss()(output, self.aug_y)
             # torch.cuda.nvtx.range_pop()
 
             if training:
                 # Leads to decreased accuracy
                 # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
-                dw = w / torch.sum(w)
+                dw = self.aug_w / torch.sum(self.aug_w)
                 #torch.cuda.nvtx.range_push("Optimizer step")
                 if self.use_amp:
                     with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
@@ -483,8 +354,22 @@ class nil_agent(Agent):
                     loss.backward(dw)
                     self.optimizer_regime.step()
                 # torch.cuda.nvtx.range_pop()
+
+                start_acc_time = time.time()
+                self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+                self.last_batch_acc_time = time.time() - start_acc_time
+                self.epoch_acc_time += self.last_batch_acc_time
+
                 self.global_steps += 1
                 self.steps += 1
+                self.num_reps = self.dsl.get_rehearsal_size()
+
+                # Log representatives
+                if self.writer is not None and self.writer_images and self.num_reps > 0:
+                    fig = plot_representatives(
+                        self.aug_x[len(x):], self.aug_y[len(x):], 5)
+                    self.writer.add_figure(
+                        "representatives", fig, self.global_steps)
 
             outputs.append(output.detach())
             total_loss += torch.mean(loss).item()
@@ -496,19 +381,4 @@ class nil_agent(Agent):
         return self.num_reps
 
     def get_memory_size(self):
-        for label, reps in self.representatives_x.items():
-            for rep in reps:
-                return rep.element_size() * rep.numel() * self.num_reps
         return -1
-
-
-def nil(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval):
-    implementation = config.get("implementation", "")
-    agent = nil_agent
-    if implementation == "cpp":
-        agent = nil_cpp_agent
-    elif implementation == "global":
-        agent = nil_global_agent
-    elif implementation == "cpp_global":
-        agent = nil_cpp_global_agent
-    return agent(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval)

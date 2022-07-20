@@ -6,8 +6,6 @@ import time
 import torch
 import wandb
 
-from torch.utils.tensorboard import SummaryWriter
-
 from utils.meters import AverageMeter, accuracy
 from utils.utils import move_cuda, synchronize_cuda, display
 
@@ -282,6 +280,12 @@ class Agent:
             return False
         if images:
             self.writer_images = images
+        try:
+            global SummaryWriter
+            from torch.utils.tensorboard import SummaryWriter
+        except ImportError:
+            raise ImportError(
+                "Please install tensorboardx to run this app.")
         self.writer = SummaryWriter(log_dir=save_path)
         return True
 

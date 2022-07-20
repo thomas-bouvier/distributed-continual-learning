@@ -93,8 +93,11 @@ parser.add_argument(
     choices=agent_names,
     help="model agent: " + " | ".join(agent_names),
 )
-parser.add_argument("--agent-config", default="",
-                    help="additional agent configuration")
+parser.add_argument(
+    "--agent-config",
+    default="",
+    help="additional agent configuration"
+)
 parser.add_argument(
     "--model",
     metavar="MODEL",
@@ -455,7 +458,7 @@ class Experiment:
         defaults = {
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
-            "distributed": hvd.size() > 0,
+            "distributed": hvd.size() > 1,
             "use_dali": self.args.use_dali,
             "use_dali_cuda": self.args.use_dali and self.args.cuda,
             "pin_memory": True,
