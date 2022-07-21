@@ -110,8 +110,7 @@ void distributed_stream_loader_t::async_process() {
                     }
                 }
             } else {
-                get_samples(local_index);
-                for (const auto& it : selected_samples) {
+                for (const auto& it : get_samples(local_index)) {
                     for (const auto& sample : it.second.second) {
                         batch.aug_samples.index_put_({j}, sample);
                         batch.aug_labels.index_put_({j}, it.first);
@@ -157,15 +156,14 @@ void distributed_stream_loader_t::async_process() {
 
 void distributed_stream_loader_t::get_remote_samples(const tl::request& req, unsigned int index) {
     std::cout << "Sending samples to remote node" << std::endl;
-    get_samples(index);
-    req.respond(selected_samples);
+    req.respond(get_samples(index));
 }
 
 // TODO: pass a vector of indices
-void distributed_stream_loader_t::get_samples(unsigned int index) {
+rehearsal_map_t distributed_stream_loader_t::get_samples(unsigned int index) {
+    rehearsal_map_t samples;
     if (rehearsal_size == 0)
-        return;
-    selected_samples.clear();
+        return samples;
     size_t rehearsal_class = index / N;
     auto map_it = rehearsal_map.begin();
     std::advance(map_it, rehearsal_class % rehearsal_map.size());
@@ -176,7 +174,8 @@ void distributed_stream_loader_t::get_samples(unsigned int index) {
     auto weight = map_it->second.first;
     buffer_t vec_tensors;
     vec_tensors.push_back(sample);
-    selected_samples[label] = std::make_pair(weight, vec_tensors);
+    samples[label] = std::make_pair(weight, vec_tensors);
+    return samples;
 }
 
 void distributed_stream_loader_t::accumulate(const torch::Tensor &samples, const torch::Tensor &labels,

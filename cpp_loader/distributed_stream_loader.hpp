@@ -37,11 +37,10 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
     tl::managed<tl::xstream> xstream;
     tl::managed<tl::thread> async_thread;
 
-    rehearsal_map_t selected_samples;
     std::vector<tl::provider_handle> provider_handles;
     tl::remote_procedure get_samples_procedure;
 
-    void get_samples(unsigned int index);
+    rehearsal_map_t get_samples(unsigned int index);
     void get_remote_samples(const tl::request& req, unsigned int index);
 
     void async_process();
