@@ -15,8 +15,8 @@ from ast import literal_eval
 from datetime import datetime
 from os import path, makedirs
 
-import torchvision.models as models
-#import models
+#import torchvision.models as models
+import models
 import agents
 
 from argparse import Namespace
@@ -327,7 +327,7 @@ class Experiment:
         num_classes = self.prepare_dataset()
         self.create_agent(num_classes)
 
-    def create_agent(self, num_classes=1000):
+    def create_agent(self, num_classes):
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
         lr_scaler = (
@@ -343,12 +343,18 @@ class Experiment:
         model_name = models.__dict__[self.args.model]
         model_config = {
             "num_classes": num_classes,
+            "optimizer": self.args.optimizer,
+            "lr": self.args.lr,
+            "lr_scaler": lr_scaler,
+            "momentum": self.args.momentum,
+            "weight_decay": self.args.weight_decay,
         }
         if self.args.model_config != "":
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
-        model = model_name(**model_config)
+        model = model_name(model_config)
 
+        # Building the model
         if self.args.checkpoint:
             if not path.isfile(self.args.checkpoint):
                 parser.error(f"Invalid checkpoint: {self.args.checkpoint}")
@@ -378,22 +384,9 @@ class Experiment:
         logging.info(f"Number of parameters: {num_parameters}")
         model = move_cuda(model, self.args.cuda)
 
-        # Horovod: scale learning rate by lr_scaler.
-        optim_regime = getattr(
-            model,
-            "regime",
-            [
-                {
-                    "epoch": 0,
-                    "optimizer": self.args.optimizer,
-                    "lr": self.args.lr * lr_scaler,
-                    "momentum": self.args.momentum,
-                    "weight_decay": self.args.weight_decay,
-                }
-            ],
-        )
+        # Building the optimizer regime
+        optim_regime = getattr(model, "regime")
         logging.info(f"Optimizer regime: {optim_regime}")
-
         self.optimizer_regime = OptimizerRegime(
             model,
             self.args.use_amp,
