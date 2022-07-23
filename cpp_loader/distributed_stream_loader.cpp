@@ -16,7 +16,7 @@ using namespace torch::indexing;
 
 distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C,
     int64_t seed, uint16_t server_id, const std::string& server_address,
-    const std::vector<std::pair<int, std::string>>& endpoints)
+    std::vector<std::pair<int, std::string>>& endpoints)
         : tl::provider<distributed_stream_loader_t>([](uint16_t provider_id, const std::string& address) -> tl::engine& {
             static tl::engine myServer(address, THALLIUM_SERVER_MODE);
             std::cout << "Server running at address " << myServer.self()
@@ -32,6 +32,8 @@ distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsign
         async_process();
     });
     async_thread = std::move(thread);
+
+    endpoints.push_back(std::make_pair(server_id, server_address));
     if (endpoints.size() > 0) {
         add_endpoints(endpoints);
     }
@@ -77,7 +79,7 @@ void distributed_stream_loader_t::async_process() {
 
         // selection without replacement from remote nodes + current node
         // get_samples in Python
-        const unsigned int max_global_index = (provider_handles.size() + 1) * K * N;
+        const unsigned int max_global_index = provider_handles.size() * K * N;
         std::uniform_int_distribution<unsigned int> dice(0, max_global_index - 1);
         std::vector<unsigned int> choices(R);
         int i = 0;
@@ -88,35 +90,27 @@ void distributed_stream_loader_t::async_process() {
             choices[i++] = random_global_index;
         }
 
-        //TODO async calls dispatching non-blocking requests
-        //std::vector<tl::async_response> requests(choices.size());
+        // group indices per node
         int j = batch_size;
+        std::unordered_map<int, std::vector<int>> indices_per_node;
         for (size_t i = 0; i < choices.size(); i++) {
             int global_index = choices[i];
             int local_index = global_index % (K * N);
             size_t node = global_index / (K * N);
-            assert(node >= 0 && node < (provider_handles.size() + 1));
-            // choose remote node
-            if (node > 0) {
-                size_t remote_index = node - 1;
-                tl::provider_handle& ph = provider_handles[remote_index];
-                rehearsal_map_t samples = get_samples_procedure.on(ph)(local_index);
-                for (const auto& it : samples) {
-                    for (const auto& sample : it.second.second) {
-                        batch.aug_samples.index_put_({j}, sample);
-                        batch.aug_labels.index_put_({j}, it.first);
-                        batch.aug_weights.index_put_({j}, it.second.first);
-                        j++;
-                    }
-                }
-            } else {
-                for (const auto& it : get_samples(local_index)) {
-                    for (const auto& sample : it.second.second) {
-                        batch.aug_samples.index_put_({j}, sample);
-                        batch.aug_labels.index_put_({j}, it.first);
-                        batch.aug_weights.index_put_({j}, it.second.first);
-                        j++;
-                    }
+            assert(node >= 0 && node < provider_handles.size());
+            if (indices_per_node.find(node) == indices_per_node.end())
+                indices_per_node.emplace(node, std::vector<int>());
+            indices_per_node[node].push_back(local_index);
+        }
+        for (const auto& indices : indices_per_node) {
+            tl::provider_handle& ph = provider_handles[indices.first];
+            rehearsal_map_t samples = get_samples_procedure.on(ph)(indices.second);
+            for (const auto& it : samples) {
+                for (const auto& sample : it.second.second) {
+                    batch.aug_samples.index_put_({j}, sample);
+                    batch.aug_labels.index_put_({j}, it.first);
+                    batch.aug_weights.index_put_({j}, it.second.first);
+                    j++;
                 }
             }
         }
@@ -154,27 +148,28 @@ void distributed_stream_loader_t::async_process() {
     }
 }
 
-void distributed_stream_loader_t::get_remote_samples(const tl::request& req, unsigned int index) {
+void distributed_stream_loader_t::get_remote_samples(const tl::request& req, const std::vector<int>& indices) {
     std::cout << "Sending samples to remote node" << std::endl;
-    req.respond(get_samples(index));
+    req.respond(get_samples(indices));
 }
 
-// TODO: pass a vector of indices
-rehearsal_map_t distributed_stream_loader_t::get_samples(unsigned int index) {
+rehearsal_map_t distributed_stream_loader_t::get_samples(const std::vector<int>& indices) {
     rehearsal_map_t samples;
     if (rehearsal_size == 0)
         return samples;
-    size_t rehearsal_class = index / N;
-    auto map_it = rehearsal_map.begin();
-    std::advance(map_it, rehearsal_class % rehearsal_map.size());
-    size_t rehearsal_class_index = index % N % map_it->second.second.size();
-    assert(rehearsal_class_index < map_it->second.second.size());
-    auto sample = map_it->second.second[rehearsal_class_index];
-    auto label = map_it->first;
-    auto weight = map_it->second.first;
-    buffer_t vec_tensors;
-    vec_tensors.push_back(sample);
-    samples[label] = std::make_pair(weight, vec_tensors);
+    for (auto index : indices) {
+        size_t rehearsal_class = index / N;
+        auto map_it = rehearsal_map.begin();
+        std::advance(map_it, rehearsal_class % rehearsal_map.size());
+        size_t rehearsal_class_index = (index % N) % map_it->second.second.size();
+        assert(rehearsal_class_index < map_it->second.second.size());
+        auto sample = map_it->second.second[rehearsal_class_index];
+        auto label = map_it->first;
+        auto weight = map_it->second.first;
+        if (samples.find(label) == samples.end())
+            samples.emplace(label, std::make_pair(weight, buffer_t()));
+        samples[label].second.push_back(sample);
+    }
     return samples;
 }
 

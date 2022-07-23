@@ -4,10 +4,10 @@
 
 #include "distributed_stream_loader.hpp"
 
-unsigned int K = 5;
-unsigned int N = 10;
-unsigned int R = 2;
-unsigned int C = 2;
+unsigned int K = 10;
+unsigned int N = 20;
+unsigned int R = 5;
+unsigned int C = 5;
 int64_t seed = 42;
 
 int main(int argc, char** argv) {

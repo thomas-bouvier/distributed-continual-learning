@@ -40,15 +40,15 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
     std::vector<tl::provider_handle> provider_handles;
     tl::remote_procedure get_samples_procedure;
 
-    rehearsal_map_t get_samples(unsigned int index);
-    void get_remote_samples(const tl::request& req, unsigned int index);
+    rehearsal_map_t get_samples(const std::vector<int>& indices);
+    void get_remote_samples(const tl::request& req, const std::vector<int>& indices);
 
     void async_process();
 
 public:
     distributed_stream_loader_t(unsigned int _K, unsigned int _N, unsigned int _C, int64_t seed,
         uint16_t server_id, const std::string& server_address,
-        const std::vector<std::pair<int, std::string>>& endpoints);
+        std::vector<std::pair<int, std::string>>& endpoints);
     ~distributed_stream_loader_t();
     void add_endpoints(const std::vector<std::pair<int, std::string>>& endpoints);
 

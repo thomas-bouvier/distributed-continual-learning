@@ -82,8 +82,9 @@ class nil_cpp_global_agent(Agent):
         if remote_ips:
             for ip in remote_ips.split(','):
                 address_and_port = ip.split(':')
-                if len(address_and_port) == 3 and int(address_and_port[2]) == port:
-                    continue
+                # No need to exclude current node!
+                #if len(address_and_port) == 3 and int(address_and_port[2]) == port:
+                #    continue
                 remote_nodes.append((int(address_and_port[2]) - 1234, ip))
         logging.debug(f"Remote nodes to sample from: {remote_nodes}")
         self.dsl = rehearsal.DistributedStreamLoader(
