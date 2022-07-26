@@ -14,7 +14,7 @@ from agents.base import Agent
 from agents.nil_cpp import nil_cpp_agent
 from agents.nil_global import nil_global_agent
 from agents.nil_cpp_global import nil_cpp_global_agent
-from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx
+from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx, synchronize_cuda
 from utils.meters import AverageMeter, accuracy
 
 

@@ -14,7 +14,7 @@ import ctypes
 from cpp_loader import rehearsal
 
 from agents.base import Agent
-from utils.utils import get_device, move_cuda, plot_representatives
+from utils.utils import get_device, move_cuda, plot_representatives, synchronize_cuda
 from utils.meters import AverageMeter, accuracy
 
 from bisect import bisect

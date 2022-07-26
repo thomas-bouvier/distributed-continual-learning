@@ -5,7 +5,7 @@ from torchvision.models import resnet18 as rn18
 
 __all__ = ["resnet18"]
 
-        
+
 def resnet18(config):
     optimizer = config.pop('optimizer')
     lr = config.pop('lr')
@@ -22,8 +22,8 @@ def resnet18(config):
             "optimizer": "SGD",
             "lr": lr,
             "lr_rampup": True,
-            "momentum": 0.9,
-            "weight_decay": 5e-4,
+            "momentum": 0.875,
+            "weight_decay": 3.0517578125e-5,
         },
         {"epoch": 5, "lr": lr * 1.0, "lr_rampup": False},
         {"epoch": 30, "lr": lr * 1e-1, "weight_decay": 0},
