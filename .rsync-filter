@@ -1,0 +1,13 @@
+- *.tar
+- obj.*
+- bin
+- build
+- venv
+- results
+- wandb
+- .git
+- __pycache__
+- __tmp_enos__
+- current
+- cachedir
+- *.jpg
