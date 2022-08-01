@@ -14,6 +14,7 @@ from agents.base import Agent
 from agents.nil_cpp import nil_cpp_agent
 from agents.nil_global import nil_global_agent
 from agents.nil_cpp_global import nil_cpp_global_agent
+from torch.cuda.amp import GradScaler, autocast
 from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx, synchronize_cuda
 from utils.meters import AverageMeter, accuracy
 
@@ -44,12 +45,7 @@ class nil_agent(Agent):
         )
 
         if self.use_amp:
-            try:
-                global amp
-                from apex import amp
-            except ImportError:
-                raise ImportError(
-                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
+            self.scaler = GradScaler()
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
 
@@ -459,28 +455,29 @@ class nil_agent(Agent):
                         "representatives", fig, self.global_steps)
 
             #torch.cuda.nvtx.range_push("Forward pass")
-            output = self.model(x)
             if training:
-                loss = self.criterion(output, y)
+                if self.use_amp:
+                    with autocast(dtype=torch.float16):
+                        output = self.model(x)
+                        loss = self.criterion(output, y)
+                else:
+                    output = self.model(x)
+                    loss = self.criterion(output, y)
             else:
+                output = self.model(x)
                 loss = nn.CrossEntropyLoss()(output, y)
             # torch.cuda.nvtx.range_pop()
 
             if training:
-                # Leads to decreased accuracy
-                # total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
-                dw = w / torch.sum(w)
                 #torch.cuda.nvtx.range_push("Optimizer step")
                 if self.use_amp:
-                    with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
-                        scaled_loss.backward(dw)
-                        self.optimizer_regime.optimizer.synchronize()
+                    self.scaler.scale(loss).backward()
+                    self.optimizer_regime.optimizer.synchronize()
                     with self.optimizer_regime.optimizer.skip_synchronize():
-                        self.optimizer_regime.step()
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
                 else:
-                    # Faster to provide the derivative of L wrt {l}^n than letting
-                    # pytorch computing it by itself
-                    loss.backward(dw)
+                    loss.backward()
                     self.optimizer_regime.step()
                 # torch.cuda.nvtx.range_pop()
                 self.global_steps += 1

@@ -396,7 +396,6 @@ class Experiment:
             self.args.gradient_predivide_factor,
             optim_regime,
         )
-        model = self.optimizer_regime.model
 
         loss_params = {}
         self.criterion = getattr(

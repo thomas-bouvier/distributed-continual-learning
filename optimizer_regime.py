@@ -27,9 +27,12 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
         self.gradient_predivide_factor = gradient_predivide_factor
 
         optimizer = torch.optim.SGD(self.parameters, lr=0)
+        # Horovod: broadcast optimizer state and parameters
+        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
         # Horovod: wrap optimizer with DistributedOptimizer.
-        optimizer = hvd.DistributedOptimizer(
+        self.optimizer = hvd.DistributedOptimizer(
             optimizer,
             named_parameters=model.named_parameters(),
             compression=self.compression,
@@ -37,23 +40,6 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
             backward_passes_per_step=self.batches_per_allreduce,
             gradient_predivide_factor=self.gradient_predivide_factor,
         )
-
-        # Horovod: broadcast optimizer state and parameters
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
-
-        if use_amp:
-            try:
-                global amp
-                from apex import amp
-            except ImportError:
-                raise ImportError(
-                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
-            self.model, self.optimizer = amp.initialize(
-                model, optimizer, opt_level="O1")
-        else:
-            self.model = model
-            self.optimizer = optimizer
 
     def update(self, epoch=None, steps=None):
         """Adjust optimizer according to current epoch or steps and training regime."""

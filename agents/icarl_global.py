@@ -8,6 +8,7 @@ import torch.nn as nn
 import wandb
 
 from agents.base import Agent
+from torch.cuda.amp import GradScaler, autocast
 from utils.utils import move_cuda
 from utils.meters import AverageMeter, accuracy
 
@@ -51,12 +52,7 @@ class icarl_v1_agent(Agent):
         )
 
         if self.use_amp:
-            try:
-                global amp
-                from apex import amp
-            except ImportError:
-                raise ImportError(
-                    "Please install apex from https://www.github.com/nvidia/apex to run this app.")
+            self.scaler = GradScaler()
 
         self.num_exemplars = 0
         self.num_candidates = config.get("num_candidates", 20)
@@ -303,8 +299,13 @@ class icarl_v1_agent(Agent):
                     self.lock_make.release()
 
                 #torch.cuda.nvtx.range_push("Forward pass")
-                output = self.model(x)
-                loss = self.criterion(output[: y.size(0)], y)
+                if self.use_amp:
+                    with autocast(dtype=torch.float16):
+                        output = self.model(x)
+                        loss = self.criterion(output[: y.size(0)], y)
+                else:
+                    output = self.model(x)
+                    loss = self.criterion(output[: y.size(0)], y)
                 # torch.cuda.nvtx.range_pop()
 
                 # Compute distillation loss
@@ -316,11 +317,11 @@ class icarl_v1_agent(Agent):
 
                 #torch.cuda.nvtx.range_push("Optimizer step")
                 if self.use_amp:
-                    with amp.scale_loss(loss, self.optimizer_regime.optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                        self.optimizer_regime.optimizer.synchronize()
+                    self.scaler.scale(loss).backward()
+                    self.optimizer_regime.optimizer.synchronize()
                     with self.optimizer_regime.optimizer.skip_synchronize():
-                        self.optimizer_regime.step()
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
                 else:
                     loss.backward()
                     self.optimizer_regime.step()
