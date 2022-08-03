@@ -24,7 +24,7 @@ distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsign
             return myServer;
         }(server_id, server_address), server_id), K(_K), N(_N),
         C(_C), rand_gen(seed) {
-    define("get_samples", &distributed_stream_loader_t::get_remote_samples);
+    define("get_samples", &distributed_stream_loader_t::get_remote_samples).disable_response();
 
     tl::managed<tl::xstream> es = tl::xstream::create();
     xstream = std::move(es);
@@ -92,6 +92,7 @@ void distributed_stream_loader_t::async_process() {
 
         // group indices per node
         int j = batch_size;
+        // map remote node indices to local indices
         std::unordered_map<int, std::vector<int>> indices_per_node;
         for (size_t i = 0; i < choices.size(); i++) {
             int global_index = choices[i];
@@ -103,15 +104,27 @@ void distributed_stream_loader_t::async_process() {
             indices_per_node[node].push_back(local_index);
         }
         for (const auto& indices : indices_per_node) {
+            // how many tensors returned by the current node?
+            std::vector<torch::Tensor> tensors(indices.second.size(), torch::zeros({3, 224, 224}));
+            std::vector<std::pair<void*, std::size_t>> segments(indices.second.size());
+            int i = 0;
+            for (auto& rdma_tensor : segments) {
+                rdma_tensor.first = tensors[i].data_ptr();
+                rdma_tensor.second = tensors[i].nbytes();
+                i++;
+            }
+
             tl::provider_handle& ph = provider_handles[indices.first];
-            rehearsal_map_t samples = get_samples_procedure.on(ph)(indices.second);
-            for (const auto& it : samples) {
-                for (const auto& sample : it.second.second) {
-                    batch.aug_samples.index_put_({j}, sample);
-                    batch.aug_labels.index_put_({j}, it.first);
-                    batch.aug_weights.index_put_({j}, it.second.first);
-                    j++;
-                }
+            tl::bulk local_bulk = get_engine().expose(segments, tl::bulk_mode::write_only);
+            get_samples_procedure.on(ph)(local_bulk, indices.second);
+
+            // received RDMA bulk, convert it back to Tensor now :)
+            for (auto tensor : tensors) {
+                std::cout << tensor.sizes() << std::endl;
+                batch.aug_samples.index_put_({j}, tensor);
+                //batch.aug_labels.index_put_({j}, it.first);
+                //batch.aug_weights.index_put_({j}, it.second.first);
+                j++;
             }
         }
         batch.aug_size = j;
@@ -148,29 +161,45 @@ void distributed_stream_loader_t::async_process() {
     }
 }
 
-void distributed_stream_loader_t::get_remote_samples(const tl::request& req, const std::vector<int>& indices) {
-    std::cout << "Sending samples to remote node" << std::endl;
-    req.respond(get_samples(indices));
-}
-
-rehearsal_map_t distributed_stream_loader_t::get_samples(const std::vector<int>& indices) {
+void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl::bulk& b, const std::vector<int>& indices) {
+    std::cout << "Sending samples to remote node (endpoint: " << req.get_endpoint() << ")" << std::endl;
     rehearsal_map_t samples;
-    if (rehearsal_size == 0)
-        return samples;
-    for (auto index : indices) {
-        size_t rehearsal_class = index / N;
-        auto map_it = rehearsal_map.begin();
-        std::advance(map_it, rehearsal_class % rehearsal_map.size());
-        size_t rehearsal_class_index = (index % N) % map_it->second.second.size();
-        assert(rehearsal_class_index < map_it->second.second.size());
-        auto sample = map_it->second.second[rehearsal_class_index];
-        auto label = map_it->first;
-        auto weight = map_it->second.first;
-        if (samples.find(label) == samples.end())
-            samples.emplace(label, std::make_pair(weight, buffer_t()));
-        samples[label].second.push_back(sample);
+    if (rehearsal_size > 0) {
+        for (auto index : indices) {
+            size_t rehearsal_class = index / N;
+            auto map_it = rehearsal_map.begin();
+            std::advance(map_it, rehearsal_class % rehearsal_map.size());
+            size_t rehearsal_class_index = (index % N) % map_it->second.second.size();
+            assert(rehearsal_class_index < map_it->second.second.size());
+            auto sample = map_it->second.second[rehearsal_class_index];
+            auto label = map_it->first;
+            auto weight = map_it->second.first;
+            if (samples.find(label) == samples.end())
+                samples.emplace(label, std::make_pair(weight, buffer_t()));
+            samples[label].second.push_back(sample);
+        }
     }
-    return samples;
+
+    // fill the RDMA buffer with tensors, ordering them by label
+    int i = 0;
+    std::vector<std::pair<void*, std::size_t>> segments(indices.size());
+    for (auto it = samples.begin(); it != samples.end(); it++) {
+        auto tensors = it->second.second;
+        for (auto tensor : tensors) {
+            auto contiguous_tensor = tensor.contiguous();
+            assert(contiguous_tensor.is_contiguous());
+            segments[i].first = contiguous_tensor.data_ptr();
+            segments[i].second = contiguous_tensor.nbytes();
+            i++;
+        }
+    }
+    for (size_t j = i; j < segments.size(); j++) {
+        segments[j].first = nullptr;
+        segments[j].second = 0;
+    }
+
+    tl::bulk bulk = get_engine().expose(segments, tl::bulk_mode::read_only);
+    bulk >> b.on(req.get_endpoint());
 }
 
 void distributed_stream_loader_t::accumulate(const torch::Tensor &samples, const torch::Tensor &labels,

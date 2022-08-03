@@ -41,8 +41,7 @@ class distributed_stream_loader_t : public tl::provider<distributed_stream_loade
     tl::remote_procedure get_samples_procedure;
 
     rehearsal_map_t get_samples(const std::vector<int>& indices);
-    void get_remote_samples(const tl::request& req, const std::vector<int>& indices);
-
+    void get_remote_samples(const tl::request& req, tl::bulk& b, const std::vector<int>& indices);
     void async_process();
 
 public:
