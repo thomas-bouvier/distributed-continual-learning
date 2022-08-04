@@ -26,6 +26,7 @@ int main(int argc, char** argv) {
     }
     distributed_stream_loader_t dsl(K, N, C, seed, server_id, server_address, endpoints);
 
+    endpoints.clear();
     while (true) {
         std::string address;
         int provider_id;

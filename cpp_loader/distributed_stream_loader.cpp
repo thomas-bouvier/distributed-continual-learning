@@ -24,7 +24,8 @@ distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsign
             return myServer;
         }(server_id, server_address), server_id), K(_K), N(_N),
         C(_C), rand_gen(seed) {
-    define("get_samples", &distributed_stream_loader_t::get_remote_samples).disable_response();
+    define("get_samples", &distributed_stream_loader_t::get_remote_samples);
+    get_samples_procedure = get_engine().define("get_samples");
 
     tl::managed<tl::xstream> es = tl::xstream::create();
     xstream = std::move(es);
@@ -35,15 +36,12 @@ distributed_stream_loader_t::distributed_stream_loader_t(unsigned int _K, unsign
 
     endpoints.push_back(std::make_pair(server_id, server_address));
     if (endpoints.size() > 0) {
+        std::cout << "endpoint size " << endpoints.size() << std::endl;
         add_endpoints(endpoints);
     }
 }
 
 void distributed_stream_loader_t::add_endpoints(const std::vector<std::pair<int, std::string>>& endpoints) {
-    if (provider_handles.size() == 0) {
-        get_samples_procedure = get_engine().define("get_samples");
-    }
-    provider_handles.reserve(provider_handles.size() + endpoints.size());
     for (auto endpoint : endpoints) {
         std::cout << "Looking up " << endpoint.second << ", " << endpoint.first << std::endl;
         tl::endpoint server = get_engine().lookup(endpoint.second);
@@ -106,6 +104,8 @@ void distributed_stream_loader_t::async_process() {
         for (const auto& indices : indices_per_node) {
             // how many tensors returned by the current node?
             std::vector<torch::Tensor> tensors(indices.second.size(), torch::zeros({3, 224, 224}));
+            for (const auto& tensor : tensors)
+                assert(tensor.is_contiguous());
             std::vector<std::pair<void*, std::size_t>> segments(indices.second.size());
             int i = 0;
             for (auto& rdma_tensor : segments) {
@@ -116,10 +116,11 @@ void distributed_stream_loader_t::async_process() {
 
             tl::provider_handle& ph = provider_handles[indices.first];
             tl::bulk local_bulk = get_engine().expose(segments, tl::bulk_mode::write_only);
-            get_samples_procedure.on(ph)(local_bulk, indices.second);
+            size_t num_samples = get_samples_procedure.on(ph)(local_bulk, indices.second);
 
             // received RDMA bulk, convert it back to Tensor now :)
-            for (auto tensor : tensors) {
+            for (int i = 0; i < num_samples; i++) {
+                auto tensor = tensors[i];
                 std::cout << tensor.sizes() << std::endl;
                 batch.aug_samples.index_put_({j}, tensor);
                 //batch.aug_labels.index_put_({j}, it.first);
@@ -162,7 +163,7 @@ void distributed_stream_loader_t::async_process() {
 }
 
 void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl::bulk& b, const std::vector<int>& indices) {
-    std::cout << "Sending samples to remote node (endpoint: " << req.get_endpoint() << ")" << std::endl;
+    std::cout << "Sending " << indices.size() << " samples to remote node (endpoint: " << req.get_endpoint() << ")" << std::endl;
     rehearsal_map_t samples;
     if (rehearsal_size > 0) {
         for (auto index : indices) {
@@ -200,6 +201,7 @@ void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl:
 
     tl::bulk bulk = get_engine().expose(segments, tl::bulk_mode::read_only);
     bulk >> b.on(req.get_endpoint());
+    req.respond(samples.size());
 }
 
 void distributed_stream_loader_t::accumulate(const torch::Tensor &samples, const torch::Tensor &labels,
