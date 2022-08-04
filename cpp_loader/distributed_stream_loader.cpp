@@ -101,6 +101,7 @@ void distributed_stream_loader_t::async_process() {
                 indices_per_node.emplace(node, std::vector<int>());
             indices_per_node[node].push_back(local_index);
         }
+
         for (const auto& indices : indices_per_node) {
             // how many tensors returned by the current node?
             std::vector<torch::Tensor> tensors(indices.second.size(), torch::zeros({3, 224, 224}));
@@ -116,16 +117,19 @@ void distributed_stream_loader_t::async_process() {
 
             tl::provider_handle& ph = provider_handles[indices.first];
             tl::bulk local_bulk = get_engine().expose(segments, tl::bulk_mode::write_only);
-            size_t num_samples = get_samples_procedure.on(ph)(local_bulk, indices.second);
+            std::map<int, std::pair<int, int>> metadata = get_samples_procedure.on(ph)(local_bulk, indices.second);
 
             // received RDMA bulk, convert it back to Tensor now :)
-            for (int i = 0; i < num_samples; i++) {
-                auto tensor = tensors[i];
-                std::cout << tensor.sizes() << std::endl;
-                batch.aug_samples.index_put_({j}, tensor);
-                //batch.aug_labels.index_put_({j}, it.first);
-                //batch.aug_weights.index_put_({j}, it.second.first);
-                j++;
+            int t = 0;
+            for (auto it = metadata.begin(); it != metadata.end(); it++) {
+                int num_labels = it->second.first;
+                for (int i = 0; i < num_labels; i++) {
+                    batch.aug_samples.index_put_({j}, tensors[t]);
+                    batch.aug_labels.index_put_({j}, it->first);
+                    batch.aug_weights.index_put_({j}, it->second.second);
+                    t++;
+                    j++;
+                }
             }
         }
         batch.aug_size = j;
@@ -183,9 +187,14 @@ void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl:
 
     // fill the RDMA buffer with tensors, ordering them by label
     int i = 0;
+    std::map<int, std::pair<int, int>> metadata;
     std::vector<std::pair<void*, std::size_t>> segments(indices.size());
     for (auto it = samples.begin(); it != samples.end(); it++) {
         auto tensors = it->second.second;
+        auto num = tensors.size();
+        auto label = it->first;
+        auto weight = it->second.first;
+        metadata.insert({label, {num, weight}});
         for (auto tensor : tensors) {
             auto contiguous_tensor = tensor.contiguous();
             assert(contiguous_tensor.is_contiguous());
@@ -201,7 +210,7 @@ void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl:
 
     tl::bulk bulk = get_engine().expose(segments, tl::bulk_mode::read_only);
     bulk >> b.on(req.get_endpoint());
-    req.respond(samples.size());
+    req.respond(metadata);
 }
 
 void distributed_stream_loader_t::accumulate(const torch::Tensor &samples, const torch::Tensor &labels,

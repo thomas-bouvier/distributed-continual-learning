@@ -53,7 +53,6 @@ int main(int argc, char** argv) {
 
     std::cout << "Round 1" << std::endl;
     auto batch = random_batch();
-
     dsl.accumulate(std::get<0>(batch), std::get<1>(batch), aug_samples, aug_labels, aug_weights);
     int size = dsl.wait();
     std::cout << "size: " << size << std::endl;
