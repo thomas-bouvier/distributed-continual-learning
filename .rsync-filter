@@ -1,5 +1,8 @@
 - *.tar
+- *.jpg
+- *.so
 - obj.*
+- vgcore.*
 - bin
 - build
 - venv
@@ -10,4 +13,4 @@
 - __tmp_enos__
 - current
 - cachedir
-- *.jpg
+- datasets
