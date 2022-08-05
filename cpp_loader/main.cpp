@@ -46,8 +46,9 @@ int main(int argc, char** argv) {
     torch::Tensor aug_weights = torch::zeros({N + R});
 
     auto random_batch = [server_id]() -> std::tuple<torch::Tensor, torch::Tensor> {
+        auto options = torch::TensorOptions().dtype(torch::kFloat32);
         torch::Tensor labels = torch::randint(K, {N});
-        torch::Tensor samples = torch::full({N, 3, 224, 224}, server_id);
+        torch::Tensor samples = torch::full({N, 3, 224, 224}, server_id, options);
         return std::make_tuple<>(samples, labels);
     };
 

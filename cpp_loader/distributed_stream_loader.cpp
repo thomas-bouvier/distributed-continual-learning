@@ -104,7 +104,8 @@ void distributed_stream_loader_t::async_process() {
 
         for (const auto& indices : indices_per_node) {
             // how many tensors returned by the current node?
-            std::vector<torch::Tensor> tensors(indices.second.size(), torch::zeros({3, 224, 224}));
+            auto options = torch::TensorOptions().dtype(torch::kFloat32);
+            std::vector<torch::Tensor> tensors(indices.second.size(), torch::zeros({3, 224, 224}, options));
             for (const auto& tensor : tensors)
                 assert(tensor.is_contiguous());
             std::vector<std::pair<void*, std::size_t>> segments(indices.second.size());
@@ -167,7 +168,6 @@ void distributed_stream_loader_t::async_process() {
 }
 
 void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl::bulk& b, const std::vector<int>& indices) {
-    std::cout << "Sending " << indices.size() << " samples to remote node (endpoint: " << req.get_endpoint() << ")" << std::endl;
     rehearsal_map_t samples;
     if (rehearsal_size > 0) {
         for (auto index : indices) {
@@ -184,6 +184,8 @@ void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl:
             samples[label].second.push_back(sample);
         }
     }
+
+    std::cout << "Sending " << samples.size() << " samples (" << indices.size() << " requested) to remote node (endpoint: " << req.get_endpoint() << ")" << std::endl;
 
     // fill the RDMA buffer with tensors, ordering them by label
     int i = 0;
