@@ -80,11 +80,6 @@ class nil_cpp_agent(Agent):
         self.aug_w = torch.zeros(
             self.batch_size + self.num_samples, device=self.device)
 
-        self.mask = torch.as_tensor(
-            [0.0 for _ in range(self.num_classes)],
-            device=torch.device(get_device(self.cuda)),
-        )
-
     def before_every_task(self, task_id, train_data_regime):
         self.steps = 0
 
@@ -107,15 +102,6 @@ class nil_cpp_agent(Agent):
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
 
-        # Add the new classes to the mask
-        #torch.cuda.nvtx.range_push("Create mask")
-        nc = set([data[1] for data in train_data_regime.get_data()])
-        for y in nc:
-            self.mask[y] = 1.0
-        # torch.cuda.nvtx.range_pop()
-
-        self.criterion = nn.CrossEntropyLoss(
-            weight=self.mask, reduction="none")
 
     """
     Forward pass for the current epoch
@@ -273,10 +259,9 @@ class nil_cpp_agent(Agent):
     def _step(
         self,
         i_batch,
-        inputs,
-        target,
+        x,
+        y,
         training=False,
-        chunk_batch=1,
     ):
         outputs = []
         total_loss = 0
@@ -285,78 +270,72 @@ class nil_cpp_agent(Agent):
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
 
-        for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
-                                       target.chunk(chunk_batch, dim=0))):
-            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-            #torch.cuda.nvtx.range_push("Copy to device")
-            start_move_time = time.time()
-            x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
-                y, self.cuda and self.buffer_cuda)
-            self.last_batch_move_time = time.time() - start_move_time
-            self.epoch_move_time += self.last_batch_move_time
-            # torch.cuda.nvtx.range_pop()
+        w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
+        #torch.cuda.nvtx.range_push("Copy to device")
+        start_move_time = time.time()
+        x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
+            y, self.cuda and self.buffer_cuda)
+        self.last_batch_move_time = time.time() - start_move_time
+        self.epoch_move_time += self.last_batch_move_time
+        # torch.cuda.nvtx.range_pop()
 
-            if self.aug_x is None:
-                size = list(x.size())[1:]
-                self.aug_x = torch.zeros(
-                    self.batch_size + self.num_samples, *size, device=self.device)
-                self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+        if self.aug_x is None:
+            size = list(x.size())[1:]
+            self.aug_x = torch.zeros(
+                self.batch_size + self.num_samples, *size, device=self.device)
+            self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
-            if training:
-                # Get the representatives
-                start_wait_time = time.time()
-                self.sl.wait()
-                self.last_batch_wait_time = time.time() - start_wait_time
-                self.epoch_wait_time += self.last_batch_wait_time
+        if training:
+            # Get the representatives
+            start_wait_time = time.time()
+            self.sl.wait()
+            self.last_batch_wait_time = time.time() - start_wait_time
+            self.epoch_wait_time += self.last_batch_wait_time
 
-            #torch.cuda.nvtx.range_push("Forward pass")
-            if training:
-                if self.use_amp:
-                    with autocast(dtype=torch.float16):
-                        output = self.model(self.aug_x)
-                        loss = self.criterion(output, self.aug_y)
-                else:
+        #torch.cuda.nvtx.range_push("Forward pass")
+        if training:
+            if self.use_amp:
+                with autocast(dtype=torch.float16):
                     output = self.model(self.aug_x)
                     loss = self.criterion(output, self.aug_y)
             else:
                 output = self.model(self.aug_x)
-                loss = nn.CrossEntropyLoss()(output, self.aug_y)
+                loss = self.criterion(output, self.aug_y)
+        else:
+            output = self.model(self.aug_x)
+            loss = nn.CrossEntropyLoss()(output, self.aug_y)
+        # torch.cuda.nvtx.range_pop()
+
+        if training:
+            #torch.cuda.nvtx.range_push("Optimizer step")
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
+                self.optimizer_regime.optimizer.synchronize()
+                with self.optimizer_regime.optimizer.skip_synchronize():
+                    self.scaler.step(self.optimizer_regime.optimizer)
+                    self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer_regime.step()
             # torch.cuda.nvtx.range_pop()
 
-            if training:
-                #torch.cuda.nvtx.range_push("Optimizer step")
-                if self.use_amp:
-                    self.scaler.scale(loss).backward()
-                    self.optimizer_regime.optimizer.synchronize()
-                    with self.optimizer_regime.optimizer.skip_synchronize():
-                        self.scaler.step(self.optimizer_regime.optimizer)
-                        self.scaler.update()
-                else:
-                    loss.backward()
-                    self.optimizer_regime.step()
-                # torch.cuda.nvtx.range_pop()
+            start_acc_time = time.time()
+            self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            self.last_batch_acc_time = time.time() - start_acc_time
+            self.epoch_acc_time += self.last_batch_acc_time
 
-                start_acc_time = time.time()
-                self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-                self.last_batch_acc_time = time.time() - start_acc_time
-                self.epoch_acc_time += self.last_batch_acc_time
+            self.global_steps += 1
+            self.steps += 1
+            self.num_reps = self.sl.get_rehearsal_size()
 
-                self.global_steps += 1
-                self.steps += 1
-                self.num_reps = self.sl.get_rehearsal_size()
-
-                # Log representatives
-                if self.writer is not None and self.writer_images and self.num_reps > 0:
-                    fig = plot_representatives(
-                        self.aug_x[len(x):], self.aug_y[len(x):], 5)
-                    self.writer.add_figure(
+            # Log representatives
+            if self.writer is not None and self.writer_images and self.num_reps > 0:
+                fig = plot_representatives(
+                    self.aug_x[len(x):], self.aug_y[len(x):], 5)
+                self.writer.add_figure(
                         "representatives", fig, self.global_steps)
 
-            outputs.append(output.detach())
-            total_loss += torch.mean(loss).item()
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
+        return output, loss
 
     def get_num_representatives(self):
         return self.num_reps

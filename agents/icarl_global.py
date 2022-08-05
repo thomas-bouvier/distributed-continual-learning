@@ -266,7 +266,6 @@ class icarl_v1_agent(Agent):
         target,
         training=False,
         distill=False,
-        chunk_batch=1,
     ):
         outputs = []
         total_loss = 0
@@ -275,70 +274,64 @@ class icarl_v1_agent(Agent):
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
 
-        for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
-                                       target.chunk(chunk_batch, dim=0))):
-            #torch.cuda.nvtx.range_push("Copy to device")
-            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+        #torch.cuda.nvtx.range_push("Copy to device")
+        x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+        # torch.cuda.nvtx.range_pop()
+
+        if training:
+            #torch.cuda.nvtx.range_push("Store batch")
+            if self.buf_x is None:
+                self.buf_x = x.detach().cpu()
+                self.buf_y = y.detach().cpu()
+            else:
+                self.buf_x = torch.cat((self.buf_x, x.detach().cpu()))
+                self.buf_y = torch.cat((self.buf_y, y.detach().cpu()))
             # torch.cuda.nvtx.range_pop()
 
-            if training:
-                #torch.cuda.nvtx.range_push("Store batch")
-                if self.buf_x is None:
-                    self.buf_x = x.detach().cpu()
-                    self.buf_y = y.detach().cpu()
-                else:
-                    self.buf_x = torch.cat((self.buf_x, x.detach().cpu()))
-                    self.buf_y = torch.cat((self.buf_y, y.detach().cpu()))
-                # torch.cuda.nvtx.range_pop()
+            # Distillation
+            if self.should_distill:
+                self.lock_made.acquire()
+                x = torch.cat((x, move_cuda(self.cand_x, self.cuda)))
+                dist_y = move_cuda(self.cand_y, self.cuda)
+                self.lock_make.release()
 
-                # Distillation
-                if self.should_distill:
-                    self.lock_made.acquire()
-                    x = torch.cat((x, move_cuda(self.cand_x, self.cuda)))
-                    dist_y = move_cuda(self.cand_y, self.cuda)
-                    self.lock_make.release()
-
-                #torch.cuda.nvtx.range_push("Forward pass")
-                if self.use_amp:
-                    with autocast(dtype=torch.float16):
-                        output = self.model(x)
-                        loss = self.criterion(output[: y.size(0)], y)
-                else:
+            #torch.cuda.nvtx.range_push("Forward pass")
+            if self.use_amp:
+                with autocast(dtype=torch.float16):
                     output = self.model(x)
                     loss = self.criterion(output[: y.size(0)], y)
-                # torch.cuda.nvtx.range_pop()
-
-                # Compute distillation loss
-                if self.should_distill:
-                    #torch.cuda.nvtx.range_push("Compute distillation loss")
-                    loss += self.kl(self.lsm(output[y.size(0):]),
-                                    self.sm(dist_y))
-                    # torch.cuda.nvtx.range_pop()
-
-                #torch.cuda.nvtx.range_push("Optimizer step")
-                if self.use_amp:
-                    self.scaler.scale(loss).backward()
-                    self.optimizer_regime.optimizer.synchronize()
-                    with self.optimizer_regime.optimizer.skip_synchronize():
-                        self.scaler.step(self.optimizer_regime.optimizer)
-                        self.scaler.update()
-                else:
-                    loss.backward()
-                    self.optimizer_regime.step()
-                # torch.cuda.nvtx.range_pop()
-                self.global_steps += 1
-                self.steps += 1
             else:
-                #torch.cuda.nvtx.range_push("Forward pass")
-                output = self.forward(x)
+                output = self.model(x)
                 loss = self.criterion(output[: y.size(0)], y)
+            # torch.cuda.nvtx.range_pop()
+
+            # Compute distillation loss
+            if self.should_distill:
+                #torch.cuda.nvtx.range_push("Compute distillation loss")
+                loss += self.kl(self.lsm(output[y.size(0):]),
+                                self.sm(dist_y))
                 # torch.cuda.nvtx.range_pop()
 
-            outputs.append(output.detach())
-            total_loss += loss
+            #torch.cuda.nvtx.range_push("Optimizer step")
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
+                self.optimizer_regime.optimizer.synchronize()
+                with self.optimizer_regime.optimizer.skip_synchronize():
+                    self.scaler.step(self.optimizer_regime.optimizer)
+                    self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer_regime.step()
+            # torch.cuda.nvtx.range_pop()
+            self.global_steps += 1
+            self.steps += 1
+        else:
+            #torch.cuda.nvtx.range_push("Forward pass")
+            output = self.forward(x)
+            loss = self.criterion(output[: y.size(0)], y)
+            # torch.cuda.nvtx.range_pop()
 
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
+        return output, loss
 
     def after_every_epoch(self):
         if self.epoch + 1 != self.epochs:

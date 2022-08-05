@@ -68,11 +68,6 @@ class nil_global_agent(Agent):
         self.global_representatives_w = None
         self.global_counts = None
 
-        self.mask = torch.as_tensor(
-            [0.0 for _ in range(self.num_classes)],
-            device=torch.device(get_device(self.cuda)),
-        )
-
     def get_samples(self):
         """Select or retrieves the representatives from the data
 
@@ -280,16 +275,6 @@ class nil_global_agent(Agent):
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
 
-        # Add the new classes to the mask
-        #torch.cuda.nvtx.range_push("Create mask")
-        nc = set([data[1] for data in train_data_regime.get_data()])
-        for y in nc:
-            self.mask[y] = 1.0
-        # torch.cuda.nvtx.range_pop()
-
-        self.criterion = nn.CrossEntropyLoss(
-            weight=self.mask, reduction="none")
-
     """
     Forward pass for the current epoch
     """
@@ -446,10 +431,9 @@ class nil_global_agent(Agent):
     def _step(
         self,
         i_batch,
-        inputs,
-        target,
+        x,
+        y,
         training=False,
-        chunk_batch=1,
     ):
         outputs = []
         total_loss = 0
@@ -458,86 +442,80 @@ class nil_global_agent(Agent):
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
 
-        for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
-                                       target.chunk(chunk_batch, dim=0))):
-            w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-            #torch.cuda.nvtx.range_push("Copy to device")
-            x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
-                y, self.cuda and self.buffer_cuda)            # torch.cuda.nvtx.range_pop()
+        w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
+        #torch.cuda.nvtx.range_push("Copy to device")
+        x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
+            y, self.cuda and self.buffer_cuda)            # torch.cuda.nvtx.range_pop()
 
-            if training:
-                start_acc_time = time.time()
-                if self.buffer_cuda:
-                    self.accumulate(x, y)
-                else:
-                    self.accumulate(x.cpu(), y.cpu())
-                self.epoch_acc_acc_time += time.time() - start_acc_time
+        if training:
+            start_acc_time = time.time()
+            if self.buffer_cuda:
+                self.accumulate(x, y)
+            else:
+                self.accumulate(x.cpu(), y.cpu())
+            self.epoch_acc_acc_time += time.time() - start_acc_time
 
-                # Get the representatives
-                start_get_time = time.time()
-                (
-                    rep_values,
-                    rep_labels,
-                    rep_weights,
-                ) = self.get_samples()
-                self.epoch_acc_get_time += time.time() - start_get_time
-                num_reps = len(rep_values)
+            # Get the representatives
+            start_get_time = time.time()
+            (
+                rep_values,
+                rep_labels,
+                rep_weights,
+            ) = self.get_samples()
+            self.epoch_acc_get_time += time.time() - start_get_time
+            num_reps = len(rep_values)
 
-                if num_reps > 0:
-                    #torch.cuda.nvtx.range_push("Combine batches")
-                    rep_values, rep_labels, rep_weights = (
-                        move_cuda(rep_values, self.cuda),
-                        move_cuda(rep_labels, self.cuda),
-                        move_cuda(rep_weights, self.cuda),
-                    )
-                    # Concatenates the training samples with the representatives
-                    start_cat_time = time.time()
-                    w = torch.cat((w, rep_weights))
-                    x = torch.cat((x, rep_values))
-                    y = torch.cat((y, rep_labels))
-                    self.epoch_acc_cat_time += time.time() - start_cat_time
-                    # torch.cuda.nvtx.range_pop()
+            if num_reps > 0:
+                #torch.cuda.nvtx.range_push("Combine batches")
+                rep_values, rep_labels, rep_weights = (
+                    move_cuda(rep_values, self.cuda),
+                    move_cuda(rep_labels, self.cuda),
+                    move_cuda(rep_weights, self.cuda),
+                )
+                # Concatenates the training samples with the representatives
+                start_cat_time = time.time()
+                w = torch.cat((w, rep_weights))
+                x = torch.cat((x, rep_values))
+                y = torch.cat((y, rep_labels))
+                self.epoch_acc_cat_time += time.time() - start_cat_time
+                # torch.cuda.nvtx.range_pop()
 
-                # Log representatives
-                if self.writer is not None and self.writer_images and num_reps > 0:
-                    fig = plot_representatives(rep_values, rep_labels, 5)
-                    self.writer.add_figure(
-                        "representatives", fig, self.global_steps)
+            # Log representatives
+            if self.writer is not None and self.writer_images and num_reps > 0:
+                fig = plot_representatives(rep_values, rep_labels, 5)
+                self.writer.add_figure(
+                    "representatives", fig, self.global_steps)
 
-            #torch.cuda.nvtx.range_push("Forward pass")
-            if training:
-                if self.use_amp:
-                    with autocast(dtype=torch.float16):
-                        output = self.model(x)
-                        loss = self.criterion(output, y)
-                else:
+        #torch.cuda.nvtx.range_push("Forward pass")
+        if training:
+            if self.use_amp:
+                with autocast(dtype=torch.float16):
                     output = self.model(x)
                     loss = self.criterion(output, y)
             else:
                 output = self.model(x)
-                loss = nn.CrossEntropyLoss()(output, y)
+                loss = self.criterion(output, y)
+        else:
+            output = self.model(x)
+            loss = nn.CrossEntropyLoss()(output, y)
+        # torch.cuda.nvtx.range_pop()
+
+        if training:
+            #torch.cuda.nvtx.range_push("Optimizer step")
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
+                self.optimizer_regime.optimizer.synchronize()
+                with self.optimizer_regime.optimizer.skip_synchronize():
+                    self.scaler.step(self.optimizer_regime.optimizer)
+                    self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer_regime.step()
             # torch.cuda.nvtx.range_pop()
+            self.global_steps += 1
+            self.steps += 1
 
-            if training:
-                #torch.cuda.nvtx.range_push("Optimizer step")
-                if self.use_amp:
-                    self.scaler.scale(loss).backward()
-                    self.optimizer_regime.optimizer.synchronize()
-                    with self.optimizer_regime.optimizer.skip_synchronize():
-                        self.scaler.step(self.optimizer_regime.optimizer)
-                        self.scaler.update()
-                else:
-                    loss.backward()
-                    self.optimizer_regime.step()
-                # torch.cuda.nvtx.range_pop()
-                self.global_steps += 1
-                self.steps += 1
-
-            outputs.append(output.detach())
-            total_loss += torch.mean(loss).item()
-
-        outputs = torch.cat(outputs, dim=0)
-        return outputs, total_loss
+        return output, loss
 
     def get_num_representatives(self):
         return self.num_reps

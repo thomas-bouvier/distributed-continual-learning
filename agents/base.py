@@ -183,10 +183,9 @@ class Agent:
     def _step(
         self,
         i_batch,
-        inputs,
-        target,
+        x,
+        y,
         training=False,
-        chunk_batch=1,
     ):
         outputs = []
         total_loss = 0
@@ -195,24 +194,22 @@ class Agent:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
 
-        for i, (x, y) in enumerate(zip(inputs.chunk(chunk_batch, dim=0),
-                                       target.chunk(chunk_batch, dim=0))):
-            #torch.cuda.nvtx.range_push("Copy to device")
-            start_move_time = time.time()
-            x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-            self.last_batch_move_time = time.time() - start_move_time
-            self.epoch_move_time += self.last_batch_move_time
-            # torch.cuda.nvtx.range_pop()
+        #torch.cuda.nvtx.range_push("Copy to device")
+        start_move_time = time.time()
+        x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+        self.last_batch_move_time = time.time() - start_move_time
+        self.epoch_move_time += self.last_batch_move_time
+        # torch.cuda.nvtx.range_pop()
 
-            #torch.cuda.nvtx.range_push("Forward pass")
-            if self.use_amp:
-                with autocast(dtype=torch.float16):
-                    output = self.model(x)
-                    loss = self.criterion(output, y)
-            else:
+        #torch.cuda.nvtx.range_push("Forward pass")
+        if self.use_amp:
+            with autocast(dtype=torch.float16):
                 output = self.model(x)
                 loss = self.criterion(output, y)
-            # torch.cuda.nvtx.range_pop()
+        else:
+            output = self.model(x)
+            loss = self.criterion(output, y)
+        # torch.cuda.nvtx.range_pop()
 
         if training:
             #torch.cuda.nvtx.range_push("Optimizer step")
