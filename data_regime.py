@@ -26,7 +26,6 @@ _DATA_ARGS = {
 }
 _DATALOADER_ARGS = {
     "batch_size",
-    "shuffle",
     "sampler",
     "batch_sampler",
     "num_workers",
@@ -110,6 +109,8 @@ class DataRegime(object):
                     num_shards=hvd.size(), precision=precision,
                     training=self.config["data"].get("split", True) == "train",
                     **self.config["loader"])
+                logging.debug(
+                    f"DATA REGIME {self.config['data']['split']} - data distributed using DALI")
             else:
                 if self.config["others"].get("distributed", False):
                     if self.config["others"].get("shard", False):
@@ -121,9 +122,10 @@ class DataRegime(object):
                             self._data, num_replicas=hvd.size(), rank=hvd.rank()
                         )
                     self.sampler = self.config["loader"]["sampler"]
+                self.config["loader"]["shuffle"] = self.sampler is None
                 self.loader = DataLoader(self._data, **self.config["loader"])
-            logging.debug(
-                f"DATA REGIME {self.config['data']['split']} - distributed")
+                logging.debug(
+                    f"DATA REGIME {self.config['data']['split']} - data distributed using sampler")
 
         return self.loader
 
