@@ -46,9 +46,13 @@ class nil_global_agent(Agent):
 
         self.num_reps = 0
 
-        self.epoch_acc_get_time = 0
-        self.epoch_acc_cat_time = 0
-        self.epoch_acc_acc_time = 0
+        self.epoch_load_time = 0
+        self.epoch_move_time = 0
+        self.epoch_wait_time = 0
+        self.epoch_cat_time = 0
+        self.epoch_acc_time = 0
+        self.last_batch_load_time = 0
+        self.last_batch_move_time = 0
         self.last_batch_wait_time = 0
         self.last_batch_cat_time = 0
         self.last_batch_acc_time = 0
@@ -438,8 +442,12 @@ class nil_global_agent(Agent):
 
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
         #torch.cuda.nvtx.range_push("Copy to device")
+        start_move_time = time.time()
         x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
-            y, self.cuda and self.buffer_cuda)            # torch.cuda.nvtx.range_pop()
+            y, self.cuda and self.buffer_cuda)
+        self.last_batch_move_time = time.time() - start_move_time
+        self.epoch_move_time += self.last_batch_move_time
+        # torch.cuda.nvtx.range_pop()
 
         if training:
             start_acc_time = time.time()
@@ -447,16 +455,18 @@ class nil_global_agent(Agent):
                 self.accumulate(x, y)
             else:
                 self.accumulate(x.cpu(), y.cpu())
-            self.epoch_acc_acc_time += time.time() - start_acc_time
+            self.last_batch_acc_time = time.time() - start_acc_time
+            self.epoch_acc_time += self.last_batch_acc_time
 
             # Get the representatives
-            start_get_time = time.time()
+            start_wait_time = time.time()
             (
                 rep_values,
                 rep_labels,
                 rep_weights,
             ) = self.get_samples()
-            self.epoch_acc_get_time += time.time() - start_get_time
+            self.last_batch_wait_time = time.time() - start_wait_time
+            self.epoch_wait_time += self.last_batch_wait_time
             num_reps = len(rep_values)
 
             if num_reps > 0:
@@ -471,7 +481,8 @@ class nil_global_agent(Agent):
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
-                self.epoch_acc_cat_time += time.time() - start_cat_time
+                self.last_batch_cat_time = time.time() - start_cat_time
+                self.epoch_acc_cat_time += self.last_batch_cat_time
                 # torch.cuda.nvtx.range_pop()
 
             # Log representatives

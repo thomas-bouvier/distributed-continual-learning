@@ -390,7 +390,7 @@ class nil_agent(Agent):
             else:
                 self.accumulate(x.cpu(), y.cpu())
             self.last_batch_acc_time = time.time() - start_acc_time
-            self.epoch_acc_time += time.time() - self.last_batch_acc_time
+            self.epoch_acc_time += self.last_batch_acc_time
 
             # Get the representatives
             start_wait_time = time.time()
