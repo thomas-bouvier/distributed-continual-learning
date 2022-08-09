@@ -4,6 +4,7 @@ import logging
 import tensorwatch
 import time
 import torch
+import torch.nn as nn
 import wandb
 
 from torch.cuda.amp import GradScaler, autocast
@@ -18,7 +19,6 @@ class Agent:
         use_amp,
         config,
         optimizer_regime,
-        criterion,
         cuda,
         buffer_cuda,
         log_interval,
@@ -29,7 +29,6 @@ class Agent:
         self.use_amp = use_amp
         self.config = config
         self.optimizer_regime = optimizer_regime
-        self.criterion = criterion
         self.cuda = cuda
         self.buffer_cuda = buffer_cuda
         self.log_interval = log_interval
@@ -46,6 +45,8 @@ class Agent:
 
         if self.use_amp:
            self.scaler = GradScaler()
+
+        self.criterion = nn.CrossEntropyLoss()
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -187,9 +188,6 @@ class Agent:
         y,
         training=False,
     ):
-        outputs = []
-        total_loss = 0
-
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
@@ -203,12 +201,12 @@ class Agent:
 
         #torch.cuda.nvtx.range_push("Forward pass")
         if self.use_amp:
-            with autocast(dtype=torch.float16):
+            with autocast():
                 output = self.model(x)
-                loss = self.criterion(output, y)
+                loss = self.criterion(output, y.long())
         else:
             output = self.model(x)
-            loss = self.criterion(output, y)
+            loss = self.criterion(output, y.long())
         # torch.cuda.nvtx.range_pop()
 
         if training:
@@ -335,13 +333,12 @@ class Agent:
             stream.write(values)
 
 
-def base(model, use_amp, agent_config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval):
+def base(model, use_amp, agent_config, optimizer_regime, cuda, buffer_cuda, log_interval):
     return Agent(
         model,
         use_amp,
         agent_config,
         optimizer_regime,
-        criterion,
         cuda,
         buffer_cuda,
         log_interval,

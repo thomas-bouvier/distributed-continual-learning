@@ -6,13 +6,12 @@ import numpy as np
 import logging
 import time
 import torch
-import torch.nn as nn
 import torchvision
 import wandb
 
 from agents.base import Agent
 from torch.cuda.amp import GradScaler, autocast
-from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx
+from utils.utils import get_device, move_cuda, plot_representatives, synchronize_cuda, find_2d_idx
 from utils.meters import AverageMeter, accuracy
 
 
@@ -23,7 +22,6 @@ class nil_global_agent(Agent):
         use_amp,
         config,
         optimizer_regime,
-        criterion,
         cuda,
         buffer_cuda,
         log_interval,
@@ -34,15 +32,11 @@ class nil_global_agent(Agent):
             use_amp,
             config,
             optimizer_regime,
-            criterion,
             cuda,
             buffer_cuda,
             log_interval,
             state_dict,
         )
-
-        if self.use_amp:
-            self.scaler = GradScaler()
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
         self.num_representatives = config.get("num_representatives", 60)
@@ -55,6 +49,9 @@ class nil_global_agent(Agent):
         self.epoch_acc_get_time = 0
         self.epoch_acc_cat_time = 0
         self.epoch_acc_acc_time = 0
+        self.last_batch_wait_time = 0
+        self.last_batch_cat_time = 0
+        self.last_batch_acc_time = 0
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
@@ -435,9 +432,6 @@ class nil_global_agent(Agent):
         y,
         training=False,
     ):
-        outputs = []
-        total_loss = 0
-
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
@@ -487,17 +481,13 @@ class nil_global_agent(Agent):
                     "representatives", fig, self.global_steps)
 
         #torch.cuda.nvtx.range_push("Forward pass")
-        if training:
-            if self.use_amp:
-                with autocast(dtype=torch.float16):
-                    output = self.model(x)
-                    loss = self.criterion(output, y)
-            else:
+        if self.use_amp:
+            with autocast():
                 output = self.model(x)
                 loss = self.criterion(output, y)
         else:
             output = self.model(x)
-            loss = nn.CrossEntropyLoss()(output, y)
+            loss = self.criterion(output, y)
         # torch.cuda.nvtx.range_pop()
 
         if training:

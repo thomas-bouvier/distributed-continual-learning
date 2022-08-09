@@ -20,7 +20,6 @@ import models
 import agents
 
 from argparse import Namespace
-from cross_entropy import CrossEntropyLoss
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
 from utils.log import save_checkpoint, setup_logging, ResultsLog
@@ -397,18 +396,13 @@ class Experiment:
             optim_regime,
         )
 
-        loss_params = {}
-        self.criterion = getattr(
-            model, "criterion", CrossEntropyLoss)(**loss_params)
-
         agent = (
             agents.__dict__[self.args.agent]
             if self.args.agent is not None
             else agents.base
         )
         agent_config = {
-            "model": self.args.model,
-            "batch_size": self.args.batch_size,
+            "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
         }
         if self.args.agent_config != "":
             agent_config = dict(
@@ -418,7 +412,6 @@ class Experiment:
             self.args.use_amp,
             agent_config,
             self.optimizer_regime,
-            self.criterion,
             self.args.cuda,
             self.args.buffer_cuda,
             self.args.log_interval,
@@ -457,7 +450,6 @@ class Experiment:
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
             "shard": self.args.shard,
-            "shuffle": True,
             "continual": tasksets_config.get("continual"),
             "scenario": tasksets_config.get("scenario", "class"),
             "initial_increment": tasksets_config.get("initial_increment", 0),
@@ -466,13 +458,12 @@ class Experiment:
             "concatenate_tasksets": tasksets_config.get("concatenate_tasksets", False),
         }
 
-        allreduce_batch_size = self.args.batch_size * self.args.batches_per_allreduce
         self.train_data_regime = DataRegime(
             hvd,
             defaults={
                 **defaults,
                 "split": "train",
-                "batch_size": allreduce_batch_size,
+                "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
             },
         )
         logging.info("Created train data regime: %s",
@@ -485,7 +476,7 @@ class Experiment:
                 "split": "validate",
                 "batch_size": self.args.eval_batch_size
                 if self.args.eval_batch_size > 0
-                else self.args.batch_size,
+                else self.args.batch_size * self.args.batches_per_allreduce,
             },
         )
         logging.info("Created test data regime: %s",

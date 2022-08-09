@@ -6,7 +6,6 @@ import numpy as np
 import logging
 import time
 import torch
-import torch.nn as nn
 import torchvision
 import wandb
 
@@ -26,7 +25,6 @@ class nil_agent(Agent):
         use_amp,
         config,
         optimizer_regime,
-        criterion,
         cuda,
         buffer_cuda,
         log_interval,
@@ -37,18 +35,13 @@ class nil_agent(Agent):
             use_amp,
             config,
             optimizer_regime,
-            criterion,
             cuda,
             buffer_cuda,
             log_interval,
             state_dict,
         )
 
-        if self.use_amp:
-            self.scaler = GradScaler()
-
         self.device = "cuda" if self.buffer_cuda else 'cpu'
-
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
@@ -377,9 +370,6 @@ class nil_agent(Agent):
         y,
         training=False,
     ):
-        outputs = []
-        total_loss = 0
-
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
@@ -436,17 +426,13 @@ class nil_agent(Agent):
                     "representatives", fig, self.global_steps)
 
         #torch.cuda.nvtx.range_push("Forward pass")
-        if training:
-            if self.use_amp:
-                with autocast(dtype=torch.float16):
-                    output = self.model(x)
-                    loss = self.criterion(output, y)
-            else:
+        if self.use_amp:
+            with autocast():
                 output = self.model(x)
                 loss = self.criterion(output, y)
         else:
             output = self.model(x)
-            loss = nn.CrossEntropyLoss()(output, y)
+            loss = self.criterion(output, y)
         # torch.cuda.nvtx.range_pop()
 
         if training:
@@ -476,7 +462,7 @@ class nil_agent(Agent):
         return -1
 
 
-def nil(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval):
+def nil(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_interval):
     implementation = config.get("implementation", "")
     agent = nil_agent
     if implementation == "cpp":
@@ -485,4 +471,4 @@ def nil(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, 
         agent = nil_global_agent
     elif implementation == "cpp_global":
         agent = nil_cpp_global_agent
-    return agent(model, use_amp, config, optimizer_regime, criterion, cuda, buffer_cuda, log_interval)
+    return agent(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_interval)
