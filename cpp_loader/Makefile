@@ -11,8 +11,8 @@ TORCH_INCLUDE=-I$(TORCH_ROOT)/include -I$(TORCH_ROOT)/include/torch/csrc/api/inc
 THALLIUM_INCLUDE?=$(shell pkg-config --cflags-only-I thallium)
 THALLIUM_LIBS?=$(shell pkg-config --libs thallium)
 
-INCLUDES=$(shell python -m pybind11 --includes) $(TORCH_INCLUDE) $(THALLIUM_INCLUDE)
-LIBS=-L$(TORCH_ROOT)/lib -ltorch $(THALLIUM_LIBS) -lc10 -ltorch_cpu
+INCLUDES=$(shell python -m pybind11 --includes) $(TORCH_INCLUDE) $(THALLIUM_INCLUDE) $(shell python3-config --cflags --embed)
+LIBS=-L$(TORCH_ROOT)/lib -ltorch $(THALLIUM_LIBS) $(shell python3-config --ldflags --embed) -lc10 -ltorch_cpu
 EXT=$(shell python3-config --extension-suffix)
 CC=g++
 

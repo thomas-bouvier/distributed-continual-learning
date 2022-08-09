@@ -53,6 +53,17 @@ if __name__ == "__main__":
 
     for epoch in range(10):
         for i, (inputs, target) in enumerate(loader):
+            inputs, target = inputs.cuda(), target.cuda()
             print(f"================================{i} (epoch: {epoch})")
             sl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
             size = sl.wait()
+
+    dsl = rehearsal.DistributedStreamLoader(
+        K, N, C, ctypes.c_int64(torch.random.initial_seed()).value, 0, "tcp://127.0.0.1:1234", [])
+
+    for epoch in range(10):
+        for i, (inputs, target) in enumerate(loader):
+            inputs, target = inputs.cuda(), target.cuda()
+            print(f"================================{i} (epoch: {epoch})")
+            dsl.accumulate(inputs, target, aug_samples, aug_labels, aug_weights)
+            size = dsl.wait()
