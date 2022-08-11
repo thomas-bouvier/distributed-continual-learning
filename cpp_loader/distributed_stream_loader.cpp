@@ -106,7 +106,7 @@ void distributed_stream_loader_t::async_process() {
             // how many tensors returned by the current node?
             auto options = torch::TensorOptions().dtype(torch::kFloat32);
             std::vector<torch::Tensor> tensors(indices.second.size(), torch::zeros({3, 224, 224}, options));
-            for (const auto& tensor : tensors)
+            for ([[maybe_unused]] const auto& tensor : tensors)
                 assert(tensor.is_contiguous());
             std::vector<std::pair<void*, std::size_t>> segments(indices.second.size());
             int i = 0;
@@ -198,7 +198,8 @@ void distributed_stream_loader_t::get_remote_samples(const tl::request& req, tl:
         auto weight = it->second.first;
         metadata.insert({label, {num, weight}});
         for (auto tensor : tensors) {
-            auto contiguous_tensor = tensor.contiguous();
+            //TODO: use RDMA from GPU directly...
+            auto contiguous_tensor = tensor.to(torch::kCPU).contiguous();
             assert(contiguous_tensor.is_contiguous());
             segments[i].first = contiguous_tensor.data_ptr();
             segments[i].second = contiguous_tensor.nbytes();
