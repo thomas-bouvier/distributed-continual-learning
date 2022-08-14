@@ -36,12 +36,6 @@ def synchronize_cuda(use_cuda=True):
         torch.cuda.synchronize()
 
 
-def eval_func(f, x):
-    if isinstance(f, string_types):
-        f = eval(f)
-    return f(x)
-
-
 # Find 2D index from accumulated list of lengths
 def find_2d_idx(c, idx):
     i1 = bisect(c, idx)

@@ -342,11 +342,6 @@ class Experiment:
         model_name = models.__dict__[self.args.model]
         model_config = {
             "num_classes": num_classes,
-            "optimizer": self.args.optimizer,
-            "lr": self.args.lr,
-            "lr_scaler": lr_scaler,
-            "momentum": self.args.momentum,
-            "weight_decay": self.args.weight_decay,
         }
         if self.args.model_config != "":
             model_config = dict(
@@ -384,16 +379,17 @@ class Experiment:
         model = move_cuda(model, self.args.cuda)
 
         # Building the optimizer regime
-        optim_regime = getattr(model, "regime")
-        logging.info(f"Optimizer regime: {optim_regime}")
+        regime = getattr(model, "regime")
+        logging.info(f"Optimizer regime: {regime}")
         self.optimizer_regime = OptimizerRegime(
             model,
-            self.args.use_amp,
+            self.args.lr * lr_scaler,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
             hvd.Adasum if self.args.use_adasum else hvd.Average,
             self.args.batches_per_allreduce,
             self.args.gradient_predivide_factor,
-            optim_regime,
+            regime,
+            self.args.use_amp
         )
 
         agent = (
@@ -454,13 +450,13 @@ class Experiment:
             "scenario": tasksets_config.get("scenario", "class"),
             "initial_increment": tasksets_config.get("initial_increment", 0),
             "increment": tasksets_config.get("increment", 1),
-            "num_tasks": tasksets_config.get("num_tasks", 5),
+            "num_tasks": tasksets_config.get("num_tasks", None),
             "concatenate_tasksets": tasksets_config.get("concatenate_tasksets", False),
         }
 
         self.train_data_regime = DataRegime(
             hvd,
-            defaults={
+            {
                 **defaults,
                 "split": "train",
                 "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
@@ -469,9 +465,9 @@ class Experiment:
         logging.info("Created train data regime: %s",
                      repr(self.train_data_regime))
 
-        self.test_data_regime = DataRegime(
+        self.validate_data_regime = DataRegime(
             hvd,
-            defaults={
+            {
                 **defaults,
                 "split": "validate",
                 "batch_size": self.args.eval_batch_size
@@ -480,7 +476,7 @@ class Experiment:
             },
         )
         logging.info("Created test data regime: %s",
-                     repr(self.test_data_regime))
+                     repr(self.validate_data_regime))
 
         return self.train_data_regime.num_classes
 
@@ -545,12 +541,12 @@ class Experiment:
                         self.agent.update_exemplars(
                             self.agent.nc, training=False)
                     for test_task_id in range(0, task_id+1):
-                        self.test_data_regime.set_task_id(test_task_id)
-                        self.test_data_regime.get_loader(True)
-                        self.test_data_regime.set_epoch(i_epoch)
+                        self.validate_data_regime.set_task_id(test_task_id)
+                        self.validate_data_regime.get_loader(True)
+                        self.validate_data_regime.set_epoch(i_epoch)
 
                         validate_results = self.agent.validate(
-                            self.test_data_regime)
+                            self.validate_data_regime)
                         meters["loss"].update(validate_results["loss"])
                         meters["prec1"].update(validate_results["prec1"])
                         meters["prec5"].update(validate_results["prec5"])

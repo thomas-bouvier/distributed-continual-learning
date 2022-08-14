@@ -2,34 +2,35 @@ import horovod.torch as hvd
 import logging
 import torch
 
-from regime import Regime
+from copy import deepcopy
 
 _OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
 
-
-class OptimizerRegime(Regime, torch.optim.Optimizer):
+class OptimizerRegime(object):
     def __init__(
         self,
         model,
-        use_amp,
+        lr,
         compression,
         reduction,
         batches_per_allreduce,
         gradient_predivide_factor,
         regime,
+        use_amp,
         defaults={},
     ):
-        super(OptimizerRegime, self).__init__(regime, defaults)
-        self.parameters = list(model.parameters())
+        self.lr = lr
         self.compression = compression
         self.reduction = reduction
         self.batches_per_allreduce = batches_per_allreduce
         self.gradient_predivide_factor = gradient_predivide_factor
+        self.regime = regime
+        self.use_amp = use_amp
+        self.defaults = defaults
+        self.config = defaults
+        self.current_regime_phase = None
 
-        optimizer = torch.optim.SGD(self.parameters, lr=0)
-        # Horovod: broadcast optimizer state and parameters
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # Horovod: wrap optimizer with DistributedOptimizer.
         self.optimizer = hvd.DistributedOptimizer(
@@ -41,9 +42,57 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
             gradient_predivide_factor=self.gradient_predivide_factor,
         )
 
-    def update(self, epoch=None, steps=None):
-        """Adjust optimizer according to current epoch or steps and training regime."""
-        if super(OptimizerRegime, self).update(epoch, steps):
+        # Horovod: broadcast optimizer state and parameters
+        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+
+    def update(self, epoch, steps):
+        """Adjusts config according to current epoch or steps and regime."""
+        if self.regime is None:
+            return False
+
+        epoch = -1 if epoch is None else epoch
+        steps = -1 if steps is None else steps
+        config = deepcopy(self.config)
+
+        if self.current_regime_phase is None:
+            # Find the first entry where the epoch is smallest than current
+            for regime_phase, regime_config in enumerate(self.regime):
+                start_epoch = regime_config.get("epoch", 0)
+                start_step = regime_config.get("step", 0)
+                if epoch >= start_epoch or steps >= start_step:
+                    self.current_regime_phase = regime_phase
+                    break
+                config.update(regime_config)
+
+        if len(self.regime) > self.current_regime_phase + 1:
+            next_phase = self.current_regime_phase + 1
+            # Any more regime steps?
+            start_epoch = self.regime[next_phase].get("epoch", float("inf"))
+            start_step = self.regime[next_phase].get("step", float("inf"))
+            if epoch >= start_epoch or steps >= start_step:
+                self.current_regime_phase = next_phase
+
+        config.update(self.regime[self.current_regime_phase])
+
+        if "lr_decay" in config:
+            decay_steps = config.pop("lr_decay_steps", 100)
+            if steps % decay_steps == 0:
+                decay_rate = config.pop("lr_decay")
+                config["lr_adj"] = decay_rate ** (steps / decay_steps)
+        elif "lr_rampup" in config and config["lr_rampup"]:
+            # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
+            # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
+            # the first warmup_epochs epochs.
+            # See https://arxiv.org/abs/1706.02677 for details.
+            warmup_epochs = config.pop("warmup_epochs", 5)
+            lr_epoch = float(steps + 1) / self.num_steps
+            config["lr_adj"] = (
+                1.0 / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
+            )
+
+        if config != self.config:
+            self.config = config
             logging.debug(
                 f"OPTIMIZER REGIME - update (epoch: {epoch}, steps: {steps})"
             )
@@ -57,7 +106,16 @@ class OptimizerRegime(Regime, torch.optim.Optimizer):
                 logging.debug(
                     f"OPTIMIZER REGIME - setting method = {config['optimizer']}"
                 )
+        if "lr_adj" in config:
+            logging.debug(
+                f"OPTIMIZER REGIME - lr adjusted - lr_adj = {config['lr_adj']}"
+            )
+
         for param_group in self.optimizer.param_groups:
+            if "lr_adj" in config:
+                lr = self.lr * config['lr_adj']
+                param_group['lr'] = lr
+                logging.debug(f"OPTIMIZER REGIME - updating lr = {lr}")
             for key in param_group.keys():
                 if key in config:
                     new_val = config[key]

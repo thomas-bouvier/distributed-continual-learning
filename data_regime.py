@@ -9,9 +9,8 @@ from continuum.tasks import TaskSet
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from data import get_dataset
-from data_loader import get_transform
-from regime import Regime
+from dataset import get_dataset
+from preprocess import get_transform
 from sampler import MyDistributedSampler
 
 
@@ -53,9 +52,9 @@ _OTHER_ARGS = {
 
 
 class DataRegime(object):
-    def __init__(self, hvd, defaults={}):
-        self.regime = Regime(None, deepcopy(defaults))
+    def __init__(self, hvd, config={}):
         self.hvd = hvd
+        self.config = config
         self.epoch = 0
         self.task_id = 0
         self.steps = None
@@ -65,9 +64,8 @@ class DataRegime(object):
         self.continual_test_taskset = []
         self.sampler = None
         self.loader = None
-        self.config = self.get_config()
-        self.get_data(True)
 
+        self.config = self.get_config(config)
         if self.config["others"].get("use_dali", False):
             try:
                 global DaliDataLoader
@@ -76,14 +74,16 @@ class DataRegime(object):
                 raise ImportError(
                     "Please install NVIDIA DALI to run this app.")
 
+        self.get_data(True)
+
 
     def get_data(self, force_update=False):
-        if force_update or self.regime.update(self.epoch, self.steps):
+        if force_update:
             self._transform = get_transform(**self.config["transform"])
             self.config["data"].setdefault("transform", self._transform)
             self._data = self.get_taskset()
             logging.debug(
-                f"DATA REGIME {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(self._data)}"
+                f"DATA LOADER {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(self._data)}"
             )
 
         return self._data
@@ -110,7 +110,7 @@ class DataRegime(object):
                     training=self.config["data"].get("split", True) == "train",
                     **self.config["loader"])
                 logging.debug(
-                    f"DATA REGIME {self.config['data']['split']} - data distributed using DALI")
+                    f"DATA LOADER {self.config['data']['split']} - data distributed using DALI")
             else:
                 if self.config["others"].get("distributed", False):
                     if self.config["others"].get("shard", False):
@@ -125,7 +125,7 @@ class DataRegime(object):
                 self.config["loader"]["shuffle"] = self.sampler is None
                 self.loader = DataLoader(self._data, **self.config["loader"])
                 logging.debug(
-                    f"DATA REGIME {self.config['data']['split']} - data distributed using sampler")
+                    f"DATA LOADER {self.config['data']['split']} - data distributed using sampler")
 
         return self.loader
 
@@ -140,7 +140,7 @@ class DataRegime(object):
                     self.concat_taskset = current_taskset
                 else:
                     logging.debug(
-                        f"DATA REGIME {self.config['data']['split']} - concatenating taskset with all previous ones.."
+                        f"DATA LOADER {self.config['data']['split']} - concatenating taskset with all previous ones.."
                     )
                     x, y, t = self.concat_taskset.get_raw_samples(
                         np.arange(len(self.concat_taskset))
@@ -197,7 +197,7 @@ class DataRegime(object):
 
     def set_epoch(self, epoch):
         logging.debug(
-            f"DATA REGIME {self.config['data']['split']} - set epoch: {epoch}"
+            f"DATA LOADER {self.config['data']['split']} - set epoch: {epoch}"
         )
         self.epoch = epoch
         if self.sampler is not None and hasattr(self.sampler, "set_epoch"):
@@ -205,7 +205,7 @@ class DataRegime(object):
 
     def set_task_id(self, task_id):
         logging.debug(
-            f"DATA REGIME {self.config['data']['split']} - set task id: {task_id}"
+            f"DATA LOADER {self.config['data']['split']} - set task id: {task_id}"
         )
         if self.task_id != task_id:
             self.task_id = task_id
@@ -215,13 +215,12 @@ class DataRegime(object):
         return len(self._data) or 1
 
     def __str__(self):
-        return str(self.regime)
+        return str(self.config)
 
     def __repr__(self):
         return str(self.config)
 
-    def get_config(self):
-        config = self.regime.config
+    def get_config(self, config):
         loader_config = {k: v for k,
                          v in config.items() if k in _DATALOADER_ARGS}
         data_config = {k: v for k, v in config.items() if k in _DATA_ARGS}
@@ -242,4 +241,4 @@ class DataRegime(object):
         }
 
     def get(self, key, default=None):
-        return self.regime.config.get(key, default)
+        return self.config.get(key, default)
