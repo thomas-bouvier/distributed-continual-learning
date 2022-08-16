@@ -46,6 +46,7 @@ _OTHER_ARGS = {
     "use_amp",
     "use_dali",
     "use_dali_cuda",
+    "fp16_dali",
     "distributed",
     "shard"
 }
@@ -101,7 +102,7 @@ class DataRegime(object):
                 self.config["loader"]["multiprocessing_context"] = "forkserver"
 
             if self.config["others"].get("use_dali", False):
-                precision = 16 if self.config["others"].get("use_amp", False) else 32
+                precision = 16 if self.config["others"].get("fp16_dali", False) else 32
                 self.loader = DaliDataLoader(
                     self._data, self.task_id,
                     self.config["others"].get("use_dali_cuda", False),

@@ -11,15 +11,14 @@ import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import wandb
 
+from argparse import Namespace
 from ast import literal_eval
 from datetime import datetime
 from os import path, makedirs
 
-#import torchvision.models as models
 import models
 import agents
 
-from argparse import Namespace
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
 from utils.log import save_checkpoint, setup_logging, ResultsLog
@@ -208,6 +207,12 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="enable Automatic Mixed Precision training",
+)
+parser.add_argument(
+    "--fp16-dali",
+    action="store_true",
+    default=False,
+    help="load images in half precision",
 )
 parser.add_argument(
     "--fp16-allreduce",
@@ -442,6 +447,7 @@ class Experiment:
             "distributed": hvd.size() > 1,
             "use_dali": self.args.use_dali,
             "use_dali_cuda": self.args.use_dali and self.args.cuda,
+            "fp16_dali": self.args.fp16_dali,
             "pin_memory": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
