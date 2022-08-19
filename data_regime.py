@@ -77,10 +77,10 @@ class DataRegime(object):
 
         self.get_data(True)
 
-
     def get_data(self, force_update=False):
         if force_update:
-            self._transform = get_transform(**self.config["transform"])
+            self._transform = get_transform(training=self.config["data"].get(
+                "split", True) == "train", **self.config["transform"])
             self.config["data"].setdefault("transform", self._transform)
             self._data = self.get_taskset()
             logging.debug(
@@ -102,7 +102,8 @@ class DataRegime(object):
                 self.config["loader"]["multiprocessing_context"] = "forkserver"
 
             if self.config["others"].get("use_dali", False):
-                precision = 16 if self.config["others"].get("fp16_dali", False) else 32
+                precision = 16 if self.config["others"].get(
+                    "fp16_dali", False) else 32
                 self.loader = DaliDataLoader(
                     self._data, self.task_id,
                     self.config["others"].get("use_dali_cuda", False),

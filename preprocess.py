@@ -1,66 +1,37 @@
 from torchvision import transforms
 
 
-_IMAGENET_NORMALIZE_STATS = {
-    "mean": [0.485, 0.456, 0.406],
-    "std": [0.229, 0.224, 0.225],
-}
-
-
-def scale_crop(input_size, scale_size=None, normalize=_IMAGENET_NORMALIZE_STATS):
-    convert_tensor = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize(**normalize)]
-    )
-    t_list = [transforms.CenterCrop(input_size), convert_tensor]
-    if scale_size != input_size:
-        t_list = [transforms.Resize(scale_size)] + t_list
-
-    return transforms.Compose(t_list)
-
-
-def preprocess_imagenet(input_size, normalize=_IMAGENET_NORMALIZE_STATS):
-    return transforms.Compose(
-        [
-            transforms.RandomResizedCrop(input_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(**normalize),
-        ]
-    )
-
-
-def preprocess_core50(input_size, normalize=_IMAGENET_NORMALIZE_STATS):
-    return transforms.Compose(
-        [
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(**normalize),
-        ]
-    )
+_IMAGENET_STATS = {'mean': [0.485, 0.456, 0.406],
+                   'std': [0.229, 0.224, 0.225]}
 
 
 def get_transform(
     transform_name="imagenet",
-    augment=True,
+    training=True,
     input_size=None,
-    scale_size=None,
-    normalize=None,
+    normalize=_IMAGENET_STATS,
 ):
-    normalize = normalize or _IMAGENET_NORMALIZE_STATS
     if transform_name == "mnist":
-        normalize = {"mean": [0.5], "std": [0.5]}
-        input_size = input_size or 28
-        scale_size = scale_size or 32
-        return scale_crop(
-            input_size=input_size, scale_size=scale_size, normalize=normalize
+        return transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize(mean=0.5, std=[0.5])]
         )
 
     elif "cifar" in transform_name:
-        input_size = input_size or 32
-        scale_size = scale_size or 32
-        return scale_crop(
-            input_size=input_size, scale_size=scale_size, normalize=normalize
-        )
+        if training:
+            return transforms.Compose([
+                transforms.RandomCrop(input_size or 32, padding=4),
+                transforms.RandomHorizontalFlip(),
+                CIFAR10Policy(fillcolor=(128, 128, 128)),
+                transforms.ToTensor(),
+                transforms.Normalize(**normalize)
+            ])
+        else:
+            return transforms.Compose([
+                transforms.RandomCrop(scale_size, padding=4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(**normalize)
+            ])
 
     elif (
         transform_name == "imagenet100"
@@ -68,37 +39,41 @@ def get_transform(
         or transform_name == "imagenet"
         or transform_name == "imagenet_blurred"
     ):
-        input_size = input_size or 224
-        scale_size = scale_size or int(input_size * 8 / 7)
-        if augment:
-            return preprocess_imagenet(input_size=input_size, normalize=normalize)
+        if training:
+            return transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(input_size or 224),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize(**normalize)
+                ]
+            )
         else:
-            return scale_crop(
-                input_size=input_size,
-                scale_size=scale_size,
-                normalize=normalize,
+            return transforms.Compose(
+                [
+                    transforms.Resize(256),
+                    transforms.CenterCrop(input_size or 224),
+                    transforms.ToTensor(),
+                    transforms.Normalize(**normalize)
+                ]
             )
 
     elif transform_name == "tinyimagenet":
-        input_size = input_size or 64
-        scale_size = scale_size or int(input_size * 8 / 7)
-        if augment:
-            return preprocess_imagenet(input_size=input_size, normalize=normalize)
-        else:
-            return scale_crop(
-                input_size=input_size,
-                scale_size=scale_size,
-                normalize=normalize,
+        if training:
+            return transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(input_size or 64),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    transforms.Normalize(**normalize)
+                ]
             )
-
-    elif transform_name == "core50":
-        input_size = input_size or 224
-        scale_size = scale_size or int(input_size * 8 / 7)
-        if augment:
-            return preprocess_core50(input_size=input_size, normalize=normalize)
         else:
-            return scale_crop(
-                input_size=input_size,
-                scale_size=scale_size,
-                normalize=normalize,
+            return transforms.Compose(
+                [
+                    transforms.Resize(256),
+                    transforms.CenterCrop(input_size or 224 * 8 / 7),
+                    transforms.ToTensor(),
+                    transforms.Normalize(**normalize)
+                ]
             )
