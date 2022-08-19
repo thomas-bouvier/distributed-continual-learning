@@ -329,9 +329,13 @@ class Experiment:
         self.save_path = save_path
 
         num_classes = self.prepare_dataset()
-        self.create_agent(num_classes)
+        batch_metrics_path = path.join(self.save_path, "batch_metrics")
+        batch_metrics = ResultsLog(
+            batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir
+        )
+        self.create_agent(num_classes, batch_metrics)
 
-    def create_agent(self, num_classes):
+    def create_agent(self, num_classes, batch_metrics=None):
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
         lr_scaler = (
@@ -416,6 +420,7 @@ class Experiment:
             self.args.cuda,
             self.args.buffer_cuda,
             self.args.log_interval,
+            batch_metrics
         )
         self.agent.epochs = self.args.epochs
         logging.info(f"Created agent with configuration: {agent_config}")
@@ -500,6 +505,7 @@ class Experiment:
         time_metrics = ResultsLog(
             time_metrics_path, title="Time metrics - %s" % self.args.save_dir
         )
+        
         img_secs = []
         evaluate_durations = []
 

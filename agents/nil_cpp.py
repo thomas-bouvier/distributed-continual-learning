@@ -30,6 +30,7 @@ class nil_cpp_agent(Agent):
         cuda,
         buffer_cuda,
         log_interval,
+        batch_metrics=None,
         state_dict=None,
     ):
         super(nil_cpp_agent, self).__init__(
@@ -40,6 +41,7 @@ class nil_cpp_agent(Agent):
             cuda,
             buffer_cuda,
             log_interval,
+            batch_metrics,
             state_dict,
         )
 
@@ -48,7 +50,6 @@ class nil_cpp_agent(Agent):
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
         self.batch_size = config.get("batch_size")
-
         self.num_reps = 0
 
         self.epoch_load_time = 0
@@ -56,6 +57,7 @@ class nil_cpp_agent(Agent):
         self.epoch_wait_time = 0
         self.epoch_cat_time = 0
         self.epoch_acc_time = 0
+        self.last_batch_time = 0
         self.last_batch_load_time = 0
         self.last_batch_move_time = 0
         self.last_batch_wait_time = 0
@@ -95,7 +97,6 @@ class nil_cpp_agent(Agent):
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
 
-
     """
     Forward pass for the current epoch
     """
@@ -121,8 +122,8 @@ class nil_cpp_agent(Agent):
                 i_batch, x, y, training=training
             )
             synchronize_cuda(self.cuda)
-            batch_time = time.time() - start_batch_time
-            epoch_time += batch_time
+            self.last_batch_time = time.time() - start_batch_time
+            epoch_time += self.last_batch_time
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
@@ -146,19 +147,36 @@ class nil_cpp_agent(Agent):
                     )
                 )
 
-                logging.info(f"batch {i_batch} time {batch_time} sec")
+                logging.info(f"batch {i_batch} time {self.last_batch_time} sec")
                 logging.info(
-                    f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/batch_time}%)")
+                    f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
                 logging.info(
-                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/self.last_batch_time}%)")
                 logging.info(
-                    f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/batch_time}%)")
+                    f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
                 logging.info(
-                    f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/batch_time}%)")
+                    f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/self.last_batch_time}%)")
                 logging.info(
-                    f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/batch_time}%)")
+                    f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
+                logging.info(
+                    f"\tnum_representatives {self.get_num_representatives()}")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
+                    if self.epoch < 5 and self.batch_metrics is not None:
+                        batch_metrics_values = dict(
+                            epoch=self.epoch,
+                            batch=i_batch,
+                            time=self.last_batch_time,
+                            load_time=self.last_batch_load_time,
+                            move_time=self.last_batch_move_time,
+                            wait_time=self.last_batch_wait_time,
+                            cat_time=self.last_batch_cat_time,
+                            acc_time=self.last_batch_acc_time,
+                            num_reps=self.num_reps,
+                        )
+                        self.batch_metrics.add(**batch_metrics_values)
+                        self.batch_metrics.save()
+
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
                                "step": self.global_steps,
                                "epoch": self.global_epoch,
@@ -319,7 +337,7 @@ class nil_cpp_agent(Agent):
                 fig = plot_representatives(
                     self.aug_x[len(x):], self.aug_y[len(x):], 5)
                 self.writer.add_figure(
-                        "representatives", fig, self.global_steps)
+                    "representatives", fig, self.global_steps)
 
         return output, loss
 

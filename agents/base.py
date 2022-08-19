@@ -22,6 +22,7 @@ class Agent:
         cuda,
         buffer_cuda,
         log_interval,
+        batch_metrics=None,
         state_dict=None,
     ):
         super(Agent, self).__init__()
@@ -32,6 +33,8 @@ class Agent:
         self.cuda = cuda
         self.buffer_cuda = buffer_cuda
         self.log_interval = log_interval
+        self.batch_metrics = batch_metrics
+
         self.global_epoch = 0
         self.epoch = 0
         self.global_steps = 0
@@ -44,7 +47,7 @@ class Agent:
         self.streams = {}
 
         if self.use_amp:
-           self.scaler = GradScaler()
+            self.scaler = GradScaler()
 
         self.criterion = nn.CrossEntropyLoss()
 
@@ -281,7 +284,7 @@ class Agent:
             from torch.utils.tensorboard import SummaryWriter
         except ImportError:
             raise ImportError(
-                "Please install tensorboardx to run this app.")
+                "Please install tensorboard to run this app.")
         self.writer = SummaryWriter(log_dir=save_path)
         return True
 
