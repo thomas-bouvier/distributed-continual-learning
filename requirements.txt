@@ -4,7 +4,7 @@ filelock
 horovod[pytorch]
 nvtx
 ruamel.yaml
-tensorboardx
+tensorboard
 tensorwatch
 torch
 torchvision

@@ -56,6 +56,7 @@ def plot_representatives(rep_values, rep_labels, num_cols):
             ax[j, k].axis('off')
     return fig
 
+
 def display(outputs, count, columns=2, captions=None, cuda=True):
     rows = int(math.ceil(len(outputs) / columns))
     fig = plt.figure()
@@ -68,5 +69,6 @@ def display(outputs, count, columns=2, captions=None, cuda=True):
         plt.axis("off")
         if captions is not None:
             plt.title(captions[i])
-        plt.imshow(outputs[i].permute(1, 2, 0).cpu() if cuda else outputs[i].permute(1, 2, 0))
+        plt.imshow(outputs[i].permute(1, 2, 0).cpu()
+                   if cuda else outputs[i].permute(1, 2, 0))
         plt.savefig("batch.jpg")

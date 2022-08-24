@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 import shutil
 import torch
+import wandb
 
 from bokeh.io import output_file, save
 from bokeh.plotting import figure
@@ -203,6 +204,7 @@ class ResultsLog(object):
             holder_dictionary = self.results.to_dict(orient="records")
             with open(self.data_path, "w") as outfile:
                 json.dump(holder_dictionary, outfile)
+                wandb.save(self.data_path)
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
 

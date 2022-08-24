@@ -297,7 +297,10 @@ def main():
 
     save_path = ""
     if hvd.rank() == 0 and hvd.local_rank() == 0:
-        wandb.init(project="distributed-continual-learning")
+        if args.agent is not None:
+            wandb.init(project=f"distributed-continual-learning_{args.agent}")
+        else:
+            wandb.init(project="distributed-continual-learning")
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
         wandb.run.name = run_name
 

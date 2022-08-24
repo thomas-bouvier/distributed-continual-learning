@@ -6,6 +6,7 @@ from copy import deepcopy
 
 _OPTIMIZERS = {name: func for name, func in torch.optim.__dict__.items()}
 
+
 class OptimizerRegime(object):
     def __init__(
         self,
