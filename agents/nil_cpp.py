@@ -29,6 +29,7 @@ class nil_cpp_agent(Agent):
         optimizer_regime,
         cuda,
         buffer_cuda,
+        log_buffer,
         log_interval,
         batch_metrics=None,
         state_dict=None,
@@ -40,6 +41,7 @@ class nil_cpp_agent(Agent):
             optimizer_regime,
             cuda,
             buffer_cuda,
+            log_buffer,
             log_interval,
             batch_metrics,
             state_dict,
@@ -50,6 +52,7 @@ class nil_cpp_agent(Agent):
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
         self.batch_size = config.get("batch_size")
+
         self.num_reps = 0
 
         self.epoch_load_time = 0
@@ -67,10 +70,18 @@ class nil_cpp_agent(Agent):
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
 
-        shape = shape = next(iter(train_data_regime.get_loader()))[0][0].size()
+        shape = next(iter(train_data_regime.get_loader()))[0][0].size()
 
-        self.sl = rehearsal.StreamLoader(
-            self.num_classes, self.num_representatives, self.num_candidates, ctypes.c_int64(torch.random.initial_seed()).value)
+        port = 1234 + hvd.rank()
+        self.dsl = rehearsal.DistributedStreamLoader(
+            rehearsal.Classification,
+            self.num_classes, self.num_representatives, self.num_candidates,
+            ctypes.c_int64(torch.random.initial_seed()).value,
+            ctypes.c_uint16(hvd.rank()).value,
+            f"tcp://127.0.0.1:{port}",
+            [f"tcp://127.0.0.1:{port}"],
+            1, list(shape)
+        )
 
         self.aug_x = torch.zeros(
             self.batch_size + self.num_samples, *shape, device=self.device)
@@ -84,8 +95,9 @@ class nil_cpp_agent(Agent):
 
         # Distribute the data
         #torch.cuda.nvtx.range_push("Distribute dataset")
-        train_data_regime.get_loader(True)
+        iterations = train_data_regime.get_loader(True)
         # torch.cuda.nvtx.range_pop()
+        logging.info(f"{iterations} iterations needed with batch size {self.batch_size} to traverse taskset {task_id}")
 
         if self.best_model is not None:
             logging.debug(
@@ -114,9 +126,11 @@ class nil_cpp_agent(Agent):
         epoch_time = 0
         step_count = 0
 
+        dataloader_iter = enumerate(data_regime.get_loader())
+
         start_batch_time = time.time()
         start_load_time = start_batch_time
-        for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
+        for i_batch, (x, y, t) in dataloader_iter:
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
@@ -292,26 +306,59 @@ class nil_cpp_agent(Agent):
         # torch.cuda.nvtx.range_pop()
 
         if self.num_reps == 0:
-            self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+
+        ####
+        #aug_x = None
+        #aug_y = None
+        #aug_w = None
 
         if training:
             # Get the representatives
             start_wait_time = time.time()
-            self.sl.wait()
+            aug_size = self.dsl.wait()
             self.last_batch_wait_time = time.time() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
+            #aug_x = self.aug_x.clone()
+            #aug_y = self.aug_y.clone()
+            #aug_w = self.aug_w.clone()
+            logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
+            if self.log_buffer:
+                display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
 
-        #torch.cuda.nvtx.range_push("Forward pass")
-        if self.use_amp:
-            with autocast():
+            ############ slot 1
+            #start_acc_time = time.time()
+            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            #self.last_batch_acc_time = time.time() - start_acc_time
+            #self.epoch_acc_time += self.last_batch_acc_time
+
+            #torch.cuda.nvtx.range_push("Forward pass")
+            if self.use_amp:
+                with autocast():
+                    output = self.model(self.aug_x)
+                    loss = self.criterion(output, self.aug_y)
+            else:
                 output = self.model(self.aug_x)
                 loss = self.criterion(output, self.aug_y)
+            # torch.cuda.nvtx.range_pop()
         else:
-            output = self.model(self.aug_x)
-            loss = self.criterion(output, self.aug_y)
-        # torch.cuda.nvtx.range_pop()
+            #torch.cuda.nvtx.range_push("Forward pass")
+            if self.use_amp:
+                with autocast():
+                    output = self.model(x)
+                    loss = self.criterion(output, y)
+            else:
+                output = self.model(x)
+                loss = self.criterion(output, y)
+            # torch.cuda.nvtx.range_pop()
 
         if training:
+            ############ slot 2
+            #start_acc_time = time.time()
+            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            #self.last_batch_acc_time = time.time() - start_acc_time
+            #self.epoch_acc_time += self.last_batch_acc_time
+
             #torch.cuda.nvtx.range_push("Optimizer step")
             if self.use_amp:
                 self.scaler.scale(loss).backward()
@@ -324,14 +371,15 @@ class nil_cpp_agent(Agent):
                 self.optimizer_regime.step()
             # torch.cuda.nvtx.range_pop()
 
+            ############ slot 3
             start_acc_time = time.time()
-            self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
             self.last_batch_acc_time = time.time() - start_acc_time
             self.epoch_acc_time += self.last_batch_acc_time
 
             self.global_steps += 1
             self.steps += 1
-            self.num_reps = self.sl.get_rehearsal_size()
+            self.num_reps = self.dsl.get_rehearsal_size()
 
             # Log representatives
             if self.writer is not None and self.writer_images and self.num_reps > 0:

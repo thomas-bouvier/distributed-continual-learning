@@ -29,6 +29,7 @@ class nil_cpp_global_agent(Agent):
         optimizer_regime,
         cuda,
         buffer_cuda,
+        log_buffer,
         log_interval,
         batch_metrics=None,
         state_dict=None,
@@ -40,6 +41,7 @@ class nil_cpp_global_agent(Agent):
             optimizer_regime,
             cuda,
             buffer_cuda,
+            log_buffer,
             log_interval,
             batch_metrics,
             state_dict,
@@ -76,15 +78,21 @@ class nil_cpp_global_agent(Agent):
         if remote_ips:
             for ip in remote_ips.split(','):
                 address_and_port = ip.split(':')
+                if len(address_and_port) != 3:
+                    raise ValueError("Remote ips should have the following format: tcp://ip:port")
                 # No need to exclude current node!
                 # if len(address_and_port) == 3 and int(address_and_port[2]) == port:
                 #    continue
                 remote_nodes.append((int(address_and_port[2]) - 1234, ip))
         logging.debug(f"Remote nodes to sample from: {remote_nodes}")
+
+        if not remote_nodes:
+            raise RuntimeError("Global sampling requires remote nodes")
+
         self.dsl = rehearsal.DistributedStreamLoader(
             rehearsal.Classification,
             self.num_classes, self.num_representatives, self.num_candidates,
-            ctypes.c_int64(torch.random.initial_seed()).value,
+            ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value,
             f"tcp://127.0.0.1:{port}",
             remote_nodes,
@@ -315,38 +323,57 @@ class nil_cpp_global_agent(Agent):
         if self.num_reps == 0:
             self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
+        ####
+        #aug_x = None
+        #aug_y = None
+        #aug_w = None
+
         if training:
             # Get the representatives
             start_wait_time = time.time()
-            self.dsl.wait()
+            aug_size = self.dsl.wait()
             self.last_batch_wait_time = time.time() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
+            #aug_x = self.aug_x.clone()
+            #aug_y = self.aug_y.clone()
+            #aug_w = self.aug_w.clone()
+            logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
+            if self.log_buffer:
+                display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
 
-        ############ slot 1
-        #if training:
-        #    start_acc_time = time.time()
-        #    self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-        #    self.last_batch_acc_time = time.time() - start_acc_time
-        #    self.epoch_acc_time += self.last_batch_acc_time
+            ############ slot 1
+            #start_acc_time = time.time()
+            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            #self.last_batch_acc_time = time.time() - start_acc_time
+            #self.epoch_acc_time += self.last_batch_acc_time
 
-        #torch.cuda.nvtx.range_push("Forward pass")
-        if self.use_amp:
-            with autocast():
+            #torch.cuda.nvtx.range_push("Forward pass")
+            if self.use_amp:
+                with autocast():
+                    output = self.model(self.aug_x)
+                    loss = self.criterion(output, self.aug_y)
+            else:
                 output = self.model(self.aug_x)
                 loss = self.criterion(output, self.aug_y)
+             # torch.cuda.nvtx.range_pop()
         else:
-            output = self.model(self.aug_x)
-            loss = self.criterion(output, self.aug_y)
-        # torch.cuda.nvtx.range_pop()
-
-        ############ slot 2
-        #if training:
-        #    start_acc_time = time.time()
-        #    self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-        #    self.last_batch_acc_time = time.time() - start_acc_time
-        #    self.epoch_acc_time += self.last_batch_acc_time
+            #torch.cuda.nvtx.range_push("Forward pass")
+            if self.use_amp:
+                with autocast():
+                    output = self.model(x)
+                    loss = self.criterion(output, y)
+            else:
+                output = self.model(x)
+                loss = self.criterion(output, y)
+            # torch.cuda.nvtx.range_pop()
 
         if training:
+            ############ slot 2
+            #start_acc_time = time.time()
+            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            #self.last_batch_acc_time = time.time() - start_acc_time
+            #self.epoch_acc_time += self.last_batch_acc_time
+
             #torch.cuda.nvtx.range_push("Optimizer step")
             if self.use_amp:
                 self.scaler.scale(loss).backward()

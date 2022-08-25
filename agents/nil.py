@@ -27,6 +27,7 @@ class nil_agent(Agent):
         optimizer_regime,
         cuda,
         buffer_cuda,
+        log_buffer,
         log_interval,
         batch_metrics=None,
         state_dict=None,
@@ -38,6 +39,7 @@ class nil_agent(Agent):
             optimizer_regime,
             cuda,
             buffer_cuda,
+            log_buffer,
             log_interval,
             batch_metrics,
             state_dict,
@@ -480,7 +482,7 @@ class nil_agent(Agent):
         return -1
 
 
-def nil(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_interval, batch_metrics):
+def nil(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_buffer, log_interval, batch_metrics):
     implementation = config.get("implementation", "")
     agent = nil_agent
     if implementation == "cpp":
@@ -489,4 +491,4 @@ def nil(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_interva
         agent = nil_global_agent
     elif implementation == "cpp_global":
         agent = nil_cpp_global_agent
-    return agent(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_interval, batch_metrics)
+    return agent(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_buffer, log_interval, batch_metrics)
