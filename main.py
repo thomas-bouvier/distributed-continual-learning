@@ -79,7 +79,7 @@ parser.add_argument(
     help="store replay buffers in CUDA memory rather than cpu",
 )
 parser.add_argument(
-    "--buffer-tensorboard",
+    "--log-buffer",
     action="store_true",
     default=False,
     help="log replay buffers to tensorboard",
@@ -269,7 +269,7 @@ def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     args.buffer_cuda = args.buffer_cuda and args.cuda
-    args.buffer_tensorboard = args.buffer_tensorboard and args.tensorboard
+    args.buffer_tensorboard = args.log_buffer and args.tensorboard
     args.evaluate = not args.training_only
 
     mp.set_start_method("spawn")
@@ -279,7 +279,10 @@ def main():
     for k, v in params.items():
         yparam = yparams[k]
         if yparam:
-            params[k] = yparam
+            if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config':
+                params[k] = literal_eval(v) | literal_eval(yparam)
+            else:
+                params[k] = yparam
     args = Namespace(**params)
 
     # Horovod: initialize library.
@@ -422,6 +425,7 @@ class Experiment:
             self.optimizer_regime,
             self.args.cuda,
             self.args.buffer_cuda,
+            self.args.log_buffer,
             self.args.log_interval,
             batch_metrics
         )

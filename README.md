@@ -52,7 +52,7 @@ make -C cpp_loader/
 
 ## Usage
 
-Parameters defined in the `config.yaml` override CLI parameters.
+Parameters defined in the `config.yaml` override CLI parameters. However, values for `agent_config`, `model_config` and `tasksets_config` will be concatenated with those defined when there is no key conflict.
 
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|
