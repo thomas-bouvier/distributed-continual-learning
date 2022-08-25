@@ -276,7 +276,7 @@ class nil_agent(Agent):
                     f"\tnum_representatives {self.get_num_representatives()}")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
-                    if self.epoch < 5 and self.batch_metrics is not None:
+                    if training and self.epoch < 5 and self.batch_metrics is not None:
                         batch_metrics_values = dict(
                             epoch=self.epoch,
                             batch=i_batch,

@@ -66,10 +66,14 @@ class nil_cpp_agent(Agent):
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
+
+        shape = shape = next(iter(train_data_regime.get_loader()))[0][0].size()
+
         self.sl = rehearsal.StreamLoader(
             self.num_classes, self.num_representatives, self.num_candidates, ctypes.c_int64(torch.random.initial_seed()).value)
 
-        self.aug_x = None
+        self.aug_x = torch.zeros(
+            self.batch_size + self.num_samples, *shape, device=self.device)
         self.aug_y = torch.randint(high=self.num_classes, size=(
             self.batch_size + self.num_samples,), device=self.device)
         self.aug_w = torch.zeros(
@@ -162,7 +166,7 @@ class nil_cpp_agent(Agent):
                     f"\tnum_representatives {self.get_num_representatives()}")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
-                    if self.epoch < 5 and self.batch_metrics is not None:
+                    if training and self.epoch < 5 and self.batch_metrics is not None:
                         batch_metrics_values = dict(
                             epoch=self.epoch,
                             batch=i_batch,
@@ -287,10 +291,7 @@ class nil_cpp_agent(Agent):
         self.epoch_move_time += self.last_batch_move_time
         # torch.cuda.nvtx.range_pop()
 
-        if self.aug_x is None:
-            size = list(x.size())[1:]
-            self.aug_x = torch.zeros(
-                self.batch_size + self.num_samples, *size, device=self.device)
+        if self.num_reps == 0:
             self.sl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
         if training:

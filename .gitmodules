@@ -1,0 +1,3 @@
+[submodule "distributed-rehearsal-buffer"]
+	path = distributed-rehearsal-buffer
+	url = git@gitlab.inria.fr:Kerdata/Kerdata-Codes/distributed-rehearsal-buffer.git

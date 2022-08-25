@@ -68,6 +68,8 @@ class nil_cpp_global_agent(Agent):
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
 
+        shape = next(iter(train_data_regime.get_loader()))[0][0].size()
+
         port = 1234 + hvd.rank()
         remote_nodes = []
         remote_ips = self.config.get("remote_nodes", "")
@@ -80,14 +82,17 @@ class nil_cpp_global_agent(Agent):
                 remote_nodes.append((int(address_and_port[2]) - 1234, ip))
         logging.debug(f"Remote nodes to sample from: {remote_nodes}")
         self.dsl = rehearsal.DistributedStreamLoader(
+            rehearsal.Classification,
             self.num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed()).value,
             ctypes.c_uint16(hvd.rank()).value,
             f"tcp://127.0.0.1:{port}",
-            remote_nodes
+            remote_nodes,
+            1, list(shape)
         )
 
-        self.aug_x = None
+        self.aug_x = torch.zeros(
+            self.batch_size + self.num_samples, *shape, device=self.device)
         self.aug_y = torch.randint(high=self.num_classes, size=(
             self.batch_size + self.num_samples,), device=self.device)
         self.aug_w = torch.zeros(
@@ -128,9 +133,11 @@ class nil_cpp_global_agent(Agent):
         epoch_time = 0
         step_count = 0
 
+        dataloader_iter = enumerate(data_regime.get_loader())
+
         start_batch_time = time.time()
         start_load_time = start_batch_time
-        for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
+        for i_batch, (x, y, t) in dataloader_iter:
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
@@ -180,7 +187,7 @@ class nil_cpp_global_agent(Agent):
                     f"\tnum_representatives {self.get_num_representatives()}")
 
                 if hvd.rank() == 0 and hvd.local_rank() == 0:
-                    if self.epoch < 5 and self.batch_metrics is not None:
+                    if training and self.epoch < 5 and self.batch_metrics is not None:
                         batch_metrics_values = dict(
                             epoch=self.epoch,
                             batch=i_batch,
@@ -305,10 +312,7 @@ class nil_cpp_global_agent(Agent):
         self.epoch_move_time += self.last_batch_move_time
         # torch.cuda.nvtx.range_pop()
 
-        if self.aug_x is None:
-            size = list(x.size())[1:]
-            self.aug_x = torch.zeros(
-                self.batch_size + self.num_samples, *size, device=self.device)
+        if self.num_reps == 0:
             self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
         if training:
@@ -317,6 +321,13 @@ class nil_cpp_global_agent(Agent):
             self.dsl.wait()
             self.last_batch_wait_time = time.time() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
+
+        ############ slot 1
+        #if training:
+        #    start_acc_time = time.time()
+        #    self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+        #    self.last_batch_acc_time = time.time() - start_acc_time
+        #    self.epoch_acc_time += self.last_batch_acc_time
 
         #torch.cuda.nvtx.range_push("Forward pass")
         if self.use_amp:
@@ -327,6 +338,13 @@ class nil_cpp_global_agent(Agent):
             output = self.model(self.aug_x)
             loss = self.criterion(output, self.aug_y)
         # torch.cuda.nvtx.range_pop()
+
+        ############ slot 2
+        #if training:
+        #    start_acc_time = time.time()
+        #    self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+        #    self.last_batch_acc_time = time.time() - start_acc_time
+        #    self.epoch_acc_time += self.last_batch_acc_time
 
         if training:
             #torch.cuda.nvtx.range_push("Optimizer step")
@@ -341,6 +359,7 @@ class nil_cpp_global_agent(Agent):
                 self.optimizer_regime.step()
             # torch.cuda.nvtx.range_pop()
 
+            ############ slot 3
             start_acc_time = time.time()
             self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
             self.last_batch_acc_time = time.time() - start_acc_time
