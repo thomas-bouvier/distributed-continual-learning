@@ -195,6 +195,7 @@ class DataRegime(object):
                     trsf=[self.config["data"]["transform"]]
                 )
             ]
+        logging.info(f"Prepared {len(self.tasksets)} tasksets")
         self.num_classes = self.tasksets[0].nb_classes
 
     def set_epoch(self, epoch):

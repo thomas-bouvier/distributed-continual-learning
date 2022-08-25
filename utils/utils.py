@@ -2,6 +2,7 @@ import math
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import torch
+import wandb
 
 from bisect import bisect
 from six import string_types
@@ -57,7 +58,7 @@ def plot_representatives(rep_values, rep_labels, num_cols):
     return fig
 
 
-def display(outputs, count, columns=2, captions=None, cuda=True):
+def display(filename, outputs, count, columns=2, captions=None, cuda=True):
     rows = int(math.ceil(len(outputs) / columns))
     fig = plt.figure()
     fig.set_size_inches(16, 6 * rows)
@@ -71,4 +72,6 @@ def display(outputs, count, columns=2, captions=None, cuda=True):
             plt.title(captions[i])
         plt.imshow(outputs[i].permute(1, 2, 0).cpu()
                    if cuda else outputs[i].permute(1, 2, 0))
-        plt.savefig("batch.jpg")
+        path = f"{filename}.jpg"
+        plt.savefig(path)
+        wandb.save(path)

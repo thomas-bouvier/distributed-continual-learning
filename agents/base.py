@@ -21,6 +21,7 @@ class Agent:
         optimizer_regime,
         cuda,
         buffer_cuda,
+        log_buffer,
         log_interval,
         batch_metrics=None,
         state_dict=None,
@@ -32,6 +33,7 @@ class Agent:
         self.optimizer_regime = optimizer_regime
         self.cuda = cuda
         self.buffer_cuda = buffer_cuda
+        self.log_buffer = log_buffer
         self.log_interval = log_interval
         self.batch_metrics = batch_metrics
 
@@ -78,7 +80,6 @@ class Agent:
         start_batch_time = time.time()
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
-            #display(x, 128, captions=y, cuda=self.cuda)
             #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
@@ -206,10 +207,10 @@ class Agent:
         if self.use_amp:
             with autocast():
                 output = self.model(x)
-                loss = self.criterion(output, y.long())
+                loss = self.criterion(output, y)
         else:
             output = self.model(x)
-            loss = self.criterion(output, y.long())
+            loss = self.criterion(output, y)
         # torch.cuda.nvtx.range_pop()
 
         if training:
@@ -336,7 +337,7 @@ class Agent:
             stream.write(values)
 
 
-def base(model, use_amp, agent_config, optimizer_regime, cuda, buffer_cuda, log_interval):
+def base(model, use_amp, agent_config, optimizer_regime, cuda, buffer_cuda, log_buffer, log_interval, batch_metrics):
     return Agent(
         model,
         use_amp,
@@ -344,5 +345,7 @@ def base(model, use_amp, agent_config, optimizer_regime, cuda, buffer_cuda, log_
         optimizer_regime,
         cuda,
         buffer_cuda,
+        log_buffer,
         log_interval,
+        batch_metrics
     )
