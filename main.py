@@ -280,7 +280,10 @@ def main():
         yparam = yparams[k]
         if yparam:
             if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config':
-                params[k] = literal_eval(v) | literal_eval(yparam)
+                if v :
+                    params[k] = str(literal_eval(v) | literal_eval(yparam))
+                else:
+                    params[k] = yparam
             else:
                 params[k] = yparam
     args = Namespace(**params)
