@@ -196,7 +196,7 @@ class DataRegime(object):
                 )
             ]
         logging.info(f"Prepared {len(self.tasksets)} tasksets")
-        self.num_classes = self.tasksets[0].nb_classes
+        self.num_classes = len(dataset.list_classes)
 
     def set_epoch(self, epoch):
         logging.debug(
