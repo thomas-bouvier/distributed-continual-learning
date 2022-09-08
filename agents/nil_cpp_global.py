@@ -72,31 +72,12 @@ class nil_cpp_global_agent(Agent):
 
         shape = next(iter(train_data_regime.get_loader()))[0][0].size()
 
-        port = 1234 + hvd.rank()
-        remote_nodes = []
-        remote_ips = self.config.get("remote_nodes", "")
-        if remote_ips:
-            for ip in remote_ips.split(','):
-                address_and_port = ip.split(':')
-                if len(address_and_port) != 3:
-                    raise ValueError("Remote ips should have the following format: tcp://ip:port")
-                # No need to exclude current node!
-                # if len(address_and_port) == 3 and int(address_and_port[2]) == port:
-                #    continue
-                remote_nodes.append((int(address_and_port[2]) - 1234, ip))
-        logging.debug(f"Remote nodes to sample from: {remote_nodes}")
-
-        if not remote_nodes:
-            raise RuntimeError("Global sampling requires remote nodes")
-
         self.dsl = rehearsal.DistributedStreamLoader(
             rehearsal.Classification,
             self.num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value,
-            f"tcp://127.0.0.1:{port}",
-            remote_nodes,
-            1, list(shape)
+            "tcp://", 1, list(shape), True
         )
 
         self.aug_x = torch.zeros(
