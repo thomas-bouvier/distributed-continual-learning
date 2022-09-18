@@ -340,7 +340,8 @@ class Experiment:
         num_classes = self.prepare_dataset()
         batch_metrics_path = path.join(self.save_path, "batch_metrics")
         batch_metrics = ResultsLog(
-            batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir
+            batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
         self.create_agent(num_classes, batch_metrics)
 
@@ -505,15 +506,18 @@ class Experiment:
     def run(self):
         dl_metrics_path = path.join(self.save_path, "dl_metrics")
         dl_metrics = ResultsLog(
-            dl_metrics_path, title="DL metrics - %s" % self.args.save_dir
+            dl_metrics_path, title="DL metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
         tasks_metrics_path = path.join(self.save_path, "tasks_metrics")
         tasks_metrics = ResultsLog(
-            tasks_metrics_path, title="Tasks metrics - %s" % self.args.save_dir
+            tasks_metrics_path, title="Tasks metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
         time_metrics_path = path.join(self.save_path, "time_metrics")
         time_metrics = ResultsLog(
-            time_metrics_path, title="Time metrics - %s" % self.args.save_dir
+            time_metrics_path, title="Time metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
         
         img_secs = []
