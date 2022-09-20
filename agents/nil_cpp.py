@@ -80,7 +80,7 @@ class nil_cpp_agent(Agent):
             ctypes.c_uint16(hvd.rank()).value,
             f"tcp://127.0.0.1:{port}", 1, list(shape), False
         )
-        self.dsl.register_endpoints([(f"tcp://127.0.0.1:{port}", hvd.rank())])
+        self.dsl.register_endpoints({f"tcp://127.0.0.1:{port}": hvd.rank()})
 
         self.aug_x = torch.zeros(
             self.batch_size + self.num_samples, *shape, device=self.device)
