@@ -9,3 +9,4 @@ min*.py
 *.jpg
 rehearsal
 cpp_loader
+.vscode

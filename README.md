@@ -7,8 +7,8 @@ Distributed continual learning with Horovod + PyTorch.
 Using conda:
 
 ```
-conda create --name horovod-py39 python=3.9
-conda activate horovod-py39
+conda create --name horovod python=3.10
+conda activate horovod
 pip install -r requirements.txt
 pip uninstall horovod
 conda install openmpi-mpicc
@@ -17,28 +17,15 @@ horovodrun --check-build
 LD_LIBRARY_PATH=$HOME/.conda/envs/horovod-py39/lib/python3.9/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
-Install Thallium dependencies using spack:
-
-```
-git clone -c feature.manyFiles=true https://github.com/spack/spack.git --depth 1
-. spack/share/spack/setup-env.sh
-spack load mochi-thallium
-```
-
-Install Open Fabric Interfaces:
-
-```
-git clone https://github.com/ofiwg/libfabric.git --depth 1
-./autogen.sh
-./configure --prefix=/opt/libfabric --enable-debug --enable-tcp=dl --enable-rxm=dl && make -j 32 && sudo make install
-LD_LIBRARY_PATH=/opt/libfabric/lib:/opt/libfabric/lib/libfabric:$LD_LIBRARY_PATH
-```
-
 Datasets should be added in `datasets/`, or using the following:
 
 ```
 ln -s /home/tbouvier/Documents/datasets/ datasets
 ```
+
+## Distributed buffer
+
+Make sure to install the [distributed rehearsal buffer](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/distributed-rehearsal-buffer).
 
 ## Compilation
 
