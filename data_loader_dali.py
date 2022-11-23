@@ -18,22 +18,31 @@ https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/general/data_
 
 class ExternalInputCallable:
     def __init__(self, taskset, task_id, batch_size, shard_id, num_shards):
-        raw_samples = taskset.get_raw_samples()
         self.task_id = task_id
         self.batch_size = batch_size
         self.shard_id = shard_id
         self.num_shards = num_shards
 
-        self.files = raw_samples[0]
-        self.labels = raw_samples[1]
+        raw_samples = taskset.get_raw_samples()
+        files = np.array(raw_samples[0])
+        labels = np.array(raw_samples[1])
+        self.data_set_len = len(files)
 
         # If the dataset size is not divisible by number of shards, the trailing samples will
         # be omitted.
         self.shard_size = len(self.files) // num_shards
         self.shard_offset = self.shard_size * shard_id
+
+        # perform a permutation for shards to be iid
+        perm = np.random.permutation(self.data_set_len)
+        self.files = files[perm]
+        self.labels = labels[perm]
+
         # If the shard size is not divisible by the batch size, the last incomplete batch
         # will be omitted.
-        self.full_iterations = self.shard_size // batch_size
+        self.n = shard_size
+        self.full_iterations = self.n // batch_size
+
         self.perm = None  # permutation of indices
         # so that we don't have to recompute the `self.perm` for every sample
         self.last_seen_epoch = None
