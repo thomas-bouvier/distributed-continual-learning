@@ -30,8 +30,8 @@ class ExternalInputCallable:
 
         # If the dataset size is not divisible by number of shards, the trailing samples will
         # be omitted.
-        self.shard_size = len(self.files) // num_shards
-        self.shard_offset = self.shard_size * shard_id
+        shard_size = len(files) // num_shards
+        self.shard_offset = shard_size * shard_id
 
         # perform a permutation for shards to be iid
         perm = np.random.permutation(self.data_set_len)
