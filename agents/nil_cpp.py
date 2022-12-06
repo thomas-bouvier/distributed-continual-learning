@@ -73,15 +73,14 @@ class nil_cpp_agent(Agent):
 
         shape = next(iter(train_data_regime.get_loader()))[0][0].size()
 
-        port = 1234 + hvd.rank()
         self.dsl = rehearsal.DistributedStreamLoader(
             rehearsal.Classification,
             self.num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed()).value,
             ctypes.c_uint16(hvd.rank()).value,
-            f"tcp://127.0.0.1:{port}", 1, list(shape), False
+            f"na+sm://1-{hvd.rank()}", 1, list(shape), False
         )
-        self.dsl.register_endpoints({f"tcp://127.0.0.1:{port}": hvd.rank()})
+        self.dsl.register_endpoints({f"na+sm://1-{hvd.rank()}": hvd.rank()})
 
         self.aug_x = torch.zeros(
             self.batch_size + self.num_samples, *shape, device=self.device)
