@@ -14,7 +14,7 @@ from cpp_loader import rehearsal
 
 from agents.base import Agent
 from torch.cuda.amp import GradScaler, autocast
-from utils.utils import get_device, move_cuda, plot_representatives, synchronize_cuda
+from utils.utils import get_device, move_cuda, plot_representatives, synchronize_cuda, display
 from utils.meters import AverageMeter, accuracy
 
 from bisect import bisect
@@ -47,7 +47,8 @@ class nil_cpp_global_agent(Agent):
             state_dict,
         )
 
-        self.device = "cuda" if self.buffer_cuda else 'cpu'
+        self.device = 'cuda' if self.cuda else 'cpu'
+        self.buffer_device = 'cuda' if self.buffer_cuda else 'cpu'
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
@@ -77,7 +78,7 @@ class nil_cpp_global_agent(Agent):
             self.num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value,
-            "tcp://", 1, list(shape), True
+            "na+sm", 1, list(shape), True
         )
 
         self.aug_x = torch.zeros(
@@ -292,22 +293,16 @@ class nil_cpp_global_agent(Agent):
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
 
-        w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
+        w = torch.ones(len(x), device=torch.device(self.device))
         #torch.cuda.nvtx.range_push("Copy to device")
         start_move_time = time.time()
-        x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
-            y, self.cuda and self.buffer_cuda)
+        x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
         # torch.cuda.nvtx.range_pop()
 
-        if self.num_reps == 0:
-            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-
-        ####
-        #aug_x = None
-        #aug_y = None
-        #aug_w = None
+        if self.epoch == 0 and i_batch == 0:
+            self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
 
         if training:
             # Get the representatives
@@ -315,16 +310,14 @@ class nil_cpp_global_agent(Agent):
             aug_size = self.dsl.wait()
             self.last_batch_wait_time = time.time() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
-            #aug_x = self.aug_x.clone()
-            #aug_y = self.aug_y.clone()
-            #aug_w = self.aug_w.clone()
+
             logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
-            if self.log_buffer:
+            if self.log_buffer and i_batch % self.log_interval == 0 and self.num_reps > 0 and hvd.rank() == 0 and hvd.local_rank() == 0:
                 display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
 
             ############ slot 1
             #start_acc_time = time.time()
-            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            #self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
@@ -351,7 +344,7 @@ class nil_cpp_global_agent(Agent):
         if training:
             ############ slot 2
             #start_acc_time = time.time()
-            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            #self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
@@ -369,7 +362,7 @@ class nil_cpp_global_agent(Agent):
 
             ############ slot 3
             start_acc_time = time.time()
-            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+            self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
             self.last_batch_acc_time = time.time() - start_acc_time
             self.epoch_acc_time += self.last_batch_acc_time
 
