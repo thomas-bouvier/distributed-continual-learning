@@ -10,3 +10,5 @@ min*.py
 rehearsal
 cpp_loader
 .vscode
+.spack-env
+*.lock

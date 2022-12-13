@@ -1,0 +1,6 @@
+spack:
+  specs:
+  - mochi-thallium ^argobots+stackunwind ^mercury+debug ^libfabric+debug fabrics=tcp,verbs,rxm
+  - py-horovod@0.26.1 controllers=mpi frameworks=pytorch ^openmpi@4.1.2 ^py-torch@1.13.0~caffe2~gloo
+  concretizer:
+    unify: true
