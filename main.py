@@ -4,7 +4,6 @@ import horovod.torch as hvd
 import json
 import logging
 import numpy as np
-import nvtx
 import os
 import time
 import torch.multiprocessing as mp
@@ -502,7 +501,6 @@ class Experiment:
 
         return self.train_data_regime.num_classes
 
-    @nvtx.annotate("run")
     def run(self):
         dl_metrics_path = path.join(self.save_path, "dl_metrics")
         dl_metrics = ResultsLog(
@@ -527,7 +525,6 @@ class Experiment:
         self.agent.before_all_tasks(self.train_data_regime)
 
         for task_id in range(0, len(self.train_data_regime.tasksets)):
-            #torch.cuda.nvtx.range_push(f"Task {task_id}")
             start = time.time()
             training_time = time.time()
             logging.info(
@@ -543,7 +540,6 @@ class Experiment:
                 self.train_data_regime.get_loader())
 
             for i_epoch in range(0, self.args.epochs):
-                #torch.cuda.nvtx.range_push(f"Epoch {i_epoch}")
                 logging.info(f"Starting task {task_id}, epoch: {i_epoch}")
                 self.agent.epoch = i_epoch
 
@@ -551,9 +547,7 @@ class Experiment:
                 self.train_data_regime.set_epoch(i_epoch)
 
                 # train for one epoch
-                # torch.cuda.nvtx.range_push("Train")
                 train_results = self.agent.train(self.train_data_regime)
-                # torch.cuda.nvtx.range_pop()
 
                 # evaluate on test set
                 before_evaluate_time = time.time()
@@ -562,7 +556,6 @@ class Experiment:
                         metric: AverageMeter(f"task_{metric}")
                         for metric in ["loss", "prec1", "prec5"]
                     }
-                    # torch.cuda.nvtx.range_push("Test")
                     if self.args.agent == "icarl":
                         self.agent.update_exemplars(
                             self.agent.nc, training=False)
@@ -593,7 +586,6 @@ class Experiment:
                             task_metrics["test_task_metrics"].append(
                                 task_metrics_values
                             )
-                    # torch.cuda.nvtx.range_pop()
 
                     if meters["loss"].avg < self.agent.minimal_eval_loss:
                         logging.debug(
@@ -604,7 +596,6 @@ class Experiment:
                             self.agent.model.state_dict()
                         )
 
-                    # torch.cuda.nvtx.range_pop()
                 evaluate_durations.append(time.time() - before_evaluate_time)
 
                 self.agent.after_every_epoch()
@@ -678,7 +669,6 @@ class Experiment:
             tasks_metrics.save()
 
             self.agent.after_every_task()
-            # torch.cuda.nvtx.range_pop()
 
         self.agent.after_all_tasks()
         total_end = time.time()

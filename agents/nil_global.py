@@ -193,8 +193,6 @@ class nil_global_agent(Agent):
         self.recalculate_weights()
 
     def share_representatives(self, candidates, offsets, rm_targets, add_targets):
-        #torch.cuda.nvtx.range_push("Share representatives")
-
         self.global_counts = hvd.allgather(self.counts.unsqueeze(0))
         global_candidates = hvd.allgather(torch.cat(candidates).unsqueeze(0))
         global_offsets = hvd.allgather(torch.tensor([offsets]))
@@ -235,7 +233,6 @@ class nil_global_agent(Agent):
             ]
         ).unsqueeze(0))
         self.num_reps = self.global_representatives_y.numel()
-        # torch.cuda.nvtx.range_pop()
 
     def recalculate_weights(self):
         """Reassign the weights of the representatives
@@ -262,9 +259,7 @@ class nil_global_agent(Agent):
         self.steps = 0
 
         # Distribute the data
-        #torch.cuda.nvtx.range_push("Distribute dataset")
         train_data_regime.get_loader(True)
-        # torch.cuda.nvtx.range_pop()
 
         if self.best_model is not None:
             logging.debug(
@@ -296,7 +291,6 @@ class nil_global_agent(Agent):
         start_batch_time = time.time()
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
-            #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
@@ -414,7 +408,6 @@ class nil_global_agent(Agent):
                             (self.global_steps,
                              self.optimizer_regime.get_lr()[0]),
                         )
-            # torch.cuda.nvtx.range_pop()
             step_count += 1
             synchronize_cuda(self.cuda)
             start_batch_time = time.time()
@@ -462,13 +455,11 @@ class nil_global_agent(Agent):
             self.optimizer_regime.update(self.epoch, self.steps)
 
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-        #torch.cuda.nvtx.range_push("Copy to device")
         start_move_time = time.time()
         x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
             y, self.cuda and self.buffer_cuda)
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
-        # torch.cuda.nvtx.range_pop()
 
         if training:
             start_acc_time = time.time()
@@ -491,7 +482,6 @@ class nil_global_agent(Agent):
             num_reps = len(rep_values)
 
             if num_reps > 0:
-                #torch.cuda.nvtx.range_push("Combine batches")
                 rep_values, rep_labels, rep_weights = (
                     move_cuda(rep_values, self.cuda),
                     move_cuda(rep_labels, self.cuda),
@@ -504,7 +494,6 @@ class nil_global_agent(Agent):
                 y = torch.cat((y, rep_labels))
                 self.last_batch_cat_time = time.time() - start_cat_time
                 self.epoch_acc_cat_time += self.last_batch_cat_time
-                # torch.cuda.nvtx.range_pop()
 
             # Log representatives
             if self.writer is not None and self.writer_images and num_reps > 0:
@@ -512,7 +501,6 @@ class nil_global_agent(Agent):
                 self.writer.add_figure(
                     "representatives", fig, self.global_steps)
 
-        #torch.cuda.nvtx.range_push("Forward pass")
         if self.use_amp:
             with autocast():
                 output = self.model(x)
@@ -520,10 +508,8 @@ class nil_global_agent(Agent):
         else:
             output = self.model(x)
             loss = self.criterion(output, y)
-        # torch.cuda.nvtx.range_pop()
 
         if training:
-            #torch.cuda.nvtx.range_push("Optimizer step")
             if self.use_amp:
                 self.scaler.scale(loss).backward()
                 self.optimizer_regime.optimizer.synchronize()
@@ -533,7 +519,6 @@ class nil_global_agent(Agent):
             else:
                 loss.backward()
                 self.optimizer_regime.step()
-            # torch.cuda.nvtx.range_pop()
             self.global_steps += 1
             self.steps += 1
 

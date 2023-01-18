@@ -93,9 +93,7 @@ class nil_cpp_agent(Agent):
         self.steps = 0
 
         # Distribute the data
-        #torch.cuda.nvtx.range_push("Distribute dataset")
         iterations = train_data_regime.get_loader(True)
-        # torch.cuda.nvtx.range_pop()
         logging.info(f"{iterations} iterations needed with batch size {self.batch_size} to traverse taskset {task_id}")
 
         if self.best_model is not None:
@@ -130,7 +128,6 @@ class nil_cpp_agent(Agent):
         start_batch_time = time.time()
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in dataloader_iter:
-            #torch.cuda.nvtx.range_push(f"Batch {i_batch}")
             synchronize_cuda(self.cuda)
             self.last_batch_load_time = time.time() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
@@ -248,7 +245,6 @@ class nil_cpp_agent(Agent):
                             (self.global_steps,
                              self.optimizer_regime.get_lr()[0]),
                         )
-            # torch.cuda.nvtx.range_pop()
             step_count += 1
             synchronize_cuda(self.cuda)
             start_batch_time = time.time()
@@ -296,15 +292,13 @@ class nil_cpp_agent(Agent):
             self.optimizer_regime.update(self.epoch, self.steps)
 
         w = torch.ones(len(x), device=torch.device(self.device))
-        #torch.cuda.nvtx.range_push("Copy to device")
         start_move_time = time.time()
         x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
-        # torch.cuda.nvtx.range_pop()
 
         if self.epoch == 0 and i_batch == 0:
-            self.dsl.accumulate(x.to(self.buffer_device), y, self.aug_x, self.aug_y, self.aug_w)
+            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
         if training:
             # Get the representatives
@@ -323,7 +317,6 @@ class nil_cpp_agent(Agent):
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
-            #torch.cuda.nvtx.range_push("Forward pass")
             if self.use_amp:
                 with autocast():
                     output = self.model(self.aug_x)
@@ -331,9 +324,7 @@ class nil_cpp_agent(Agent):
             else:
                 output = self.model(self.aug_x)
                 loss = self.criterion(output, self.aug_y)
-            # torch.cuda.nvtx.range_pop()
         else:
-            #torch.cuda.nvtx.range_push("Forward pass")
             if self.use_amp:
                 with autocast():
                     output = self.model(x)
@@ -341,7 +332,6 @@ class nil_cpp_agent(Agent):
             else:
                 output = self.model(x)
                 loss = self.criterion(output, y)
-            # torch.cuda.nvtx.range_pop()
 
         if training:
             ############ slot 2
@@ -350,7 +340,6 @@ class nil_cpp_agent(Agent):
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
-            #torch.cuda.nvtx.range_push("Optimizer step")
             if self.use_amp:
                 self.scaler.scale(loss).backward()
                 self.optimizer_regime.optimizer.synchronize()
@@ -360,11 +349,10 @@ class nil_cpp_agent(Agent):
             else:
                 loss.backward()
                 self.optimizer_regime.step()
-            # torch.cuda.nvtx.range_pop()
 
             ############ slot 3
             start_acc_time = time.time()
-            self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
+            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
             self.last_batch_acc_time = time.time() - start_acc_time
             self.epoch_acc_time += self.last_batch_acc_time
 

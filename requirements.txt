@@ -2,7 +2,6 @@ bokeh
 continuum
 filelock
 horovod[pytorch]
-nvtx
 ruamel.yaml
 tensorboard
 tensorwatch

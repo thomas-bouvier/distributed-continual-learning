@@ -11,10 +11,8 @@ conda create --name horovod python=3.10
 conda activate horovod
 pip install -r requirements.txt
 pip uninstall horovod
-conda install openmpi-mpicc
 HOROVOD_WITHOUT_GLOO=1 HOROVOD_WITHOUT_TENSORFLOW=1 HOROVOD_WITHOUT_MXNET=1 HOROVOD_WITH_MPI=1 HOROVOD_WITH_PYTORCH=1 pip install --no-cache-dir horovod[pytorch]
 horovodrun --check-build
-LD_LIBRARY_PATH=$HOME/.conda/envs/horovod-py39/lib/python3.9/site-packages/torch/lib:$LD_LIBRARY_PATH
 ```
 
 Datasets should be added in `datasets/`, or using the following:
@@ -26,16 +24,6 @@ ln -s /home/tbouvier/Documents/datasets/ datasets
 ## Distributed buffer
 
 Make sure to install the [distributed rehearsal buffer](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/distributed-rehearsal-buffer).
-
-## Compilation
-
-Compile shared library for use with Python:
-
-```
-. spack/share/spack/setup-env.sh
-spack load mochi-thallium
-make -C cpp_loader/
-```
 
 ## Usage
 
