@@ -10,15 +10,12 @@ import torchvision
 import wandb
 
 from agents.base import Agent
-from agents.nil_cpp import nil_cpp_agent
-from agents.nil_global import nil_global_agent
-from agents.nil_cpp_global import nil_cpp_global_agent
 from torch.cuda.amp import GradScaler, autocast
 from utils.utils import get_device, move_cuda, plot_representatives, find_2d_idx, synchronize_cuda
 from utils.meters import AverageMeter, accuracy
 
 
-class nil_agent(Agent):
+class nil_local_agent(Agent):
     def __init__(
         self,
         model,
@@ -32,7 +29,7 @@ class nil_agent(Agent):
         batch_metrics=None,
         state_dict=None,
     ):
-        super(nil_agent, self).__init__(
+        super(nil_local_agent, self).__init__(
             model,
             use_amp,
             config,

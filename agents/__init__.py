@@ -2,7 +2,7 @@ from .base import *
 from .icarl import *
 from .nil import *
 from .nil_cpp import *
-from .nil_global import *
+from .nil_local import *
 
 def nil(model, use_amp, config, optimizer_regime, cuda, buffer_cuda, log_buffer, log_interval, batch_metrics):
     implementation = config.get("implementation", "")

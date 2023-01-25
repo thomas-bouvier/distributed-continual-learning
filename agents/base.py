@@ -1,7 +1,6 @@
 import copy
 import horovod.torch as hvd
 import logging
-import tensorwatch
 import time
 import torch
 import torch.nn as nn
@@ -282,6 +281,7 @@ class Agent:
     def set_tensorwatch_watcher(self, filename, port=0, dummy=False):
         if dummy:
             return False
+        import tensorwatch
         self.watcher = tensorwatch.Watcher(filename=filename, port=port)
         self.get_stream("train_loss")
         self.get_stream("val_loss")
