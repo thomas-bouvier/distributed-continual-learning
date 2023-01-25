@@ -15,7 +15,7 @@ from utils.utils import get_device, move_cuda, plot_representatives, synchronize
 from utils.meters import AverageMeter, accuracy
 
 
-class nil_global_agent(Agent):
+class nil_agent(Agent):
     def __init__(
         self,
         model,
@@ -29,7 +29,7 @@ class nil_global_agent(Agent):
         batch_metrics=None,
         state_dict=None,
     ):
-        super(nil_global_agent, self).__init__(
+        super(nil_agent, self).__init__(
             model,
             use_amp,
             config,

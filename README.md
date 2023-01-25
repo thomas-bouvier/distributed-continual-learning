@@ -4,17 +4,6 @@ Distributed continual learning with Horovod + PyTorch.
 
 ## Installation
 
-Using conda:
-
-```
-conda create --name horovod python=3.10
-conda activate horovod
-pip install -r requirements.txt
-pip uninstall horovod
-HOROVOD_WITHOUT_GLOO=1 HOROVOD_WITHOUT_TENSORFLOW=1 HOROVOD_WITHOUT_MXNET=1 HOROVOD_WITH_MPI=1 HOROVOD_WITH_PYTORCH=1 pip install --no-cache-dir horovod[pytorch]
-horovodrun --check-build
-```
-
 Datasets should be added in `datasets/`, or using the following:
 
 ```
@@ -82,31 +71,8 @@ python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets
 
 #### NIL implementations
 
-**nil**: local sampling
+**nil**: global sampling in Python, very inefficient
 
-**nil_global**: global sampling (representatives are shared between workers)
+**nil_cpp**: global sampling with C++ backend
 
-**nil_cpp**: local sampling, representatives managed in C++
-
-##### Obsolete implementations
-
-On branch async.
-
-**nil_v1**: synchronous parallel memory management, representatives are synchronized using `Queue`s. The memory manager waits until the main process sends candidates, and the main process waits until the memory manager fills the shared buffer with new representatives. *First implementation v1*.
-
-**nil_v2**: asynchronous version of **nil_v1**. The main process doesn’t wait for the memory manager to fill the shared buffer. If the episodic memory update takes longer than the training time, the process is sped up with the drawback of reusing the same representatives multiple times in a row. *First implementation v2*.
-
-**nil_v3**: management of the episodic memory including the creation of batches from the taskset, their copy on the GPU, the selection of candidates and the concatenation of batches with selected representatives.
-
-**nil_v4**: **nil_v3** including batch sampling. *Second implementation*.
-
-#### iCaRL implementations
-
-**icarl**: default implementation, without parallel memory management
-
-**icarl_v1**: parallel memory management but very little impact observed
-## Credits
-
-Some parts of the project are inspired by https://github.com/eladhoffer/convNet.pytorch.
-
-Thanks to Hugo Chaugier for his initial work on continual learning.
+**nil_local**: local sampling in Python, not correct as representatives are not shared between workers
