@@ -446,14 +446,17 @@ class nil_agent(Agent):
             loss = self.criterion(output, y)
 
         if training:
+            total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
+            dw = w / total_weight
+
             if self.use_amp:
-                self.scaler.scale(loss).backward()
+                self.scaler.scale(loss).backward(dw)
                 self.optimizer_regime.optimizer.synchronize()
                 with self.optimizer_regime.optimizer.skip_synchronize():
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
             else:
-                loss.backward()
+                loss.backward(dw)
                 self.optimizer_regime.step()
             self.global_steps += 1
             self.steps += 1

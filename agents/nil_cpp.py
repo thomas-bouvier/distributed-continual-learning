@@ -47,8 +47,7 @@ class nil_cpp_agent(Agent):
             state_dict,
         )
 
-        self.device = "cuda" if self.cuda else "cpu"
-        self.buffer_device = "cuda" if self.buffer_cuda else 'cpu'
+        self.device = 'cuda' if self.cuda else 'cpu'
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
@@ -76,11 +75,10 @@ class nil_cpp_agent(Agent):
         self.dsl = rehearsal.DistributedStreamLoader(
             rehearsal.Classification,
             self.num_classes, self.num_representatives, self.num_candidates,
-            ctypes.c_int64(torch.random.initial_seed()).value,
+            ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value,
-            f"na+sm://1-{hvd.rank()}", 1, list(shape), False
+            "ofi+verbs://", 1, list(shape), True
         )
-        self.dsl.register_endpoints({f"na+sm://1-{hvd.rank()}": hvd.rank()})
 
         self.aug_x = torch.zeros(
             self.batch_size + self.num_samples, *shape, device=self.device)
@@ -93,8 +91,7 @@ class nil_cpp_agent(Agent):
         self.steps = 0
 
         # Distribute the data
-        iterations = train_data_regime.get_loader(True)
-        logging.info(f"{iterations} iterations needed with batch size {self.batch_size} to traverse taskset {task_id}")
+        train_data_regime.get_loader(True)
 
         if self.best_model is not None:
             logging.debug(
@@ -199,6 +196,7 @@ class nil_cpp_agent(Agent):
                                f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
                         wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                   "num_reps": self.get_num_representatives(),
                                    "step": self.global_steps,
                                    "epoch": self.global_epoch})
                 if self.writer is not None:
@@ -245,6 +243,7 @@ class nil_cpp_agent(Agent):
                             (self.global_steps,
                              self.optimizer_regime.get_lr()[0]),
                         )
+
             step_count += 1
             synchronize_cuda(self.cuda)
             start_batch_time = time.time()
@@ -306,14 +305,14 @@ class nil_cpp_agent(Agent):
             aug_size = self.dsl.wait()
             self.last_batch_wait_time = time.time() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
-            logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
 
+            logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
             if self.log_buffer and i_batch % self.log_interval == 0 and self.num_reps > 0 and hvd.rank() == 0 and hvd.local_rank() == 0:
                 display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
 
             ############ slot 1
             #start_acc_time = time.time()
-            #self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
+            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
@@ -336,18 +335,21 @@ class nil_cpp_agent(Agent):
         if training:
             ############ slot 2
             #start_acc_time = time.time()
-            #self.dsl.accumulate(x.to(self.buffer_device), y.to(self.buffer_device), self.aug_x, self.aug_y, self.aug_w)
+            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
+            total_weight = hvd.allreduce(torch.sum(self.aug_w), name='total_weight', op=hvd.Sum)
+            dw = w / total_weight
+
             if self.use_amp:
-                self.scaler.scale(loss).backward()
+                self.scaler.scale(loss).backward(dw)
                 self.optimizer_regime.optimizer.synchronize()
                 with self.optimizer_regime.optimizer.skip_synchronize():
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
             else:
-                loss.backward()
+                loss.backward(dw)
                 self.optimizer_regime.step()
 
             ############ slot 3
