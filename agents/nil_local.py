@@ -22,8 +22,8 @@ class nil_local_agent(Agent):
         use_amp,
         config,
         optimizer_regime,
+        batch_size,
         cuda,
-        buffer_cuda,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -34,8 +34,8 @@ class nil_local_agent(Agent):
             use_amp,
             config,
             optimizer_regime,
+            batch_size,
             cuda,
-            buffer_cuda,
             log_buffer,
             log_interval,
             batch_metrics,
@@ -46,10 +46,9 @@ class nil_local_agent(Agent):
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
-        self.batch_size = config.get("batch_size")
+
         self.num_reps = 0
         self.counts = {}
-
         self.representatives_x = {}
         self.representatives_y = None
         self.representatives_w = None

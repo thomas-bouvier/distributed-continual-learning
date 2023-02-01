@@ -18,8 +18,8 @@ class Agent:
         use_amp,
         config,
         optimizer_regime,
+        batch_size,
         cuda,
-        buffer_cuda,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -30,8 +30,8 @@ class Agent:
         self.use_amp = use_amp
         self.config = config
         self.optimizer_regime = optimizer_regime
+        self.batch_size = batch_size
         self.cuda = cuda
-        self.buffer_cuda = buffer_cuda
         self.log_buffer = log_buffer
         self.log_interval = log_interval
         self.batch_metrics = batch_metrics

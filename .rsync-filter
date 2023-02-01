@@ -1,6 +1,7 @@
 - *.tar
 - *.jpg
 - *.so
+- rehearsal
 - obj.*
 - vgcore.*
 - bin
@@ -15,4 +16,5 @@
 - current
 - cachedir
 - datasets
-- cpp_loader
+- .ccls-cache
+- .vscode

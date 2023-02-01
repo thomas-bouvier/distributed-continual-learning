@@ -22,8 +22,8 @@ class nil_agent(Agent):
         use_amp,
         config,
         optimizer_regime,
+        batch_size,
         cuda,
-        buffer_cuda,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -34,8 +34,8 @@ class nil_agent(Agent):
             use_amp,
             config,
             optimizer_regime,
+            batch_size,
             cuda,
-            buffer_cuda,
             log_buffer,
             log_interval,
             batch_metrics,
@@ -46,7 +46,7 @@ class nil_agent(Agent):
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
-        self.batch_size = config.get("batch_size")
+
         self.num_reps = 0
 
         self.epoch_load_time = 0
@@ -493,7 +493,7 @@ class nil_agent(Agent):
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
                 self.last_batch_cat_time = time.time() - start_cat_time
-                self.epoch_acc_cat_time += self.last_batch_cat_time
+                self.epoch_cat_time += self.last_batch_cat_time
 
             # Log representatives
             if self.writer is not None and self.writer_images and num_reps > 0:
@@ -510,14 +510,17 @@ class nil_agent(Agent):
             loss = self.criterion(output, y)
 
         if training:
+            total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
+            dw = w / total_weight
+
             if self.use_amp:
-                self.scaler.scale(loss).backward()
+                self.scaler.scale(loss).backward(dw)
                 self.optimizer_regime.optimizer.synchronize()
                 with self.optimizer_regime.optimizer.skip_synchronize():
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
             else:
-                loss.backward()
+                loss.backward(dw)
                 self.optimizer_regime.step()
             self.global_steps += 1
             self.steps += 1

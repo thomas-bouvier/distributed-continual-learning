@@ -415,9 +415,7 @@ class Experiment:
             if self.args.agent is not None
             else agents.base
         )
-        agent_config = {
-            "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
-        }
+        agent_config = {}
         if self.args.agent_config != "":
             agent_config = dict(
                 agent_config, **literal_eval(self.args.agent_config))
@@ -426,8 +424,8 @@ class Experiment:
             self.args.use_amp,
             agent_config,
             self.optimizer_regime,
+            self.args.batch_size * self.args.batches_per_allreduce,
             self.args.cuda,
-            self.args.buffer_cuda,
             self.args.log_buffer,
             self.args.log_interval,
             batch_metrics

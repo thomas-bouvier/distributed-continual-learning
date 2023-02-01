@@ -27,8 +27,8 @@ class nil_cpp_agent(Agent):
         use_amp,
         config,
         optimizer_regime,
+        batch_size,
         cuda,
-        buffer_cuda,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -39,8 +39,8 @@ class nil_cpp_agent(Agent):
             use_amp,
             config,
             optimizer_regime,
+            batch_size,
             cuda,
-            buffer_cuda,
             log_buffer,
             log_interval,
             batch_metrics,
@@ -51,7 +51,9 @@ class nil_cpp_agent(Agent):
         self.num_representatives = config.get("num_representatives", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_samples = config.get("num_samples", 20)
-        self.batch_size = config.get("batch_size")
+        self.provider = config.get('provider', 'na+sm://')
+        self.discover_endpoints = config.get('discover_endpoints', True)
+        self.cuda_rdma = config.get('cuda_rdma', False)
 
         self.num_reps = 0
 
@@ -76,8 +78,8 @@ class nil_cpp_agent(Agent):
             rehearsal.Classification,
             self.num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
-            ctypes.c_uint16(hvd.rank()).value,
-            "ofi+verbs://", 1, list(shape), True
+            ctypes.c_uint16(hvd.rank()).value, self.provider,
+            1, list(shape), self.cuda_rdma, self.discover_endpoints
         )
 
         self.aug_x = torch.zeros(
@@ -340,7 +342,7 @@ class nil_cpp_agent(Agent):
             #self.epoch_acc_time += self.last_batch_acc_time
 
             total_weight = hvd.allreduce(torch.sum(self.aug_w), name='total_weight', op=hvd.Sum)
-            dw = w / total_weight
+            dw = self.aug_w / total_weight
 
             if self.use_amp:
                 self.scaler.scale(loss).backward(dw)
