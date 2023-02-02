@@ -6,6 +6,7 @@ import numpy as np
 import logging
 import time
 import torch
+import torch.nn as nn
 import torchvision
 import wandb
 
@@ -199,13 +200,16 @@ class nil_local_agent(Agent):
             )
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
-
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
                 logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
+        
+        # Create mask so the loss is only used for classes learnt during this task
+        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
+        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """
     Forward pass for the current epoch
@@ -236,7 +240,7 @@ class nil_local_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
-            meters["loss"].update(loss)
+            meters["loss"].update(loss.sum() / self.mask[y].sum())
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
 

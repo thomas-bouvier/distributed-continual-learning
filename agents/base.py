@@ -234,7 +234,7 @@ class Agent:
             return self.loop(data_regime, training=False)
 
     def before_all_tasks(self, train_data_regime):
-        self.num_classes = train_data_regime.num_classes
+        pass
 
     def after_all_tasks(self):
         pass

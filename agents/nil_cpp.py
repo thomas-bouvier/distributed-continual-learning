@@ -6,6 +6,7 @@ import numpy as np
 import logging
 import time
 import torch
+import torch.nn as nn
 import torchvision
 import wandb
 
@@ -76,7 +77,7 @@ class nil_cpp_agent(Agent):
 
         self.dsl = rehearsal.DistributedStreamLoader(
             rehearsal.Classification,
-            self.num_classes, self.num_representatives, self.num_candidates,
+            train_data_regime.total_num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value, self.provider,
             1, list(shape), self.cuda_rdma, self.discover_endpoints
@@ -84,7 +85,7 @@ class nil_cpp_agent(Agent):
 
         self.aug_x = torch.zeros(
             self.batch_size + self.num_samples, *shape, device=self.device)
-        self.aug_y = torch.randint(high=self.num_classes, size=(
+        self.aug_y = torch.randint(high=train_data_regime.total_num_classes, size=(
             self.batch_size + self.num_samples,), device=self.device)
         self.aug_w = torch.zeros(
             self.batch_size + self.num_samples, device=self.device)
@@ -101,7 +102,6 @@ class nil_cpp_agent(Agent):
             )
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
-
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
                 logging.debug("Resetting model internal state..")
@@ -109,10 +109,11 @@ class nil_cpp_agent(Agent):
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
 
-    """
-    Forward pass for the current epoch
-    """
+        # Create mask so the loss is only used for classes learnt during this task
+        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
+        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
+    """Forward pass for the current epoch"""
     def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
@@ -140,7 +141,8 @@ class nil_cpp_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
-            meters["loss"].update(loss)
+            # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
+            meters["loss"].update(loss.sum() / self.mask[y].sum())
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
 
@@ -341,6 +343,7 @@ class nil_cpp_agent(Agent):
             #self.last_batch_acc_time = time.time() - start_acc_time
             #self.epoch_acc_time += self.last_batch_acc_time
 
+            # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
             total_weight = hvd.allreduce(torch.sum(self.aug_w), name='total_weight', op=hvd.Sum)
             dw = self.aug_w / total_weight
 

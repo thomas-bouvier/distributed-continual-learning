@@ -60,11 +60,12 @@ class DataRegime(object):
         self.task_id = 0
         self.steps = None
         self.tasksets = None
-        self.num_classes = 0
+        self.total_num_classes = 0
         self.concat_taskset = None
         self.continual_test_taskset = []
         self.sampler = None
         self.loader = None
+        self.classes_mask = None
 
         self.config = self.get_config(config)
         if self.config["others"].get("use_dali", False):
@@ -77,6 +78,7 @@ class DataRegime(object):
 
         self.get_data(True)
 
+    """Get the current taskset"""
     def get_data(self, force_update=False):
         if force_update:
             self._transform = get_transform(training=self.config["data"].get(
@@ -131,6 +133,7 @@ class DataRegime(object):
 
         return self.loader
 
+    """Get the taskset refered by self.task_id"""
     def get_taskset(self):
         if self.tasksets is None:
             self.prepare_tasksets()
@@ -167,6 +170,9 @@ class DataRegime(object):
                 self.continual_test_taskset.append(current_taskset)
                 return self.continual_test_taskset
         """
+        mask = np.zeros(self.total_num_classes)
+        mask[current_taskset.get_classes()] = 1
+        self.classes_mask = mask
         return current_taskset
 
     def prepare_tasksets(self):
@@ -196,7 +202,7 @@ class DataRegime(object):
                 )
             ]
         logging.info(f"Prepared {len(self.tasksets)} tasksets")
-        self.num_classes = len(dataset.list_classes)
+        self.total_num_classes = len(dataset.list_classes)
 
     def set_epoch(self, epoch):
         logging.debug(

@@ -6,6 +6,7 @@ import numpy as np
 import logging
 import time
 import torch
+import torch.nn as nn
 import torchvision
 import wandb
 
@@ -63,7 +64,8 @@ class nil_agent(Agent):
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
-        self.counts = torch.tensor([0 for _ in range(self.num_classes)])
+        self.num_classes = train_data_regime.total_num_classes
+        self.counts = torch.zeros(self.num_classes, dtype=int)
 
         self.global_representatives_x = [
             [torch.Tensor() for _ in range(self.num_classes)]
@@ -267,18 +269,20 @@ class nil_agent(Agent):
             )
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
-
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
                 logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
+        
+        # Create mask so the loss is only used for classes learnt during this task
+        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
+        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """
     Forward pass for the current epoch
     """
-
     def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
@@ -304,7 +308,7 @@ class nil_agent(Agent):
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
-            meters["loss"].update(loss)
+            meters["loss"].update(loss.sum() / self.mask[y].sum())
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
 

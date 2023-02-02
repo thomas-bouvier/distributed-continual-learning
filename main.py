@@ -336,15 +336,15 @@ class Experiment:
         self.args = args
         self.save_path = save_path
 
-        num_classes = self.prepare_dataset()
+        total_num_classes = self.prepare_dataset()
         batch_metrics_path = path.join(self.save_path, "batch_metrics")
         batch_metrics = ResultsLog(
             batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir,
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
-        self.create_agent(num_classes, batch_metrics)
+        self.create_agent(total_num_classes, batch_metrics)
 
-    def create_agent(self, num_classes, batch_metrics=None):
+    def create_agent(self, total_num_classes, batch_metrics=None):
         # By default, Adasum doesn't need scaling up learning rate.
         # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
         lr_scaler = (
@@ -359,7 +359,7 @@ class Experiment:
 
         model_name = models.__dict__[self.args.model]
         model_config = {
-            "num_classes": num_classes,
+            "num_classes": total_num_classes,
         }
         if self.args.model_config != "":
             model_config = dict(
@@ -497,7 +497,7 @@ class Experiment:
         logging.info("Created test data regime: %s",
                      repr(self.validate_data_regime))
 
-        return self.train_data_regime.num_classes
+        return self.train_data_regime.total_num_classes
 
     def run(self):
         dl_metrics_path = path.join(self.save_path, "dl_metrics")
