@@ -304,7 +304,7 @@ class nil_cpp_agent(Agent):
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
 
-        if self.epoch == 0 and i_batch == 0:
+        if self.epoch == 0 and i_batch == 0 and self.num_reps == 0:
             self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
 
         if training:
