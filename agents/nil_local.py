@@ -25,6 +25,7 @@ class nil_local_agent(Agent):
         optimizer_regime,
         batch_size,
         cuda,
+        verbose,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -37,6 +38,7 @@ class nil_local_agent(Agent):
             optimizer_regime,
             batch_size,
             cuda,
+            verbose,
             log_buffer,
             log_interval,
             batch_metrics,
@@ -322,11 +324,6 @@ class nil_local_agent(Agent):
                         self.writer.add_scalar(
                             "num_representatives",
                             self.get_num_representatives(),
-                            self.global_steps,
-                        )
-                        self.writer.add_scalar(
-                            "memory_size",
-                            self.get_memory_size(),
                             self.global_steps,
                         )
                     self.writer.flush()

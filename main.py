@@ -189,6 +189,12 @@ parser.add_argument(
     help="random seed (default: 42)",
 )
 parser.add_argument(
+    "--verbose",
+    action="store_true",
+    default=False,
+    help="print more messages"
+)
+parser.add_argument(
     "--log-interval",
     type=int,
     default=10,
@@ -426,6 +432,7 @@ class Experiment:
             self.optimizer_regime,
             self.args.batch_size * self.args.batches_per_allreduce,
             self.args.cuda,
+            self.args.verbose,
             self.args.log_buffer,
             self.args.log_interval,
             batch_metrics

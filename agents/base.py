@@ -20,6 +20,7 @@ class Agent:
         optimizer_regime,
         batch_size,
         cuda,
+        verbose,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -32,6 +33,7 @@ class Agent:
         self.optimizer_regime = optimizer_regime
         self.batch_size = batch_size
         self.cuda = cuda
+        self.verbose = verbose
         self.log_buffer = log_buffer
         self.log_interval = log_interval
         self.batch_metrics = batch_metrics
