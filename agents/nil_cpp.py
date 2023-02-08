@@ -1,6 +1,5 @@
 import copy
 import horovod.torch as hvd
-import itertools
 import math
 import numpy as np
 import logging
@@ -19,7 +18,15 @@ from torch.cuda.amp import GradScaler, autocast
 from utils.utils import get_device, move_cuda, plot_representatives, synchronize_cuda, display
 from utils.meters import AverageMeter, accuracy
 
-from bisect import bisect
+
+class AugmentedMinibatch:
+    def __init__(self, batch_size, num_samples, shape, device):
+        self.x = torch.zeros(
+            batch_size + num_samples, *shape, device=device)
+        self.y = torch.randint(high=1000, size=(
+            batch_size + num_samples,), device=device)
+        self.w = torch.zeros(
+            batch_size + num_samples, device=device)
 
 
 class nil_cpp_agent(Agent):
@@ -86,12 +93,10 @@ class nil_cpp_agent(Agent):
             1, list(shape), self.cuda_rdma, self.discover_endpoints, self.verbose
         )
 
-        self.aug_x = torch.zeros(
-            self.batch_size + self.num_samples, *shape, device=self.device)
-        self.aug_y = torch.randint(high=train_data_regime.total_num_classes, size=(
-            self.batch_size + self.num_samples,), device=self.device)
-        self.aug_w = torch.zeros(
-            self.batch_size + self.num_samples, device=self.device)
+        self.minibatches_ahead = 2
+        self.next_minibatches = []
+        for i in range(self.minibatches_ahead):
+            self.next_minibatches.append(AugmentedMinibatch(self.batch_size, self.num_samples, shape, self.device))
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id
@@ -304,8 +309,9 @@ class nil_cpp_agent(Agent):
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
 
-        if self.epoch == 0 and i_batch == 0 and self.num_reps == 0:
-            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
+        if self.global_steps == 0 and self.num_reps == 0:
+            current_minibatch = self.get_current_augmented_minibatch()
+            self.dsl.accumulate(x, y, current_minibatch.x, current_minibatch.y, current_minibatch.w)
 
         if training:
             # Get the representatives
@@ -314,15 +320,21 @@ class nil_cpp_agent(Agent):
             self.last_batch_wait_time = time.time() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
 
+            current_minibatch = self.get_current_augmented_minibatch()
+            self.aug_x = current_minibatch.x
+            self.aug_y = current_minibatch.y
+            self.aug_w = current_minibatch.w
+
             #logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
-            if self.log_buffer and i_batch % self.log_interval == 0 and self.num_reps > 0 and hvd.rank() == 0 and hvd.local_rank() == 0:
+            if self.log_buffer and i_batch % self.log_interval == 0 and self.num_reps > 0 and hvd.rank() == 0:
                 display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
 
-            ############ slot 1
-            #start_acc_time = time.time()
-            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-            #self.last_batch_acc_time = time.time() - start_acc_time
-            #self.epoch_acc_time += self.last_batch_acc_time
+            # In-advance preparation of next minibatch
+            start_acc_time = time.time()
+            next_minibatch = self.get_next_augmented_minibatch()
+            self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
+            self.last_batch_acc_time = time.time() - start_acc_time
+            self.epoch_acc_time += self.last_batch_acc_time
 
             if self.use_amp:
                 with autocast():
@@ -341,12 +353,6 @@ class nil_cpp_agent(Agent):
                 loss = self.criterion(output, y)
 
         if training:
-            ############ slot 2
-            #start_acc_time = time.time()
-            #self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-            #self.last_batch_acc_time = time.time() - start_acc_time
-            #self.epoch_acc_time += self.last_batch_acc_time
-
             # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
             total_weight = hvd.allreduce(torch.sum(self.aug_w), name='total_weight', op=hvd.Sum)
             dw = self.aug_w / total_weight
@@ -360,12 +366,6 @@ class nil_cpp_agent(Agent):
             else:
                 loss.backward(dw)
                 self.optimizer_regime.step()
-
-            ############ slot 3
-            start_acc_time = time.time()
-            self.dsl.accumulate(x, y, self.aug_x, self.aug_y, self.aug_w)
-            self.last_batch_acc_time = time.time() - start_acc_time
-            self.epoch_acc_time += self.last_batch_acc_time
 
             self.global_steps += 1
             self.steps += 1
@@ -382,3 +382,9 @@ class nil_cpp_agent(Agent):
 
     def get_num_representatives(self):
         return self.num_reps
+
+    def get_current_augmented_minibatch(self):
+        return self.next_minibatches[self.global_steps % self.minibatches_ahead]
+
+    def get_next_augmented_minibatch(self):
+        return self.next_minibatches[(self.global_steps + 1) % self.minibatches_ahead]

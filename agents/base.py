@@ -329,13 +329,14 @@ class Agent:
             stream.write(values)
 
 
-def base(model, use_amp, agent_config, optimizer_regime, cuda, buffer_cuda, log_buffer, log_interval, batch_metrics):
+def base(model, use_amp, agent_config, optimizer_regime, cuda, verbose, buffer_cuda, log_buffer, log_interval, batch_metrics):
     return Agent(
         model,
         use_amp,
         agent_config,
         optimizer_regime,
         cuda,
+        verbose,
         buffer_cuda,
         log_buffer,
         log_interval,
