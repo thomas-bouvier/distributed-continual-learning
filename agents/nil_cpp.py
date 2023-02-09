@@ -1,6 +1,5 @@
 import copy
 import horovod.torch as hvd
-import math
 import numpy as np
 import logging
 import time
@@ -38,7 +37,7 @@ class nil_cpp_agent(Agent):
         optimizer_regime,
         batch_size,
         cuda,
-        verbose,
+        log_level,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -51,7 +50,7 @@ class nil_cpp_agent(Agent):
             optimizer_regime,
             batch_size,
             cuda,
-            verbose,
+            log_level,
             log_buffer,
             log_interval,
             batch_metrics,
@@ -90,7 +89,7 @@ class nil_cpp_agent(Agent):
             train_data_regime.total_num_classes, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value, self.provider,
-            1, list(shape), self.cuda_rdma, self.discover_endpoints, self.verbose
+            1, list(shape), self.cuda_rdma, self.discover_endpoints, self.log_level not in ('info')
         )
 
         self.minibatches_ahead = 2
@@ -137,8 +136,8 @@ class nil_cpp_agent(Agent):
         start_batch_time = time.time()
         start_load_time = start_batch_time
         with tqdm(total=len(data_regime.get_loader()),
-              desc=f"Task #{self.task_id} {prefix} epoch #{self.epoch + 1}",
-              disable=self.verbose) as progress:
+              desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
+              disable=self.log_level not in ('info')) as progress:
             for i_batch, (x, y, t) in dataloader_iter:
                 synchronize_cuda(self.cuda)
                 self.last_batch_load_time = time.time() - start_load_time
@@ -153,13 +152,16 @@ class nil_cpp_agent(Agent):
 
                 # measure accuracy and record loss
                 prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
-                # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
-                meters["loss"].update(loss.sum() / self.mask[y].sum())
+                if training:
+                    # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
+                    meters["loss"].update(loss.sum() / self.mask[y].sum())
+                else:
+                    meters["loss"].update(loss)
                 meters["prec1"].update(prec1, x.size(0))
                 meters["prec5"].update(prec5, x.size(0))
 
-                if self.verbose and (i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader())):
-                    logging.info(
+                if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
+                    logging.debug(
                         "{phase}: epoch: {0} [{1}/{2}]\t"
                         "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
                         "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
@@ -172,21 +174,21 @@ class nil_cpp_agent(Agent):
                         )
                     )
 
-                    logging.info(f"batch {i_batch} time {self.last_batch_time} sec")
-                    logging.info(
+                    logging.debug(f"batch {i_batch} time {self.last_batch_time} sec")
+                    logging.debug(
                         f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
-                    logging.info(
+                    logging.debug(
                         f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/self.last_batch_time}%)")
-                    logging.info(
+                    logging.debug(
                         f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
-                    logging.info(
+                    logging.debug(
                         f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/self.last_batch_time}%)")
-                    logging.info(
+                    logging.debug(
                         f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
-                    logging.info(
+                    logging.debug(
                         f"\tnum_representatives {self.get_num_representatives()}")
 
-                    if hvd.rank() == 0 and hvd.local_rank() == 0:
+                    if hvd.rank() == 0:
                         if training and self.epoch < 5 and self.batch_metrics is not None:
                             batch_metrics_values = dict(
                                 epoch=self.epoch,
@@ -257,10 +259,10 @@ class nil_cpp_agent(Agent):
                            'representatives': self.num_reps})
                 progress.update(1)
 
-            step_count += 1
-            synchronize_cuda(self.cuda)
-            start_batch_time = time.time()
-            start_load_time = start_batch_time
+                step_count += 1
+                synchronize_cuda(self.cuda)
+                start_batch_time = time.time()
+                start_load_time = start_batch_time
 
         if training:
             self.global_epoch += 1
@@ -309,11 +311,11 @@ class nil_cpp_agent(Agent):
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
 
-        if self.global_steps == 0 and self.num_reps == 0:
-            current_minibatch = self.get_current_augmented_minibatch()
-            self.dsl.accumulate(x, y, current_minibatch.x, current_minibatch.y, current_minibatch.w)
-
         if training:
+            if self.global_steps == 0 and self.num_reps == 0:
+                current_minibatch = self.get_current_augmented_minibatch()
+                self.dsl.accumulate(x, y, current_minibatch.x, current_minibatch.y, current_minibatch.w)
+
             # Get the representatives
             start_wait_time = time.time()
             aug_size = self.dsl.wait()
@@ -325,7 +327,7 @@ class nil_cpp_agent(Agent):
             self.aug_y = current_minibatch.y
             self.aug_w = current_minibatch.w
 
-            #logging.info(f"Received {aug_size - self.batch_size} samples from other nodes")
+            logging.debug(f"Received {aug_size - self.batch_size} samples from other nodes")
             if self.log_buffer and i_batch % self.log_interval == 0 and self.num_reps > 0 and hvd.rank() == 0:
                 display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
 
@@ -347,10 +349,10 @@ class nil_cpp_agent(Agent):
             if self.use_amp:
                 with autocast():
                     output = self.model(x)
-                    loss = self.criterion(output, y)
+                    loss = nn.CrossEntropyLoss()(output, y)
             else:
                 output = self.model(x)
-                loss = self.criterion(output, y)
+                loss = nn.CrossEntropyLoss()(output, y)
 
         if training:
             # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
