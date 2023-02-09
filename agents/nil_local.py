@@ -25,7 +25,7 @@ class nil_local_agent(Agent):
         optimizer_regime,
         batch_size,
         cuda,
-        verbose,
+        log_level,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -38,7 +38,7 @@ class nil_local_agent(Agent):
             optimizer_regime,
             batch_size,
             cuda,
-            verbose,
+            log_level,
             log_buffer,
             log_interval,
             batch_metrics,
@@ -276,7 +276,7 @@ class nil_local_agent(Agent):
                 logging.info(
                     f"\tnum_representatives {self.get_num_representatives()}")
 
-                if hvd.rank() == 0 and hvd.local_rank() == 0:
+                if hvd.rank() == 0:
                     if training and self.epoch < 5 and self.batch_metrics is not None:
                         batch_metrics_values = dict(
                             epoch=self.epoch,

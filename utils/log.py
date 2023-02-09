@@ -13,7 +13,7 @@ from bokeh.models import Div
 from itertools import cycle
 
 
-def setup_logging(log_file="log.txt", dummy=False):
+def setup_logging(log_file="log.txt", level="info", dummy=False):
     if dummy:
         logging.getLogger("dummy")
         return
@@ -21,7 +21,7 @@ def setup_logging(log_file="log.txt", dummy=False):
     file_mode = "a" if os.path.isfile(log_file) else "w"
 
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=level.upper(),
         format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

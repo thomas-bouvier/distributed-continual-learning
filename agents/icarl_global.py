@@ -185,7 +185,7 @@ class icarl_v1_agent(Agent):
                 logging.info(
                     f"Time taken for batch {i_batch} is {batch_end - batch_start} sec")
 
-                if hvd.rank() == 0 and hvd.local_rank() == 0:
+                if hvd.rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
                                "step": self.global_steps,
                                "epoch": self.global_epoch,

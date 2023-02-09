@@ -20,7 +20,7 @@ class Agent:
         optimizer_regime,
         batch_size,
         cuda,
-        verbose,
+        log_level,
         log_buffer,
         log_interval,
         batch_metrics=None,
@@ -33,7 +33,7 @@ class Agent:
         self.optimizer_regime = optimizer_regime
         self.batch_size = batch_size
         self.cuda = cuda
-        self.verbose = verbose
+        self.log_level = log_level
         self.log_buffer = log_buffer
         self.log_interval = log_interval
         self.batch_metrics = batch_metrics
@@ -120,7 +120,7 @@ class Agent:
                 logging.info(
                     f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
 
-                if hvd.rank() == 0 and hvd.local_rank() == 0:
+                if hvd.rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
                                "step": self.global_steps,
                                "epoch": self.global_epoch,
@@ -329,14 +329,14 @@ class Agent:
             stream.write(values)
 
 
-def base(model, use_amp, agent_config, optimizer_regime, cuda, verbose, buffer_cuda, log_buffer, log_interval, batch_metrics):
+def base(model, use_amp, agent_config, optimizer_regime, cuda, log_level, buffer_cuda, log_buffer, log_interval, batch_metrics):
     return Agent(
         model,
         use_amp,
         agent_config,
         optimizer_regime,
         cuda,
-        verbose,
+        log_level,
         buffer_cuda,
         log_buffer,
         log_interval,

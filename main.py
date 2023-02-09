@@ -189,10 +189,9 @@ parser.add_argument(
     help="random seed (default: 42)",
 )
 parser.add_argument(
-    "--verbose",
-    action="store_true",
-    default=False,
-    help="print more messages"
+    "--log-level",
+    default='info',
+    help="logging level"
 )
 parser.add_argument(
     "--log-interval",
@@ -307,7 +306,7 @@ def main():
     torch.set_num_threads(1)
 
     save_path = ""
-    if hvd.rank() == 0 and hvd.local_rank() == 0:
+    if hvd.rank() == 0:
         if args.agent is not None:
             wandb.init(project=f"distributed-continual-learning_{args.agent}")
         else:
@@ -326,6 +325,7 @@ def main():
         wandb.config.update(args)
 
         setup_logging(path.join(save_path, "log.txt"),
+                      level=args.log_level,
                       dummy=hvd.local_rank() > 0)
         logging.info(f"Saving to {save_path}")
 
@@ -432,7 +432,7 @@ class Experiment:
             self.optimizer_regime,
             self.args.batch_size * self.args.batches_per_allreduce,
             self.args.cuda,
-            self.args.verbose,
+            self.args.log_level,
             self.args.log_buffer,
             self.args.log_interval,
             batch_metrics
@@ -617,7 +617,7 @@ class Experiment:
                         "Average: {} samples/sec per device\n"
                         "Average on {} device(s): {} samples/sec\n"
                         "Training loss: {train[loss]:.4f}\n".format(
-                            i_epoch,
+                            i_epoch + 1,
                             hvd.size(),
                             train_results["time"],
                             img_sec,
@@ -627,7 +627,7 @@ class Experiment:
                         )
                     )
 
-                    if hvd.rank() == 0 and hvd.local_rank() == 0:
+                    if hvd.rank() == 0:
                         wandb.log({"epoch": self.agent.global_epoch,
                                    "epoch_time": train_results["time"],
                                    "img_sec": img_sec * hvd.size()})
