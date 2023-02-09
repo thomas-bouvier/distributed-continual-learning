@@ -328,8 +328,10 @@ class nil_cpp_agent(Agent):
             self.aug_w = current_minibatch.w
 
             logging.debug(f"Received {aug_size - self.batch_size} samples from other nodes")
-            if self.log_buffer and i_batch % self.log_interval == 0 and self.num_reps > 0 and hvd.rank() == 0:
-                display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x, aug_size, captions=self.aug_y, cuda=self.cuda)
+            if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
+                num_reps = aug_size - self.batch_size
+                if num_reps > 0:
+                    display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x[-num_reps:], captions=self.aug_y[-num_reps:], cuda=self.cuda)
 
             # In-advance preparation of next minibatch
             start_acc_time = time.time()

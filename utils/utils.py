@@ -58,14 +58,14 @@ def plot_representatives(rep_values, rep_labels, num_cols):
     return fig
 
 
-def display(filename, outputs, count, columns=2, captions=None, cuda=True):
+def display(filename, outputs, columns=2, captions=None, cuda=True):
     rows = int(math.ceil(len(outputs) / columns))
     fig = plt.figure()
     fig.set_size_inches(16, 6 * rows)
     gs = gridspec.GridSpec(rows, columns)
     row = 0
     col = 0
-    for i in range(count):
+    for i in range(len(outputs)):
         plt.subplot(gs[i])
         plt.axis("off")
         if captions is not None:
