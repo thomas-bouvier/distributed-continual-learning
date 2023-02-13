@@ -2,6 +2,7 @@ import copy
 import horovod.torch as hvd
 import logging
 import time
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import wandb
@@ -78,92 +79,106 @@ class Agent:
         epoch_time = 0
         step_count = 0
 
+        dataloader_iter = enumerate(data_regime.get_loader())
+
         start_batch_time = time.time()
         start_load_time = start_batch_time
-        for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
-            synchronize_cuda(self.cuda)
-            self.last_batch_load_time = time.time() - start_load_time
-            self.epoch_load_time += self.last_batch_load_time
+        with tqdm(total=len(data_regime.get_loader()),
+              desc=f"{prefix} epoch #{self.epoch + 1}",
+              disable=self.log_level not in ('info')) as progress:
+            for i_batch, (x, y, t) in dataloader_iter:
+                synchronize_cuda(self.cuda)
+                self.last_batch_load_time = time.time() - start_load_time
+                self.epoch_load_time += self.last_batch_load_time
 
-            output, loss = self._step(
-                i_batch, x, y, training=training
-            )
-            synchronize_cuda(self.cuda)
-            batch_time = time.time() - start_batch_time
-            epoch_time += batch_time
-
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(output, y, topk=(1, 5))
-            meters["loss"].update(loss)
-            meters["prec1"].update(prec1, x.size(0))
-            meters["prec5"].update(prec5, x.size(0))
-
-            if i_batch % self.log_interval == 0 or i_batch == len(
-                data_regime.get_loader()
-            ):
-                logging.info(
-                    "{phase}: epoch: {0} [{1}/{2}]\t"
-                    "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
-                    "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
-                    "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                        self.epoch,
-                        i_batch,
-                        len(data_regime.get_loader()),
-                        phase="TRAINING" if training else "EVALUATING",
-                        meters=meters,
-                    )
+                output, loss = self._step(
+                    i_batch, x, y, training=training
                 )
+                synchronize_cuda(self.cuda)
+                batch_time = time.time() - start_batch_time
+                epoch_time += batch_time
 
-                logging.info(f"batch {i_batch} time {batch_time} sec")
-                logging.info(
-                    f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/batch_time}%)")
-                logging.info(
-                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+                # measure accuracy and record loss
+                prec1, prec5 = accuracy(output, y, topk=(1, 5))
+                meters["loss"].update(loss)
+                meters["prec1"].update(prec1, x.size(0))
+                meters["prec5"].update(prec5, x.size(0))
 
-                if hvd.rank() == 0:
-                    wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                               "step": self.global_steps,
-                               "epoch": self.global_epoch,
-                               "batch": i_batch,
-                               f"{prefix}_prec1": meters["prec1"].avg,
-                               f"{prefix}_prec5": meters["prec5"].avg})
-                    if training:
-                        wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                   "step": self.global_steps,
-                                   "epoch": self.global_epoch})
-                if self.writer is not None:
-                    self.writer.add_scalar(
-                        f"{prefix}_loss", meters["loss"].avg, self.global_steps
+                if i_batch % self.log_interval == 0 or i_batch == len(
+                    data_regime.get_loader()
+                ):
+                    logging.info(
+                        "{phase}: epoch: {0} [{1}/{2}]\t"
+                        "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
+                        "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
+                        "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
+                            self.epoch,
+                            i_batch,
+                            len(data_regime.get_loader()),
+                            phase="TRAINING" if training else "EVALUATING",
+                            meters=meters,
+                        )
                     )
-                    self.writer.add_scalar(
-                        f"{prefix}_prec1",
-                        meters["prec1"].avg,
-                        self.global_steps,
-                    )
-                    if training:
+
+                    logging.debug(f"batch {i_batch} time {batch_time} sec")
+                    logging.debug(
+                        f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/batch_time}%)")
+                    logging.debug(
+                        f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+
+                    if hvd.rank() == 0:
+                        wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                                "step": self.global_steps,
+                                "epoch": self.global_epoch,
+                                "batch": i_batch,
+                                f"{prefix}_prec1": meters["prec1"].avg,
+                                f"{prefix}_prec5": meters["prec5"].avg})
+                        if training:
+                            wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                    "step": self.global_steps,
+                                    "epoch": self.global_epoch})
+                    if self.writer is not None:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[
-                                0], self.global_steps
+                            f"{prefix}_loss", meters["loss"].avg, self.global_steps
                         )
-                    self.writer.flush()
-                if self.watcher is not None:
-                    self.observe(
-                        trainer=self,
-                        model=self.model,
-                        optimizer=self.optimizer_regime.optimizer,
-                        data=(x, y),
-                    )
-                    self.stream_meters(meters, prefix=prefix)
-                    if training:
-                        self.write_stream(
-                            "lr",
-                            (self.global_steps,
-                             self.optimizer_regime.get_lr()[0]),
+                        self.writer.add_scalar(
+                            f"{prefix}_prec1",
+                            meters["prec1"].avg,
+                            self.global_steps,
                         )
-            step_count += 1
-            synchronize_cuda(self.cuda)
-            start_batch_time = time.time()
-            start_load_time = start_batch_time
+                        self.writer.add_scalar(
+                            f"{prefix}_prec5",
+                            meters["prec5"].avg,
+                            self.global_steps,
+                        )
+                        if training:
+                            self.writer.add_scalar(
+                                "lr", self.optimizer_regime.get_lr()[
+                                    0], self.global_steps
+                            )
+                        self.writer.flush()
+                    if self.watcher is not None:
+                        self.observe(
+                            trainer=self,
+                            model=self.model,
+                            optimizer=self.optimizer_regime.optimizer,
+                            data=(x, y),
+                        )
+                        self.stream_meters(meters, prefix=prefix)
+                        if training:
+                            self.write_stream(
+                                "lr",
+                                (self.global_steps,
+                                self.optimizer_regime.get_lr()[0]),
+                            )
+                progress.set_postfix({'loss': meters["loss"].avg.item(),
+                            'accuracy': 100. * meters["prec1"].avg.item()})
+                progress.update(1)
+
+                step_count += 1
+                synchronize_cuda(self.cuda)
+                start_batch_time = time.time()
+                start_load_time = start_batch_time
 
         if training:
             self.global_epoch += 1

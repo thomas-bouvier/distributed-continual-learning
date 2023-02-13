@@ -91,6 +91,7 @@ class nil_cpp_agent(Agent):
             ctypes.c_uint16(hvd.rank()).value, self.provider,
             1, list(shape), self.cuda_rdma, self.discover_endpoints, self.log_level not in ('info')
         )
+        #self.dsl.enable_augmentation(True)
 
         self.minibatches_ahead = 2
         self.next_minibatches = []
@@ -111,6 +112,8 @@ class nil_cpp_agent(Agent):
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
         if task_id > 0:
+            self.dsl.enable_augmentation(True)
+
             if self.config.get("reset_state_dict", False):
                 logging.debug("Resetting model internal state..")
                 self.model.load_state_dict(
@@ -331,7 +334,7 @@ class nil_cpp_agent(Agent):
             if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
                 num_reps = aug_size - self.batch_size
                 if num_reps > 0:
-                    display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x[-num_reps:], captions=self.aug_y[-num_reps:], cuda=self.cuda)
+                    display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x[-num_reps:], captions=self.aug_y[-num_reps:])
 
             # In-advance preparation of next minibatch
             start_acc_time = time.time()

@@ -37,6 +37,7 @@ python main.py --model candlenet --dataset candle
 python main.py --model mnistnet --dataset mnist
 python main.py --model resnet18 --dataset cifar10
 python main.py --model resnet50 --dataset cifar100
+python main.py --model resnet50 --dataset imagenet_blurred
 python main.py --model resnet101 --dataset tinyimagenet
 ```
 

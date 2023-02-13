@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import torch
 import wandb
+import numpy as np
 
 from bisect import bisect
 from six import string_types
@@ -58,7 +59,7 @@ def plot_representatives(rep_values, rep_labels, num_cols):
     return fig
 
 
-def display(filename, outputs, columns=2, captions=None, cuda=True):
+def display(filename, outputs, columns=2, captions=None):
     rows = int(math.ceil(len(outputs) / columns))
     fig = plt.figure()
     fig.set_size_inches(16, 6 * rows)
@@ -70,8 +71,8 @@ def display(filename, outputs, columns=2, captions=None, cuda=True):
         plt.axis("off")
         if captions is not None:
             plt.title(captions[i])
-        plt.imshow(outputs[i].permute(1, 2, 0).cpu()
-                   if cuda else outputs[i].permute(1, 2, 0))
-        path = f"{filename}.jpg"
-        plt.savefig(path)
-        wandb.save(path)
+        plt.imshow(np.array(outputs[i].permute(1, 2, 0).cpu()))
+    path = f"{filename}.jpg"
+    plt.savefig(path)
+    plt.close()
+    wandb.save(path)
