@@ -66,10 +66,43 @@ class Agent:
         self.last_batch_load_time = 0
         self.last_batch_move_time = 0
 
+    def train(self, data_regime):
+        # switch to train mode
+        self.model.train()
+        self.write_stream("epoch", (self.global_steps, self.epoch))
+        return self.loop(data_regime, training=True)
+
+    def validate(self, data_regime):
+        # switch to evaluate mode
+        self.model.eval()
+        with torch.no_grad():
+            return self.loop(data_regime, training=False)
+
+    def before_all_tasks(self, train_data_regime):
+        pass
+
+    def before_every_task(self, task_id, train_data_regime):
+        self.steps = 0
+
+        # Distribute the data
+        train_data_regime.get_loader(True)
+
+        if self.best_model is not None:
+            logging.debug(
+                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
+            )
+            self.model.load_state_dict(self.best_model)
+            self.minimal_eval_loss = float("inf")
+        if task_id > 0:
+            if self.config.get("reset_state_dict", False):
+                logging.debug("Resetting model internal state..")
+                self.model.load_state_dict(
+                    copy.deepcopy(self.initial_snapshot))
+            self.optimizer_regime.reset(self.model.parameters())
+
     """
     Forward pass for the current epoch
     """
-
     def loop(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
@@ -77,12 +110,11 @@ class Agent:
             for metric in ["loss", "prec1", "prec5"]
         }
         epoch_time = 0
-        step_count = 0
-
         dataloader_iter = enumerate(data_regime.get_loader())
 
         start_batch_time = time.time()
         start_load_time = start_batch_time
+
         with tqdm(total=len(data_regime.get_loader()),
               desc=f"{prefix} epoch #{self.epoch + 1}",
               disable=self.log_level not in ('info')) as progress:
@@ -91,31 +123,24 @@ class Agent:
                 self.last_batch_load_time = time.time() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
 
-                output, loss = self._step(
-                    i_batch, x, y, training=training
-                )
+                self._step(i_batch, x, y, meters, training=training)
+
                 synchronize_cuda(self.cuda)
                 batch_time = time.time() - start_batch_time
                 epoch_time += batch_time
 
-                # measure accuracy and record loss
-                prec1, prec5 = accuracy(output, y, topk=(1, 5))
-                meters["loss"].update(loss)
-                meters["prec1"].update(prec1, x.size(0))
-                meters["prec5"].update(prec5, x.size(0))
-
                 if i_batch % self.log_interval == 0 or i_batch == len(
                     data_regime.get_loader()
                 ):
-                    logging.info(
-                        "{phase}: epoch: {0} [{1}/{2}]\t"
-                        "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
-                        "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
-                        "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                            self.epoch,
+                    logging.debug(
+                        "{0}: epoch: {1} [{2}/{3}]\t"
+                        "Loss {meters[loss].avg:.4f}\t"
+                        "Prec@1 {meters[prec1].avg:.3f}\t"
+                        "Prec@5 {meters[prec5].avg:.3f}\t".format(
+                            prefix,
+                            self.epoch + 1,
                             i_batch,
                             len(data_regime.get_loader()),
-                            phase="TRAINING" if training else "EVALUATING",
                             meters=meters,
                         )
                     )
@@ -172,10 +197,12 @@ class Agent:
                                 self.optimizer_regime.get_lr()[0]),
                             )
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
-                            'accuracy': 100. * meters["prec1"].avg.item()})
+                            'accuracy': meters["prec1"].avg.item()})
                 progress.update(1)
 
-                step_count += 1
+                self.global_steps += 1
+                self.steps += 1
+
                 synchronize_cuda(self.cuda)
                 start_batch_time = time.time()
                 start_load_time = start_batch_time
@@ -195,7 +222,7 @@ class Agent:
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
-        meters["step_count"] = step_count
+        meters["steps"] = self.steps
 
         return meters
 
@@ -204,6 +231,7 @@ class Agent:
         i_batch,
         x,
         y,
+        meters,
         training=False,
     ):
         if training:
@@ -233,47 +261,14 @@ class Agent:
             else:
                 loss.backward()
                 self.optimizer_regime.step()
-            self.global_steps += 1
-            self.steps += 1
-
-        return output, loss
-
-    def train(self, data_regime):
-        # switch to train mode
-        self.model.train()
-        self.write_stream("epoch", (self.global_steps, self.epoch))
-        return self.loop(data_regime, training=True)
-
-    def validate(self, data_regime):
-        # switch to evaluate mode
-        self.model.eval()
-        with torch.no_grad():
-            return self.loop(data_regime, training=False)
-
-    def before_all_tasks(self, train_data_regime):
-        pass
+        
+        prec1, prec5 = accuracy(output, y, topk=(1, 5))
+        meters["loss"].update(loss, x.size(0))
+        meters["prec1"].update(prec1, x.size(0))
+        meters["prec5"].update(prec5, x.size(0))
 
     def after_all_tasks(self):
         pass
-
-    def before_every_task(self, task_id, train_data_regime):
-        self.steps = 0
-
-        # Distribute the data
-        train_data_regime.get_loader(True)
-
-        if self.best_model is not None:
-            logging.debug(
-                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
-            )
-            self.model.load_state_dict(self.best_model)
-            self.minimal_eval_loss = float("inf")
-        if task_id > 0:
-            if self.config.get("reset_state_dict", False):
-                logging.debug("Resetting model internal state..")
-                self.model.load_state_dict(
-                    copy.deepcopy(self.initial_snapshot))
-            self.optimizer_regime.reset(self.model.parameters())
 
     def after_every_task(self):
         pass

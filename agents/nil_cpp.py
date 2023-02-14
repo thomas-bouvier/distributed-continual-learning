@@ -132,12 +132,11 @@ class nil_cpp_agent(Agent):
             for metric in ["loss", "prec1", "prec5"]
         }
         epoch_time = 0
-        step_count = 0
-
         dataloader_iter = enumerate(data_regime.get_loader())
 
         start_batch_time = time.time()
         start_load_time = start_batch_time
+
         with tqdm(total=len(data_regime.get_loader()),
               desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
               disable=self.log_level not in ('info')) as progress:
@@ -146,33 +145,24 @@ class nil_cpp_agent(Agent):
                 self.last_batch_load_time = time.time() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
 
-                output, loss = self._step(
-                    i_batch, x, y, training=training
-                )
+                self._step(i_batch, x, y, meters, training=training)
+
                 synchronize_cuda(self.cuda)
                 self.last_batch_time = time.time() - start_batch_time
                 epoch_time += self.last_batch_time
 
-                # measure accuracy and record loss
-                prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
-                if training:
-                    # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
-                    meters["loss"].update(loss.sum() / self.mask[y].sum())
-                else:
-                    meters["loss"].update(loss)
-                meters["prec1"].update(prec1, x.size(0))
-                meters["prec5"].update(prec5, x.size(0))
-
-                if i_batch % self.log_interval == 0 or i_batch == len(data_regime.get_loader()):
+                if i_batch % self.log_interval == 0 or i_batch == len(
+                    data_regime.get_loader()
+                ):
                     logging.debug(
-                        "{phase}: epoch: {0} [{1}/{2}]\t"
-                        "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
-                        "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
-                        "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                            self.epoch,
+                        "{0}: epoch: {1} [{2}/{3}]\t"
+                        "Loss {meters[loss].avg:.4f}\t"
+                        "Prec@1 {meters[prec1].avg:.3f}\t"
+                        "Prec@5 {meters[prec5].avg:.3f}\t".format(
+                            prefix,
+                            self.epoch + 1,
                             i_batch,
                             len(data_regime.get_loader()),
-                            phase="TRAINING" if training else "EVALUATING",
                             meters=meters,
                         )
                     )
@@ -258,11 +248,13 @@ class nil_cpp_agent(Agent):
                                 self.optimizer_regime.get_lr()[0]),
                             )
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
-                           'accuracy': 100. * meters["prec1"].avg.item(),
+                           'accuracy': meters["prec1"].avg.item(),
                            'representatives': self.num_reps})
                 progress.update(1)
 
-                step_count += 1
+                self.global_steps += 1
+                self.steps += 1
+
                 synchronize_cuda(self.cuda)
                 start_batch_time = time.time()
                 start_load_time = start_batch_time
@@ -293,7 +285,7 @@ class nil_cpp_agent(Agent):
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
-        meters["step_count"] = step_count
+        meters["steps"] = self.steps
 
         return meters
 
@@ -302,13 +294,13 @@ class nil_cpp_agent(Agent):
         i_batch,
         x,
         y,
+        meters,
         training=False,
     ):
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.steps)
 
-        w = torch.ones(len(x), device=torch.device(self.device))
         start_move_time = time.time()
         x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
         self.last_batch_move_time = time.time() - start_move_time
@@ -316,8 +308,9 @@ class nil_cpp_agent(Agent):
 
         if training:
             if self.global_steps == 0 and self.num_reps == 0:
-                current_minibatch = self.get_current_augmented_minibatch()
-                self.dsl.accumulate(x, y, current_minibatch.x, current_minibatch.y, current_minibatch.w)
+                next_minibatch = self.get_next_augmented_minibatch()
+                self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
+                return
 
             # Get the representatives
             start_wait_time = time.time()
@@ -326,15 +319,15 @@ class nil_cpp_agent(Agent):
             self.epoch_wait_time += self.last_batch_wait_time
 
             current_minibatch = self.get_current_augmented_minibatch()
-            self.aug_x = current_minibatch.x
-            self.aug_y = current_minibatch.y
-            self.aug_w = current_minibatch.w
+            aug_x = current_minibatch.x[:aug_size]
+            aug_y = current_minibatch.y[:aug_size]
+            aug_w = current_minibatch.w[:aug_size]
 
             logging.debug(f"Received {aug_size - self.batch_size} samples from other nodes")
             if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
                 num_reps = aug_size - self.batch_size
                 if num_reps > 0:
-                    display(f"aug_batch_{self.epoch}_{i_batch}", self.aug_x[-num_reps:], captions=self.aug_y[-num_reps:])
+                    display(f"aug_batch_{self.epoch}_{i_batch}", current_minibatch.x[-num_reps:], captions=current_minibatch.y[-num_reps:])
 
             # In-advance preparation of next minibatch
             start_acc_time = time.time()
@@ -345,11 +338,11 @@ class nil_cpp_agent(Agent):
 
             if self.use_amp:
                 with autocast():
-                    output = self.model(self.aug_x)
-                    loss = self.criterion(output, self.aug_y)
+                    output = self.model(aug_x)
+                    loss = self.criterion(output, aug_y)
             else:
-                output = self.model(self.aug_x)
-                loss = self.criterion(output, self.aug_y)
+                output = self.model(aug_x)
+                loss = self.criterion(output, aug_y)
         else:
             if self.use_amp:
                 with autocast():
@@ -361,8 +354,8 @@ class nil_cpp_agent(Agent):
 
         if training:
             # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
-            total_weight = hvd.allreduce(torch.sum(self.aug_w), name='total_weight', op=hvd.Sum)
-            dw = self.aug_w / total_weight
+            total_weight = hvd.allreduce(torch.sum(aug_w), name='total_weight', op=hvd.Sum)
+            dw = aug_w / total_weight
 
             if self.use_amp:
                 self.scaler.scale(loss).backward(dw)
@@ -374,18 +367,19 @@ class nil_cpp_agent(Agent):
                 loss.backward(dw)
                 self.optimizer_regime.step()
 
-            self.global_steps += 1
-            self.steps += 1
             self.num_reps = self.dsl.get_rehearsal_size()
 
-            # Log representatives
-            if self.writer is not None and self.writer_images and self.num_reps > 0:
-                fig = plot_representatives(
-                    self.aug_x[len(x):], self.aug_y[len(x):], 5)
-                self.writer.add_figure(
-                    "representatives", fig, self.global_steps)
-
-        return output, loss
+            # measure accuracy and record loss
+            prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
+            # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
+            meters["loss"].update(loss.sum() / self.mask[aug_y].sum(), aug_x.size(0))
+            meters["prec1"].update(prec1, aug_x.size(0))
+            meters["prec5"].update(prec5, aug_x.size(0))
+        else:
+            prec1, prec5 = accuracy(output, y, topk=(1, 5))
+            meters["loss"].update(loss, x.size(0))
+            meters["prec1"].update(prec1, x.size(0))
+            meters["prec5"].update(prec5, x.size(0))
 
     def get_num_representatives(self):
         return self.num_reps

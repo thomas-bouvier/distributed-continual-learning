@@ -607,7 +607,7 @@ class Experiment:
 
                 if hvd.rank() == 0:
                     img_sec = (
-                        train_results["step_count"]
+                        train_results["steps"]
                         * self.args.batch_size
                         / train_results["time"]
                     )
