@@ -533,7 +533,7 @@ class Experiment:
             start = time.time()
             training_time = time.time()
 
-            task_metrics = {"task_id": task_id, "test_task_metrics": []}
+            task_metrics = {"task_id": task_id, "test_tasks_metrics": [], "task_averages": []}
 
             self.train_data_regime.set_task_id(task_id)
             self.agent.before_every_task(task_id, self.train_data_regime)
@@ -591,14 +591,21 @@ class Experiment:
                             task_metrics_values.update(
                                 {k: v for k, v in validate_results.items()}
                             )
-                            task_metrics["test_task_metrics"].append(
+                            task_metrics["test_tasks_metrics"].append(
                                 task_metrics_values
                             )
 
-                    averages = {metric: sum(meters[i][metric].avg for i in range(task_id + 1)) / (task_id + 1)
+                    averages = {metric: sum(meters[i][metric].avg.item() for i in range(task_id + 1)) / (task_id + 1)
                             for metric in ["loss", "prec1", "prec5"]}
-                    task_metrics.update(
-                        {"test_task_averages": averages}
+
+                    task_metrics_averages = dict(
+                        epoch=i_epoch
+                    )
+                    task_metrics_averages.update(
+                        {k: v for k, v in averages.items()}
+                    )
+                    task_metrics["task_averages"].append(
+                        task_metrics_averages
                     )
 
                     if hvd.rank() == 0:
