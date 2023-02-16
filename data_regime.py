@@ -58,7 +58,6 @@ class DataRegime(object):
         self.config = config
         self.epoch = 0
         self.task_id = 0
-        self.steps = None
         self.tasksets = None
         self.total_num_classes = 0
         self.concat_taskset = None

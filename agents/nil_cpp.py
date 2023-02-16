@@ -100,7 +100,7 @@ class nil_cpp_agent(Agent):
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id
-        self.steps = 0
+        self.batch = 0
 
         # Distribute the data
         train_data_regime.get_loader(True)
@@ -111,6 +111,7 @@ class nil_cpp_agent(Agent):
             )
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
+
         if task_id > 0:
             self.dsl.enable_augmentation(True)
 
@@ -125,7 +126,7 @@ class nil_cpp_agent(Agent):
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """Forward pass for the current epoch"""
-    def loop(self, data_regime, training=False):
+    def loop(self, data_regime, training=False, previous_task=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -137,15 +138,16 @@ class nil_cpp_agent(Agent):
         start_batch_time = time.time()
         start_load_time = start_batch_time
 
+        enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
         with tqdm(total=len(data_regime.get_loader()),
               desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
-              disable=self.log_level not in ('info')) as progress:
+              disable=not enable_tqdm) as progress:
             for i_batch, (x, y, t) in dataloader_iter:
                 synchronize_cuda(self.cuda)
                 self.last_batch_load_time = time.time() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
 
-                self._step(i_batch, x, y, meters, training=training)
+                self._step(i_batch, x, y, meters, training=training, previous_task=previous_task)
 
                 synchronize_cuda(self.cuda)
                 self.last_batch_time = time.time() - start_batch_time
@@ -197,40 +199,42 @@ class nil_cpp_agent(Agent):
                             self.batch_metrics.add(**batch_metrics_values)
                             self.batch_metrics.save()
 
-                        wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                                "step": self.global_steps,
-                                "epoch": self.global_epoch,
-                                "batch": i_batch,
-                                f"{prefix}_prec1": meters["prec1"].avg,
-                                f"{prefix}_prec5": meters["prec5"].avg})
-                        if training:
-                            wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                    "num_reps": self.get_num_representatives(),
-                                    "step": self.global_steps,
-                                    "epoch": self.global_epoch})
+                        if not previous_task:
+                            wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                                    "batch": self.global_batch,
+                                    "epoch": self.global_epoch,
+                                    "batch": i_batch,
+                                    f"{prefix}_prec1": meters["prec1"].avg,
+                                    f"{prefix}_prec5": meters["prec5"].avg})
+                            if training:
+                                wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                        "num_reps": self.get_num_representatives(),
+                                        "batch": self.global_batch,
+                                        "epoch": self.global_epoch})
+                    """
                     if self.writer is not None:
                         self.writer.add_scalar(
-                            f"{prefix}_loss", meters["loss"].avg, self.global_steps
+                            f"{prefix}_loss", meters["loss"].avg, self.global_batch
                         )
                         self.writer.add_scalar(
                             f"{prefix}_prec1",
                             meters["prec1"].avg,
-                            self.global_steps,
+                            self.global_batch,
                         )
                         self.writer.add_scalar(
                             f"{prefix}_prec5",
                             meters["prec5"].avg,
-                            self.global_steps,
+                            self.global_batch,
                         )
                         if training:
                             self.writer.add_scalar(
                                 "lr", self.optimizer_regime.get_lr()[
-                                    0], self.global_steps
+                                    0], self.global_batch
                             )
                             self.writer.add_scalar(
                                 "num_representatives",
                                 self.get_num_representatives(),
-                                self.global_steps,
+                                self.global_batch,
                             )
                         self.writer.flush()
                     if self.watcher is not None:
@@ -244,16 +248,18 @@ class nil_cpp_agent(Agent):
                         if training:
                             self.write_stream(
                                 "lr",
-                                (self.global_steps,
+                                (self.global_batch,
                                 self.optimizer_regime.get_lr()[0]),
                             )
+                    """
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
                            'accuracy': meters["prec1"].avg.item(),
                            'representatives': self.num_reps})
                 progress.update(1)
 
-                self.global_steps += 1
-                self.steps += 1
+                if not previous_task:
+                    self.global_batch += 1
+                    self.batch += 1
 
                 synchronize_cuda(self.cuda)
                 start_batch_time = time.time()
@@ -285,7 +291,7 @@ class nil_cpp_agent(Agent):
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
-        meters["steps"] = self.steps
+        meters["batch"] = self.batch
 
         return meters
 
@@ -296,10 +302,11 @@ class nil_cpp_agent(Agent):
         y,
         meters,
         training=False,
+        previous_task=False,
     ):
         if training:
             self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.steps)
+            self.optimizer_regime.update(self.epoch, self.batch)
 
         start_move_time = time.time()
         x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
@@ -307,7 +314,7 @@ class nil_cpp_agent(Agent):
         self.epoch_move_time += self.last_batch_move_time
 
         if training:
-            if self.global_steps == 0 and self.num_reps == 0:
+            if self.global_batch == 0 and self.num_reps == 0:
                 next_minibatch = self.get_next_augmented_minibatch()
                 self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
                 return
@@ -385,7 +392,7 @@ class nil_cpp_agent(Agent):
         return self.num_reps
 
     def get_current_augmented_minibatch(self):
-        return self.next_minibatches[self.global_steps % self.minibatches_ahead]
+        return self.next_minibatches[self.global_batch % self.minibatches_ahead]
 
     def get_next_augmented_minibatch(self):
-        return self.next_minibatches[(self.global_steps + 1) % self.minibatches_ahead]
+        return self.next_minibatches[(self.global_batch + 1) % self.minibatches_ahead]

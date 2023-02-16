@@ -41,8 +41,8 @@ class Agent:
 
         self.global_epoch = 0
         self.epoch = 0
-        self.global_steps = 0
-        self.steps = 0
+        self.global_batch = 0
+        self.batch = 0
         self.minimal_eval_loss = float("inf")
         self.best_model = None
         self.writer = None
@@ -69,20 +69,21 @@ class Agent:
     def train(self, data_regime):
         # switch to train mode
         self.model.train()
-        self.write_stream("epoch", (self.global_steps, self.epoch))
+        self.write_stream("epoch", (self.global_batch, self.epoch))
         return self.loop(data_regime, training=True)
 
-    def validate(self, data_regime):
+    def validate(self, data_regime, previous_task=False):
         # switch to evaluate mode
         self.model.eval()
         with torch.no_grad():
-            return self.loop(data_regime, training=False)
+            return self.loop(data_regime, training=False, previous_task=previous_task)
 
     def before_all_tasks(self, train_data_regime):
         pass
 
     def before_every_task(self, task_id, train_data_regime):
-        self.steps = 0
+        self.task_id = task_id
+        self.batch = 0
 
         # Distribute the data
         train_data_regime.get_loader(True)
@@ -93,6 +94,7 @@ class Agent:
             )
             self.model.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
+
         if task_id > 0:
             if self.config.get("reset_state_dict", False):
                 logging.debug("Resetting model internal state..")
@@ -103,7 +105,7 @@ class Agent:
     """
     Forward pass for the current epoch
     """
-    def loop(self, data_regime, training=False):
+    def loop(self, data_regime, training=False, previous_task=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -115,9 +117,10 @@ class Agent:
         start_batch_time = time.time()
         start_load_time = start_batch_time
 
+        enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
         with tqdm(total=len(data_regime.get_loader()),
               desc=f"{prefix} epoch #{self.epoch + 1}",
-              disable=self.log_level not in ('info')) as progress:
+              disable=not enable_tqdm) as progress:
             for i_batch, (x, y, t) in dataloader_iter:
                 synchronize_cuda(self.cuda)
                 self.last_batch_load_time = time.time() - start_load_time
@@ -152,34 +155,36 @@ class Agent:
                         f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
 
                     if hvd.rank() == 0:
-                        wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                                "step": self.global_steps,
-                                "epoch": self.global_epoch,
-                                "batch": i_batch,
-                                f"{prefix}_prec1": meters["prec1"].avg,
-                                f"{prefix}_prec5": meters["prec5"].avg})
-                        if training:
-                            wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                    "step": self.global_steps,
-                                    "epoch": self.global_epoch})
+                        if not previous_task:
+                            wandb.log({"batch": self.global_batch,
+                                    "epoch": self.global_epoch,
+                                    "batch": i_batch,
+                                    f"{prefix}_loss": meters["loss"].avg,
+                                    f"{prefix}_prec1": meters["prec1"].avg,
+                                    f"{prefix}_prec5": meters["prec5"].avg})
+                            if training:
+                                wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                        "batch": self.global_batch,
+                                        "epoch": self.global_epoch})
+                    """
                     if self.writer is not None:
                         self.writer.add_scalar(
-                            f"{prefix}_loss", meters["loss"].avg, self.global_steps
+                            f"{prefix}_loss", meters["loss"].avg, self.global_batch
                         )
                         self.writer.add_scalar(
                             f"{prefix}_prec1",
                             meters["prec1"].avg,
-                            self.global_steps,
+                            self.global_batch,
                         )
                         self.writer.add_scalar(
                             f"{prefix}_prec5",
                             meters["prec5"].avg,
-                            self.global_steps,
+                            self.global_batch,
                         )
                         if training:
                             self.writer.add_scalar(
                                 "lr", self.optimizer_regime.get_lr()[
-                                    0], self.global_steps
+                                    0], self.global_batch
                             )
                         self.writer.flush()
                     if self.watcher is not None:
@@ -193,15 +198,17 @@ class Agent:
                         if training:
                             self.write_stream(
                                 "lr",
-                                (self.global_steps,
+                                (self.global_batch,
                                 self.optimizer_regime.get_lr()[0]),
                             )
+                    """
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
                             'accuracy': meters["prec1"].avg.item()})
                 progress.update(1)
 
-                self.global_steps += 1
-                self.steps += 1
+                if not previous_task:
+                    self.global_batch += 1
+                    self.batch += 1
 
                 synchronize_cuda(self.cuda)
                 start_batch_time = time.time()
@@ -222,7 +229,7 @@ class Agent:
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
-        meters["steps"] = self.steps
+        meters["batch"] = self.batch
 
         return meters
 
@@ -236,7 +243,7 @@ class Agent:
     ):
         if training:
             self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.steps)
+            self.optimizer_regime.update(self.epoch, self.batch)
 
         start_move_time = time.time()
         x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
@@ -330,7 +337,7 @@ class Agent:
             stream = self.get_stream(name)
             if stream is None:
                 continue
-            stream.write((self.global_steps, value))
+            stream.write((self.global_batch, value))
         return True
 
     def write_stream(self, name, values):

@@ -73,7 +73,7 @@ class icarl_v1_agent(Agent):
             "num_representatives", 6000) * self.num_classes
 
     def before_every_task(self, task_id, train_data_regime):
-        self.steps = 0
+        self.batch = 0
 
         # Distribute the data
         train_data_regime.get_loader(True)
@@ -187,33 +187,33 @@ class icarl_v1_agent(Agent):
 
                 if hvd.rank() == 0:
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                               "step": self.global_steps,
+                               "batch": self.global_batch,
                                "epoch": self.global_epoch,
                                "batch": i_batch,
                                f"{prefix}_prec1": meters["prec1"].avg,
                                f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
                         wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                   "step": self.global_steps,
+                                   "batch": self.global_batch,
                                    "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
-                        f"{prefix}_loss", meters["loss"].avg, self.global_steps
+                        f"{prefix}_loss", meters["loss"].avg, self.global_batch
                     )
                     self.writer.add_scalar(
                         f"{prefix}_prec1",
                         meters["prec1"].avg,
-                        self.global_steps,
+                        self.global_batch,
                     )
                     self.writer.add_scalar(
                         f"{prefix}_prec5",
                         meters["prec5"].avg,
-                        self.global_steps,
+                        self.global_batch,
                     )
                     if training:
                         self.writer.add_scalar(
                             "lr", self.optimizer_regime.get_lr()[
-                                0], self.global_steps
+                                0], self.global_batch
                         )
                     self.writer.flush()
                 if self.watcher is not None:
@@ -227,7 +227,7 @@ class icarl_v1_agent(Agent):
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps,
+                            (self.global_batch,
                              self.optimizer_regime.get_lr()[0]),
                         )
             step_count += 1
@@ -261,7 +261,7 @@ class icarl_v1_agent(Agent):
 
         if training:
             self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.steps)
+            self.optimizer_regime.update(self.epoch, self.batch)
 
         x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
 
@@ -302,8 +302,8 @@ class icarl_v1_agent(Agent):
             else:
                 loss.backward()
                 self.optimizer_regime.step()
-            self.global_steps += 1
-            self.steps += 1
+            self.global_batch += 1
+            self.batch += 1
         else:
             output = self.forward(x)
             loss = self.criterion(output[: y.size(0)], y)

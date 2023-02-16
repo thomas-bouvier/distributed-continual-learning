@@ -307,10 +307,10 @@ def main():
 
     save_path = ""
     if hvd.rank() == 0:
-        if args.agent is not None:
-            wandb.init(project=f"distributed-continual-learning_{args.agent}")
-        else:
-            wandb.init(project="distributed-continual-learning")
+        #if args.agent is not None:
+        #    wandb.init(project=f"distributed-continual-learning_{args.agent}")
+        #else:
+        wandb.init(project="distributed-continual-learning")
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
         wandb.run.name = run_name
 
@@ -522,7 +522,7 @@ class Experiment:
             time_metrics_path, title="Time metrics - %s" % self.args.save_dir,
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
-        
+
         img_secs = []
         evaluate_durations = []
 
@@ -532,10 +532,6 @@ class Experiment:
         for task_id in range(0, len(self.train_data_regime.tasksets)):
             start = time.time()
             training_time = time.time()
-            logging.info(
-                "\n==============================\nStarting task %s",
-                task_id,
-            )
 
             task_metrics = {"task_id": task_id, "test_task_metrics": []}
 
@@ -545,7 +541,7 @@ class Experiment:
                 self.train_data_regime.get_loader())
 
             for i_epoch in range(0, self.args.epochs):
-                logging.info(f"Starting task {task_id}, epoch: {i_epoch}")
+                logging.info(f"TRAINING on task {task_id + 1}/{len(self.train_data_regime.tasksets)}, epoch: {i_epoch + 1}/{self.args.epochs}, {hvd.size()} device(s)")
                 self.agent.epoch = i_epoch
 
                 # Horovod: set epoch to sampler for shuffling
@@ -556,47 +552,67 @@ class Experiment:
 
                 # evaluate on test set
                 before_evaluate_time = time.time()
+                meters = []
                 if self.args.evaluate:
-                    meters = {
-                        metric: AverageMeter(f"task_{metric}")
-                        for metric in ["loss", "prec1", "prec5"]
-                    }
+                    for test_task_id in range(0, task_id + 1):
+                        meters.append({
+                            metric: AverageMeter(f"task_{metric}")
+                            for metric in ["loss", "prec1", "prec5"]
+                        })
+
+                    """ICARL
                     if self.args.agent == "icarl":
                         self.agent.update_exemplars(
                             self.agent.nc, training=False)
-                    for test_task_id in range(0, task_id+1):
+                    """
+
+                    for test_task_id in range(0, task_id + 1):
                         self.validate_data_regime.set_task_id(test_task_id)
                         self.validate_data_regime.get_loader(True)
                         self.validate_data_regime.set_epoch(i_epoch)
 
+                        logging.info(f"EVALUATING on task {test_task_id + 1}..{task_id + 1}")
+
                         validate_results = self.agent.validate(
-                            self.validate_data_regime)
-                        meters["loss"].update(validate_results["loss"])
-                        meters["prec1"].update(validate_results["prec1"])
-                        meters["prec5"].update(validate_results["prec5"])
+                            self.validate_data_regime, previous_task=(test_task_id != task_id))
+                        meters[test_task_id]["loss"].update(validate_results["loss"])
+                        meters[test_task_id]["prec1"].update(validate_results["prec1"])
+                        meters[test_task_id]["prec5"].update(validate_results["prec5"])
 
                         if hvd.rank() == 0:
                             logging.info(
-                                "\nRESULTS: Testing loss: {validate[loss]:.4f}\n".format(
+                                "RESULTS: Testing loss: {validate[loss]:.4f}\n".format(
                                     validate=validate_results
                                 )
                             )
-
                             task_metrics_values = dict(
-                                test_task_id=test_task_id + 1, epoch=i_epoch
+                                test_task_id=test_task_id, epoch=i_epoch
                             )
                             task_metrics_values.update(
-                                {"test_" + k: v for k, v in validate_results.items()}
+                                {k: v for k, v in validate_results.items()}
                             )
                             task_metrics["test_task_metrics"].append(
                                 task_metrics_values
                             )
 
-                    if meters["loss"].avg < self.agent.minimal_eval_loss:
+                    averages = {metric: sum(meters[i][metric].avg for i in range(task_id + 1)) / (task_id + 1)
+                            for metric in ["loss", "prec1", "prec5"]}
+                    task_metrics.update(
+                        {"test_task_averages": averages}
+                    )
+
+                    if hvd.rank() == 0:
+                        wandb.log({"epoch": self.agent.global_epoch,
+                                "continual_loss": averages["loss"],
+                                "continual_prec1": averages["prec1"],
+                                "continual_prec5": averages["prec5"]})
+
+                    #TODO: maybe we should compared the averaged loss on all previous tasks?
+                    if meters[task_id]["loss"].avg < self.agent.minimal_eval_loss:
                         logging.debug(
-                            f"Saving best model with minimal eval loss ({meters['loss'].avg}).."
+                            f"Saving best model with minimal eval loss ({meters[task_id]['loss'].avg}).."
                         )
-                        self.agent.minimal_eval_loss = meters["loss"].avg
+                        self.agent.minimal_eval_loss = meters[task_id]["loss"].avg
                         self.agent.best_model = copy.deepcopy(
                             self.agent.model.state_dict()
                         )
@@ -607,7 +623,7 @@ class Experiment:
 
                 if hvd.rank() == 0:
                     img_sec = (
-                        train_results["steps"]
+                        train_results["batch"]
                         * self.args.batch_size
                         / train_results["time"]
                     )
@@ -631,14 +647,16 @@ class Experiment:
                         wandb.log({"epoch": self.agent.global_epoch,
                                    "epoch_time": train_results["time"],
                                    "img_sec": img_sec * hvd.size()})
+                    """
                     if self.agent.writer is not None:
                         self.agent.writer.add_scalar(
                             "img_sec", img_sec * hvd.size(), self.agent.global_epoch
                         )
+                    """
                     dl_metrics_values = dict(
                         task_id=task_id,
                         epoch=self.agent.global_epoch,
-                        steps=self.agent.global_steps,
+                        batch=self.agent.global_batch,
                     )
                     dl_metrics_values.update(
                         {"train_" + k: v for k, v in train_results.items()}

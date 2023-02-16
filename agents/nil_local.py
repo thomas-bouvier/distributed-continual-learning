@@ -84,7 +84,7 @@ class nil_local_agent(Agent):
         # Accumulated sum of representative list lengths
         def len_cumsum():
             counts = copy.deepcopy(self.counts)
-            all_classes = [0 for _ in range(max(counts)+1)]
+            all_classes = [0 for _ in range(max(counts) + 1)]
             for k, v in counts.items():
                 all_classes[k] = min(v, self.num_representatives)
             return list(itertools.accumulate(all_classes))
@@ -156,7 +156,7 @@ class nil_local_agent(Agent):
         self.representatives_y = torch.tensor(
             [
                 i
-                for i in range(max(self.counts)+1)
+                for i in range(max(self.counts) + 1)
                 for _ in range(min(self.counts.get(i, 0), self.num_representatives))
             ]
         )
@@ -172,7 +172,7 @@ class nil_local_agent(Agent):
         """Reassign the weights of the representatives
         """
         total_count = 0
-        for i in range(max(self.counts)+1):
+        for i in range(max(self.counts) + 1):
             total_count += self.counts.get(i, 0)
 
         # This version proposes that the total weight of representatives is
@@ -191,7 +191,7 @@ class nil_local_agent(Agent):
         self.representatives_w = torch.sum(torch.stack(ws), 0)
 
     def before_every_task(self, task_id, train_data_regime):
-        self.steps = 0
+        self.batch = 0
 
         # Distribute the data
         train_data_regime.get_loader(True)
@@ -293,38 +293,38 @@ class nil_local_agent(Agent):
                         self.batch_metrics.save()
 
                     wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                               "step": self.global_steps,
+                               "batch": self.global_batch,
                                "epoch": self.global_epoch,
                                "batch": i_batch,
                                f"{prefix}_prec1": meters["prec1"].avg,
                                f"{prefix}_prec5": meters["prec5"].avg})
                     if training:
                         wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                   "step": self.global_steps,
+                                   "batch": self.global_batch,
                                    "epoch": self.global_epoch})
                 if self.writer is not None:
                     self.writer.add_scalar(
-                        f"{prefix}_loss", meters["loss"].avg, self.global_steps
+                        f"{prefix}_loss", meters["loss"].avg, self.global_batch
                     )
                     self.writer.add_scalar(
                         f"{prefix}_prec1",
                         meters["prec1"].avg,
-                        self.global_steps,
+                        self.global_batch,
                     )
                     self.writer.add_scalar(
                         f"{prefix}_prec5",
                         meters["prec5"].avg,
-                        self.global_steps,
+                        self.global_batch,
                     )
                     if training:
                         self.writer.add_scalar(
                             "lr", self.optimizer_regime.get_lr()[
-                                0], self.global_steps
+                                0], self.global_batch
                         )
                         self.writer.add_scalar(
                             "num_representatives",
                             self.get_num_representatives(),
-                            self.global_steps,
+                            self.global_batch,
                         )
                     self.writer.flush()
                 if self.watcher is not None:
@@ -338,7 +338,7 @@ class nil_local_agent(Agent):
                     if training:
                         self.write_stream(
                             "lr",
-                            (self.global_steps,
+                            (self.global_batch,
                              self.optimizer_regime.get_lr()[0]),
                         )
             step_count += 1
@@ -385,7 +385,7 @@ class nil_local_agent(Agent):
     ):
         if training:
             self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.steps)
+            self.optimizer_regime.update(self.epoch, self.batch)
 
         # Create batch weights
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
@@ -432,7 +432,7 @@ class nil_local_agent(Agent):
             if self.writer is not None and self.writer_images and num_reps > 0:
                 fig = plot_representatives(rep_values, rep_labels, 5)
                 self.writer.add_figure(
-                    "representatives", fig, self.global_steps)
+                    "representatives", fig, self.global_batch)
 
         if self.use_amp:
             with autocast():
@@ -455,8 +455,8 @@ class nil_local_agent(Agent):
             else:
                 loss.backward(dw)
                 self.optimizer_regime.step()
-            self.global_steps += 1
-            self.steps += 1
+            self.global_batch += 1
+            self.batch += 1
 
         return output, loss
 

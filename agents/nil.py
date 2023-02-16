@@ -51,6 +51,7 @@ class nil_agent(Agent):
         self.num_samples = config.get("num_samples", 20)
 
         self.num_reps = 0
+        self.highest_task_so_far = 0
 
         self.epoch_load_time = 0
         self.epoch_move_time = 0
@@ -76,6 +77,32 @@ class nil_agent(Agent):
         self.global_representatives_y = None
         self.global_representatives_w = None
         self.global_counts = None
+
+    def before_every_task(self, task_id, train_data_regime):
+        self.task_id = task_id
+        self.batch = 0
+        if task_id > self.highest_task_so_far:
+            self.highest_task_so_far = task_id
+
+        # Distribute the data
+        train_data_regime.get_loader(True)
+
+        if self.best_model is not None:
+            logging.debug(
+                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
+            )
+            self.model.load_state_dict(self.best_model)
+            self.minimal_eval_loss = float("inf")
+        if task_id > 0:
+            if self.config.get("reset_state_dict", False):
+                logging.debug("Resetting model internal state..")
+                self.model.load_state_dict(
+                    copy.deepcopy(self.initial_snapshot))
+            self.optimizer_regime.reset(self.model.parameters())
+        
+        # Create mask so the loss is only used for classes learnt during this task
+        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
+        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     def get_samples(self):
         """Select or retrieves the representatives from the data
@@ -259,29 +286,6 @@ class nil_agent(Agent):
             ws.append((self.global_representatives_y == y).float() * weight)
         self.global_representatives_w = torch.sum(torch.stack(ws), 0)
 
-    def before_every_task(self, task_id, train_data_regime):
-        self.steps = 0
-
-        # Distribute the data
-        train_data_regime.get_loader(True)
-
-        if self.best_model is not None:
-            logging.debug(
-                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
-            )
-            self.model.load_state_dict(self.best_model)
-            self.minimal_eval_loss = float("inf")
-        if task_id > 0:
-            if self.config.get("reset_state_dict", False):
-                logging.debug("Resetting model internal state..")
-                self.model.load_state_dict(
-                    copy.deepcopy(self.initial_snapshot))
-            self.optimizer_regime.reset(self.model.parameters())
-        
-        # Create mask so the loss is only used for classes learnt during this task
-        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
-        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
-
     """
     Forward pass for the current epoch
     """
@@ -292,132 +296,139 @@ class nil_agent(Agent):
             for metric in ["loss", "prec1", "prec5"]
         }
         epoch_time = 0
-        step_count = 0
 
         start_batch_time = time.time()
         start_load_time = start_batch_time
-        for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
-            synchronize_cuda(self.cuda)
-            self.last_batch_load_time = time.time() - start_load_time
-            self.epoch_load_time += self.last_batch_load_time
 
-            output, loss = self._step(
-                i_batch, x, y, training=training
-            )
-            synchronize_cuda(self.cuda)
-            self.last_batch_time = time.time() - start_batch_time
-            epoch_time += self.last_batch_time
+        with tqdm(total=len(data_regime.get_loader()),
+              desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
+              disable=self.log_level not in ('info')) as progress:
+            for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
+                synchronize_cuda(self.cuda)
+                self.last_batch_load_time = time.time() - start_load_time
+                self.epoch_load_time += self.last_batch_load_time
 
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
-            meters["loss"].update(loss.sum() / self.mask[y].sum())
-            meters["prec1"].update(prec1, x.size(0))
-            meters["prec5"].update(prec5, x.size(0))
+                self._step(i_batch, x, y, meters, training=training)
 
-            if i_batch % self.log_interval == 0 or i_batch == len(
-                data_regime.get_loader()
-            ):
-                logging.info(
-                    "{phase}: epoch: {0} [{1}/{2}]\t"
-                    "Loss {meters[loss].val:.4f} ({meters[loss].avg:.4f})\t"
-                    "Prec@1 {meters[prec1].val:.3f} ({meters[prec1].avg:.3f})\t"
-                    "Prec@5 {meters[prec5].val:.3f} ({meters[prec5].avg:.3f})\t".format(
-                        self.epoch,
-                        i_batch,
-                        len(data_regime.get_loader()),
-                        phase="TRAINING" if training else "EVALUATING",
-                        meters=meters,
-                    )
-                )
+                synchronize_cuda(self.cuda)
+                self.last_batch_time = time.time() - start_batch_time
+                epoch_time += self.last_batch_time
 
-                logging.info(f"batch {i_batch} time {self.last_batch_time} sec")
-                logging.info(
-                    f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
-                logging.info(
-                    f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/self.last_batch_time}%)")
-                logging.info(
-                    f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
-                logging.info(
-                    f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/self.last_batch_time}%)")
-                logging.info(
-                    f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
-                logging.info(
-                    f"\tnum_representatives {self.get_num_representatives()}")
-
-                if hvd.rank() == 0:
-                    if training and self.epoch < 5 and self.batch_metrics is not None:
-                        batch_metrics_values = dict(
-                            epoch=self.epoch,
-                            batch=i_batch,
-                            time=self.last_batch_time,
-                            load_time=self.last_batch_load_time,
-                            move_time=self.last_batch_move_time,
-                            wait_time=self.last_batch_wait_time,
-                            cat_time=self.last_batch_cat_time,
-                            acc_time=self.last_batch_acc_time,
-                            num_reps=self.num_reps,
+                if i_batch % self.log_interval == 0 or i_batch == len(
+                    data_regime.get_loader()
+                ):
+                    logging.debug(
+                        "{0}: epoch: {1} [{2}/{3}]\t"
+                        "Loss {meters[loss].avg:.4f}\t"
+                        "Prec@1 {meters[prec1].avg:.3f}\t"
+                        "Prec@5 {meters[prec5].avg:.3f}\t".format(
+                            prefix,
+                            self.epoch + 1,
+                            i_batch,
+                            len(data_regime.get_loader()),
+                            meters=meters,
                         )
-                        self.batch_metrics.add(**batch_metrics_values)
-                        self.batch_metrics.save()
+                    )
 
-                    wandb.log({f"{prefix}_loss": meters["loss"].avg,
-                               "step": self.global_steps,
-                               "epoch": self.global_epoch,
-                               "batch": i_batch,
-                               f"{prefix}_prec1": meters["prec1"].avg,
-                               f"{prefix}_prec5": meters["prec5"].avg})
-                    if training:
-                        wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                   "step": self.global_steps,
-                                   "epoch": self.global_epoch})
-                if self.writer is not None:
-                    self.writer.add_scalar(
-                        f"{prefix}_loss", meters["loss"].avg, self.global_steps
-                    )
-                    self.writer.add_scalar(
-                        f"{prefix}_prec1",
-                        meters["prec1"].avg,
-                        self.global_steps,
-                    )
-                    self.writer.add_scalar(
-                        f"{prefix}_prec5",
-                        meters["prec5"].avg,
-                        self.global_steps,
-                    )
-                    if training:
+                    logging.debug(f"batch {i_batch} time {self.last_batch_time} sec")
+                    logging.debug(
+                        f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
+                    logging.debug(
+                        f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/self.last_batch_time}%)")
+                    logging.debug(
+                        f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
+                    logging.debug(
+                        f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/self.last_batch_time}%)")
+                    logging.debug(
+                        f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
+                    logging.debug(
+                        f"\tnum_representatives {self.get_num_representatives()}")
+
+                    if hvd.rank() == 0:
+                        if training and self.epoch < 5 and self.batch_metrics is not None:
+                            batch_metrics_values = dict(
+                                epoch=self.epoch,
+                                batch=i_batch,
+                                time=self.last_batch_time,
+                                load_time=self.last_batch_load_time,
+                                move_time=self.last_batch_move_time,
+                                wait_time=self.last_batch_wait_time,
+                                cat_time=self.last_batch_cat_time,
+                                acc_time=self.last_batch_acc_time,
+                                num_reps=self.num_reps,
+                            )
+                            self.batch_metrics.add(**batch_metrics_values)
+                            self.batch_metrics.save()
+
+                        if self.task_id == self.highest_task_so_far:
+                            wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                                    "batch": self.global_batch,
+                                    "epoch": self.global_epoch,
+                                    "batch": i_batch,
+                                    f"{prefix}_prec1": meters["prec1"].avg,
+                                    f"{prefix}_prec5": meters["prec5"].avg})
+                            if training:
+                                wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                        "batch": self.global_batch,
+                                        "epoch": self.global_epoch})
+                    """
+                    if self.writer is not None:
                         self.writer.add_scalar(
-                            "lr", self.optimizer_regime.get_lr()[
-                                0], self.global_steps
+                            f"{prefix}_loss", meters["loss"].avg, self.global_batch
                         )
                         self.writer.add_scalar(
-                            "num_representatives",
-                            self.get_num_representatives(),
-                            self.global_steps,
+                            f"{prefix}_prec1",
+                            meters["prec1"].avg,
+                            self.global_batch,
                         )
                         self.writer.add_scalar(
-                            "num_representatives",
-                            self.get_num_representatives(),
-                            self.global_steps,
+                            f"{prefix}_prec5",
+                            meters["prec5"].avg,
+                            self.global_batch,
                         )
-                    self.writer.flush()
-                if self.watcher is not None:
-                    self.observe(
-                        trainer=self,
-                        model=self.model,
-                        optimizer=self.optimizer_regime.optimizer,
-                        data=(x, y),
-                    )
-                    self.stream_meters(meters, prefix=prefix)
-                    if training:
-                        self.write_stream(
-                            "lr",
-                            (self.global_steps,
-                             self.optimizer_regime.get_lr()[0]),
+                        if training:
+                            self.writer.add_scalar(
+                                "lr", self.optimizer_regime.get_lr()[
+                                    0], self.global_batch
+                            )
+                            self.writer.add_scalar(
+                                "num_representatives",
+                                self.get_num_representatives(),
+                                self.global_batch,
+                            )
+                            self.writer.add_scalar(
+                                "num_representatives",
+                                self.get_num_representatives(),
+                                self.global_batch,
+                            )
+                        self.writer.flush()
+                    if self.watcher is not None:
+                        self.observe(
+                            trainer=self,
+                            model=self.model,
+                            optimizer=self.optimizer_regime.optimizer,
+                            data=(x, y),
                         )
-            step_count += 1
-            synchronize_cuda(self.cuda)
-            start_batch_time = time.time()
-            start_load_time = start_batch_time
+                        self.stream_meters(meters, prefix=prefix)
+                        if training:
+                            self.write_stream(
+                                "lr",
+                                (self.global_batch,
+                                self.optimizer_regime.get_lr()[0]),
+                            )
+                    """
+                progress.set_postfix({'loss': meters["loss"].avg.item(),
+                            'accuracy': meters["prec1"].avg.item(),
+                            'representatives': self.num_reps})
+                progress.update(1)
+
+                if self.task_id == self.highest_task_so_far:
+                    self.global_batch += 1
+                    self.batch += 1
+        
+                synchronize_cuda(self.cuda)
+                start_batch_time = time.time()
+                start_load_time = start_batch_time
 
         if training:
             self.global_epoch += 1
@@ -445,7 +456,7 @@ class nil_agent(Agent):
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
-        meters["step_count"] = step_count
+        meters["batch"] = self.batch
 
         return meters
 
@@ -454,11 +465,12 @@ class nil_agent(Agent):
         i_batch,
         x,
         y,
+        meters,
         training=False,
     ):
         if training:
             self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.steps)
+            self.optimizer_regime.update(self.epoch, self.batch)
 
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
         start_move_time = time.time()
@@ -505,7 +517,7 @@ class nil_agent(Agent):
             if self.writer is not None and self.writer_images and num_reps > 0:
                 fig = plot_representatives(rep_values, rep_labels, 5)
                 self.writer.add_figure(
-                    "representatives", fig, self.global_steps)
+                    "representatives", fig, self.global_batch)
 
         if self.use_amp:
             with autocast():
@@ -528,10 +540,12 @@ class nil_agent(Agent):
             else:
                 loss.backward(dw)
                 self.optimizer_regime.step()
-            self.global_steps += 1
-            self.steps += 1
 
-        return output, loss
+            # measure accuracy and record loss
+            prec1, prec5 = accuracy(output[: y.size(0)], y, topk=(1, 5))
+            meters["loss"].update(loss.sum() / self.mask[y].sum(), x.size(0))
+            meters["prec1"].update(prec1, x.size(0))
+            meters["prec5"].update(prec5, x.size(0))
 
     def get_num_representatives(self):
         return self.num_reps
