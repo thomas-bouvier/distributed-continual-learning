@@ -70,7 +70,7 @@ class icarl_v1_agent(Agent):
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
         self.memory_size = config.get(
-            "num_representatives", 6000) * self.num_classes
+            "rehearsal_size", 100) * self.num_classes
 
     def before_every_task(self, task_id, train_data_regime):
         self.batch = 0

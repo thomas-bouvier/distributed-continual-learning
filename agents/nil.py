@@ -46,9 +46,9 @@ class nil_agent(Agent):
         )
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
-        self.num_representatives = config.get("num_representatives", 60)
+        self.rehearsal_size = config.get("rehearsal_size", 60)
         self.num_candidates = config.get("num_candidates", 20)
-        self.num_samples = config.get("num_samples", 20)
+        self.num_representatives = config.get("num_representatives", 20)
 
         self.num_reps = 0
         self.highest_task_so_far = 0
@@ -107,20 +107,20 @@ class nil_agent(Agent):
     def get_samples(self):
         """Select or retrieves the representatives from the data
 
-        :return: a list of num_samples representatives.
+        :return: a list of num_representatives representatives.
         """
         if self.num_reps == 0:
             return [], [], []
 
         # self.num_reps counts the number of representatives stored in all
         # workers. This values is bounded and is a factor of num_workers *
-        # num_representatives.
+        # rehearsal_size.
         # repr_list is a flat list of indices targeting all representatives of
         # all workers.
         repr_list = torch.randperm(self.num_reps)
-        while len(repr_list) < self.num_samples:
+        while len(repr_list) < self.num_representatives:
             repr_list = torch.cat((repr_list, torch.randperm(self.num_reps)))
-        repr_list = repr_list[: self.num_samples]
+        repr_list = repr_list[: self.num_representatives]
 
         # Accumulated sum of representative list lengths
         def len_cumsum(counts, max_clip):
@@ -133,7 +133,7 @@ class nil_agent(Agent):
         # representatives for each worker. Indices are ranks.
         global_counts = torch.sum(self.global_counts, dim=1)
         accumulated_counts = len_cumsum(
-            global_counts, self.num_representatives * self.num_classes)
+            global_counts, self.rehearsal_size * self.num_classes)
 
         # [(worker, representative count)]
         idx_worker = [find_2d_idx(accumulated_counts, i.item())
@@ -141,7 +141,7 @@ class nil_agent(Agent):
         idx_3d = []
         for w, i in idx_worker:
             idx_2d = find_2d_idx(len_cumsum(
-                self.global_counts[w], self.num_representatives), i)
+                self.global_counts[w], self.rehearsal_size), i)
             idx_3d.append((w, idx_2d[0], idx_2d[1]))
 
         return (
@@ -168,7 +168,7 @@ class nil_agent(Agent):
         previous_counts = copy.deepcopy(self.counts)
         for i in range(len(previous_counts)):
             previous_counts[i] = min(
-                previous_counts[i], self.num_representatives)
+                previous_counts[i], self.rehearsal_size)
 
         i = min(self.num_candidates, len(x))
         rand_candidates = torch.randperm(len(y))
@@ -194,7 +194,7 @@ class nil_agent(Agent):
             representatives_count = previous_counts[label]
             rand_indices = torch.randperm(
                 representatives_count + len(candidates[label])
-            )[: self.num_representatives]
+            )[: self.rehearsal_size]
             rm_targets += [
                 j for j in range(representatives_count)
                 if j not in rand_indices
@@ -207,7 +207,7 @@ class nil_agent(Agent):
             # If not the buffer for current label is not full yet, mark the next
             # ones as "to be removed"
             for j in range(max(0, len(add_targets) - len(rm_targets) + 1)):
-                if representatives_count+j < min(self.counts[label], self.num_representatives):
+                if representatives_count+j < min(self.counts[label], self.rehearsal_size):
                     rm_targets += [representatives_count+j]
             if len(rm_targets) > len(add_targets):
                 rm_targets = rm_targets[:len(add_targets)]
@@ -249,7 +249,7 @@ class nil_agent(Agent):
 
                 if len(self.global_representatives_x[w][label]) == 0 and len(add) > 0:
                     size = list(candidates[lower:upper][0].size())
-                    size.insert(0, self.num_representatives)
+                    size.insert(0, self.rehearsal_size)
                     self.global_representatives_x[w][label] = torch.empty(
                         *size)
 
@@ -260,7 +260,7 @@ class nil_agent(Agent):
             [
                 i
                 for i in range(self.num_classes)
-                for _ in range(min(self.counts[i], self.num_representatives))
+                for _ in range(min(self.counts[i], self.rehearsal_size))
             ]
         ).unsqueeze(0))
         self.num_reps = self.global_representatives_y.numel()
@@ -272,10 +272,10 @@ class nil_agent(Agent):
 
         # This version proposes that the total weight of representatives is
         # calculated from the proportion of samples to augment the batch with.
-        # E.g. a batch of 100 images and 10 are num_samples selected,
+        # E.g. a batch of 100 images and 10 are num_representatives selected,
         # total_weight = 10
         total_weight = (self.batch_size * 1.0) / \
-            (self.num_samples * len(self.global_representatives_y))
+            (self.num_representatives * len(self.global_representatives_y))
         # The total_weight is adjusted to the proportion between candidates
         # and actual representatives.
         ws = []
@@ -342,7 +342,7 @@ class nil_agent(Agent):
                     logging.debug(
                         f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
                     logging.debug(
-                        f"\tnum_representatives {self.get_num_representatives()}")
+                        f"\trehearsal_size {self.get_rehearsal_size()}")
 
                     if hvd.rank() == 0:
                         if training and self.epoch < 5 and self.batch_metrics is not None:
@@ -392,13 +392,13 @@ class nil_agent(Agent):
                                     0], self.global_batch
                             )
                             self.writer.add_scalar(
-                                "num_representatives",
-                                self.get_num_representatives(),
+                                "rehearsal_size",
+                                self.get_rehearsal_size(),
                                 self.global_batch,
                             )
                             self.writer.add_scalar(
-                                "num_representatives",
-                                self.get_num_representatives(),
+                                "rehearsal_size",
+                                self.get_rehearsal_size(),
                                 self.global_batch,
                             )
                         self.writer.flush()
@@ -434,7 +434,7 @@ class nil_agent(Agent):
             self.global_epoch += 1
             logging.info(f"\nCUMULATED VALUES:")
             logging.info(
-                f"\tnum_representatives {self.get_num_representatives()}")
+                f"\trehearsal_size {self.get_rehearsal_size()}")
             logging.info(f"epoch time {epoch_time} sec")
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
@@ -547,7 +547,7 @@ class nil_agent(Agent):
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
 
-    def get_num_representatives(self):
+    def get_rehearsal_size(self):
         return self.num_reps
 
     def get_memory_size(self):

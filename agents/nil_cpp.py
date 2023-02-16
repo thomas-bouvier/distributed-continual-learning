@@ -19,13 +19,13 @@ from utils.meters import AverageMeter, accuracy
 
 
 class AugmentedMinibatch:
-    def __init__(self, batch_size, num_samples, shape, device):
+    def __init__(self, batch_size, num_representatives, shape, device):
         self.x = torch.zeros(
-            batch_size + num_samples, *shape, device=device)
+            batch_size + num_representatives, *shape, device=device)
         self.y = torch.randint(high=1000, size=(
-            batch_size + num_samples,), device=device)
+            batch_size + num_representatives,), device=device)
         self.w = torch.zeros(
-            batch_size + num_samples, device=device)
+            batch_size + num_representatives, device=device)
 
 
 class nil_cpp_agent(Agent):
@@ -58,9 +58,9 @@ class nil_cpp_agent(Agent):
         )
 
         self.device = 'cuda' if self.cuda else 'cpu'
-        self.num_representatives = config.get("num_representatives", 60)
+        self.rehearsal_size = config.get("rehearsal_size", 100)
         self.num_candidates = config.get("num_candidates", 20)
-        self.num_samples = config.get("num_samples", 20)
+        self.num_representatives = config.get("num_representatives", 20)
         self.provider = config.get('provider', 'na+sm://')
         self.discover_endpoints = config.get('discover_endpoints', True)
         self.cuda_rdma = config.get('cuda_rdma', False)
@@ -86,7 +86,7 @@ class nil_cpp_agent(Agent):
 
         self.dsl = rehearsal.DistributedStreamLoader(
             rehearsal.Classification,
-            train_data_regime.total_num_classes, self.num_representatives, self.num_candidates,
+            train_data_regime.total_num_classes, self.rehearsal_size, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             ctypes.c_uint16(hvd.rank()).value, self.provider,
             1, list(shape), self.cuda_rdma, self.discover_endpoints, self.log_level not in ('info')
@@ -96,7 +96,7 @@ class nil_cpp_agent(Agent):
         self.minibatches_ahead = 2
         self.next_minibatches = []
         for i in range(self.minibatches_ahead):
-            self.next_minibatches.append(AugmentedMinibatch(self.batch_size, self.num_samples, shape, self.device))
+            self.next_minibatches.append(AugmentedMinibatch(self.batch_size, self.num_representatives, shape, self.device))
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id
@@ -181,7 +181,7 @@ class nil_cpp_agent(Agent):
                     logging.debug(
                         f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
                     logging.debug(
-                        f"\tnum_representatives {self.get_num_representatives()}")
+                        f"\trehearsal_size {self.get_rehearsal_size()}")
 
                     if hvd.rank() == 0:
                         if training and self.epoch < 5 and self.batch_metrics is not None:
@@ -208,7 +208,7 @@ class nil_cpp_agent(Agent):
                                     f"{prefix}_prec5": meters["prec5"].avg})
                             if training:
                                 wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                        "num_reps": self.get_num_representatives(),
+                                        "num_reps": self.get_rehearsal_size(),
                                         "batch": self.global_batch,
                                         "epoch": self.global_epoch})
                     """
@@ -232,8 +232,8 @@ class nil_cpp_agent(Agent):
                                     0], self.global_batch
                             )
                             self.writer.add_scalar(
-                                "num_representatives",
-                                self.get_num_representatives(),
+                                "rehearsal_size",
+                                self.get_rehearsal_size(),
                                 self.global_batch,
                             )
                         self.writer.flush()
@@ -269,7 +269,7 @@ class nil_cpp_agent(Agent):
             self.global_epoch += 1
             logging.info(f"\nCUMULATED VALUES:")
             logging.info(
-                f"\tnum_representatives {self.get_num_representatives()}")
+                f"\trehearsal_size {self.get_rehearsal_size()}")
             logging.info(f"epoch time {epoch_time} sec")
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
@@ -388,7 +388,7 @@ class nil_cpp_agent(Agent):
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
 
-    def get_num_representatives(self):
+    def get_rehearsal_size(self):
         return self.num_reps
 
     def get_current_augmented_minibatch(self):

@@ -46,9 +46,9 @@ class nil_local_agent(Agent):
         )
 
         self.device = "cuda" if self.buffer_cuda else 'cpu'
-        self.num_representatives = config.get("num_representatives", 60)
+        self.rehearsal_size = config.get("rehearsal_size", 60)
         self.num_candidates = config.get("num_candidates", 20)
-        self.num_samples = config.get("num_samples", 20)
+        self.num_representatives = config.get("num_representatives", 20)
 
         self.num_reps = 0
         self.counts = {}
@@ -71,22 +71,22 @@ class nil_local_agent(Agent):
     def get_samples(self):
         """Select or retrieve the representatives from the data
 
-        :return: a list of num_samples representatives.
+        :return: a list of num_representatives representatives.
         """
         if self.num_reps == 0:
             return [], [], []
 
         repr_list = torch.randperm(self.num_reps)
-        while len(repr_list) < self.num_samples:
+        while len(repr_list) < self.num_representatives:
             repr_list = torch.cat((repr_list, torch.randperm(self.num_reps)))
-        repr_list = repr_list[: self.num_samples]
+        repr_list = repr_list[: self.num_representatives]
 
         # Accumulated sum of representative list lengths
         def len_cumsum():
             counts = copy.deepcopy(self.counts)
             all_classes = [0 for _ in range(max(counts) + 1)]
             for k, v in counts.items():
-                all_classes[k] = min(v, self.num_representatives)
+                all_classes[k] = min(v, self.rehearsal_size)
             return list(itertools.accumulate(all_classes))
 
         idx_2d = [find_2d_idx(len_cumsum(), i.item()) for i in repr_list]
@@ -110,7 +110,7 @@ class nil_local_agent(Agent):
 
         previous_counts = copy.deepcopy(self.counts)
         for k, v in previous_counts.items():
-            v = min(v, self.num_representatives)
+            v = min(v, self.rehearsal_size)
 
         i = min(self.num_candidates, len(x))
         rand_candidates = torch.randperm(len(y))
@@ -126,7 +126,7 @@ class nil_local_agent(Agent):
             representatives_count = previous_counts.get(label, 0)
             rand_indices = torch.randperm(
                 representatives_count + len(candidates)
-            )[: self.num_representatives]
+            )[: self.rehearsal_size]
             rm = [
                 j for j in range(representatives_count)
                 if j not in rand_indices
@@ -139,7 +139,7 @@ class nil_local_agent(Agent):
             # If not the buffer for current label is not full yet, mark the next
             # ones as "to be removed"
             for j in range(max(0, len(add) - len(rm) + 1)):
-                if representatives_count+j < min(self.counts[label], self.num_representatives):
+                if representatives_count+j < min(self.counts[label], self.rehearsal_size):
                     rm += [representatives_count+j]
             if len(rm) > len(add):
                 rm = rm[:len(add)]
@@ -147,7 +147,7 @@ class nil_local_agent(Agent):
 
             if representatives_count == 0 and len(add) > 0:
                 size = list(candidates[add][0].size())
-                size.insert(0, self.num_representatives)
+                size.insert(0, self.rehearsal_size)
                 self.representatives_x[label] = torch.empty(*size)
 
             for r, a in zip(rm, add):
@@ -157,7 +157,7 @@ class nil_local_agent(Agent):
             [
                 i
                 for i in range(max(self.counts) + 1)
-                for _ in range(min(self.counts.get(i, 0), self.num_representatives))
+                for _ in range(min(self.counts.get(i, 0), self.rehearsal_size))
             ]
         )
         self.num_reps = len(self.representatives_y)
@@ -177,10 +177,10 @@ class nil_local_agent(Agent):
 
         # This version proposes that the total weight of representatives is
         # calculated from the proportion of samples to augment the batch with.
-        # E.g. a batch of 100 images and 10 are num_samples selected,
+        # E.g. a batch of 100 images and 10 are num_representatives selected,
         # weight = 10
         weight = (self.batch_size * 1.0) / \
-            (self.num_samples * len(self.representatives_y))
+            (self.num_representatives * len(self.representatives_y))
         # The weight is adjusted to the proportion between historical candidates
         # and representatives.
         ws = []
@@ -274,7 +274,7 @@ class nil_local_agent(Agent):
                 logging.info(
                     f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
                 logging.info(
-                    f"\tnum_representatives {self.get_num_representatives()}")
+                    f"\trehearsal_size {self.get_rehearsal_size()}")
 
                 if hvd.rank() == 0:
                     if training and self.epoch < 5 and self.batch_metrics is not None:
@@ -322,8 +322,8 @@ class nil_local_agent(Agent):
                                 0], self.global_batch
                         )
                         self.writer.add_scalar(
-                            "num_representatives",
-                            self.get_num_representatives(),
+                            "rehearsal_size",
+                            self.get_rehearsal_size(),
                             self.global_batch,
                         )
                     self.writer.flush()
@@ -350,7 +350,7 @@ class nil_local_agent(Agent):
             self.global_epoch += 1
             logging.info(f"\nCUMULATED VALUES:")
             logging.info(
-                f"\tnum_representatives {self.get_num_representatives()}")
+                f"\trehearsal_size {self.get_rehearsal_size()}")
             logging.info(f"epoch time {epoch_time} sec")
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
@@ -460,7 +460,7 @@ class nil_local_agent(Agent):
 
         return output, loss
 
-    def get_num_representatives(self):
+    def get_rehearsal_size(self):
         return self.num_reps
 
     def get_memory_size(self):

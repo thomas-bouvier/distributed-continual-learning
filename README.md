@@ -47,8 +47,8 @@ python main.py --model resnet101 --dataset tinyimagenet
 python main.py --model mnistnet --dataset mnist --tasksets-config "{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"
 python main.py --model resnet18 --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
 python main.py --model resnet18 --agent nil --dataset cifar100 --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
-python main.py --model resnet18 --agent nil --agent-config "{'num_representatives': 26}" --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
-python main.py --model resnet18 --agent nil --agent-config "{'num_representatives': 26}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
+python main.py --model resnet18 --agent nil --agent-config "{'rehearsal_size': 100}" --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
+python main.py --model resnet18 --agent nil --agent-config "{'rehearsal_size': 100}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
 python main.py --model resnet50 --agent icarl --dataset tinyimagenet --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
 ```
 
