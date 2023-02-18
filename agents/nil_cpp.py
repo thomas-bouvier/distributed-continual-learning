@@ -70,14 +70,10 @@ class nil_cpp_agent(Agent):
         self.epoch_load_time = 0
         self.epoch_move_time = 0
         self.epoch_wait_time = 0
-        self.epoch_cat_time = 0
-        self.epoch_acc_time = 0
         self.last_batch_time = 0
         self.last_batch_load_time = 0
         self.last_batch_move_time = 0
         self.last_batch_wait_time = 0
-        self.last_batch_cat_time = 0
-        self.last_batch_acc_time = 0
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
@@ -130,7 +126,7 @@ class nil_cpp_agent(Agent):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
-            for metric in ["loss", "prec1", "prec5"]
+            for metric in ["loss", "prec1", "prec5", "num_samples"]
         }
         epoch_time = 0
         dataloader_iter = enumerate(data_regime.get_loader())
@@ -177,10 +173,6 @@ class nil_cpp_agent(Agent):
                     logging.debug(
                         f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
                     logging.debug(
-                        f"\tbatch cat time {self.last_batch_cat_time} sec ({self.last_batch_cat_time*100/self.last_batch_time}%)")
-                    logging.debug(
-                        f"\tbatch acc time {self.last_batch_acc_time} sec ({self.last_batch_acc_time*100/self.last_batch_time}%)")
-                    logging.debug(
                         f"\trehearsal_size {self.get_rehearsal_size()}")
 
                     if hvd.rank() == 0:
@@ -192,8 +184,6 @@ class nil_cpp_agent(Agent):
                                 load_time=self.last_batch_load_time,
                                 move_time=self.last_batch_move_time,
                                 wait_time=self.last_batch_wait_time,
-                                cat_time=self.last_batch_cat_time,
-                                acc_time=self.last_batch_acc_time,
                                 num_reps=self.num_reps,
                             )
                             self.batch_metrics.add(**batch_metrics_values)
@@ -277,17 +267,13 @@ class nil_cpp_agent(Agent):
                 f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
             logging.info(
                 f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
-            logging.info(
-                f"\tepoch cat time {self.epoch_cat_time} sec ({self.epoch_cat_time*100/epoch_time}%)")
-            logging.info(
-                f"\tepoch acc time {self.epoch_acc_time} sec ({self.epoch_acc_time*100/epoch_time}%)")
         self.epoch_load_time = 0
         self.epoch_move_time = 0
         self.epoch_wait_time = 0
-        self.epoch_cat_time = 0
-        self.epoch_acc_time = 0
 
+        num_samples = meters["num_samples"].sum.item()
         meters = {name: meter.avg.item() for name, meter in meters.items()}
+        meters["num_samples"] = num_samples
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
@@ -313,6 +299,10 @@ class nil_cpp_agent(Agent):
         self.last_batch_move_time = time.time() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
 
+        new_x = x
+        new_y = y
+        new_w = None
+
         if training:
             if self.global_batch == 0 and self.num_reps == 0:
                 next_minibatch = self.get_next_augmented_minibatch()
@@ -326,9 +316,9 @@ class nil_cpp_agent(Agent):
             self.epoch_wait_time += self.last_batch_wait_time
 
             current_minibatch = self.get_current_augmented_minibatch()
-            aug_x = current_minibatch.x[:aug_size]
-            aug_y = current_minibatch.y[:aug_size]
-            aug_w = current_minibatch.w[:aug_size]
+            new_x = current_minibatch.x[:aug_size]
+            new_y = current_minibatch.y[:aug_size]
+            new_w = current_minibatch.w[:aug_size]
 
             logging.debug(f"Received {aug_size - self.batch_size} samples from other nodes")
             if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
@@ -337,32 +327,29 @@ class nil_cpp_agent(Agent):
                     display(f"aug_batch_{self.epoch}_{i_batch}", current_minibatch.x[-num_reps:], captions=current_minibatch.y[-num_reps:])
 
             # In-advance preparation of next minibatch
-            start_acc_time = time.time()
             next_minibatch = self.get_next_augmented_minibatch()
             self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
-            self.last_batch_acc_time = time.time() - start_acc_time
-            self.epoch_acc_time += self.last_batch_acc_time
 
             if self.use_amp:
                 with autocast():
-                    output = self.model(aug_x)
-                    loss = self.criterion(output, aug_y)
+                    output = self.model(new_x)
+                    loss = self.criterion(output, new_y)
             else:
-                output = self.model(aug_x)
-                loss = self.criterion(output, aug_y)
+                output = self.model(new_x)
+                loss = self.criterion(output, new_y)
         else:
             if self.use_amp:
                 with autocast():
-                    output = self.model(x)
-                    loss = nn.CrossEntropyLoss()(output, y)
+                    output = self.model(new_x)
+                    loss = nn.CrossEntropyLoss()(output, new_y)
             else:
-                output = self.model(x)
-                loss = nn.CrossEntropyLoss()(output, y)
+                output = self.model(new_x)
+                loss = nn.CrossEntropyLoss()(output, new_y)
 
         if training:
             # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
-            total_weight = hvd.allreduce(torch.sum(aug_w), name='total_weight', op=hvd.Sum)
-            dw = aug_w / total_weight
+            total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)
+            dw = new_w / total_weight
 
             if self.use_amp:
                 self.scaler.scale(loss).backward(dw)
@@ -375,18 +362,18 @@ class nil_cpp_agent(Agent):
                 self.optimizer_regime.step()
 
             self.num_reps = self.dsl.get_rehearsal_size()
+            meters["num_samples"].update(aug_size)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
+            prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
             # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
-            meters["loss"].update(loss.sum() / self.mask[aug_y].sum(), aug_x.size(0))
-            meters["prec1"].update(prec1, aug_x.size(0))
-            meters["prec5"].update(prec5, aug_x.size(0))
+            meters["loss"].update(loss.sum() / self.mask[new_y].sum(), new_x.size(0))
         else:
-            prec1, prec5 = accuracy(output, y, topk=(1, 5))
-            meters["loss"].update(loss, x.size(0))
-            meters["prec1"].update(prec1, x.size(0))
-            meters["prec5"].update(prec5, x.size(0))
+            prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
+            meters["loss"].update(loss, new_x.size(0))
+
+        meters["prec1"].update(prec1, new_x.size(0))
+        meters["prec5"].update(prec5, new_x.size(0))
 
     def get_rehearsal_size(self):
         return self.num_reps

@@ -66,12 +66,14 @@ class Agent:
         self.last_batch_load_time = 0
         self.last_batch_move_time = 0
 
+    """Train for one epoch"""
     def train(self, data_regime):
         # switch to train mode
         self.model.train()
         self.write_stream("epoch", (self.global_batch, self.epoch))
         return self.loop(data_regime, training=True)
 
+    """Validate on one epoch"""
     def validate(self, data_regime, previous_task=False):
         # switch to evaluate mode
         self.model.eval()
@@ -109,7 +111,7 @@ class Agent:
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
-            for metric in ["loss", "prec1", "prec5"]
+            for metric in ["loss", "prec1", "prec5", "num_samples"]
         }
         epoch_time = 0
         dataloader_iter = enumerate(data_regime.get_loader())
@@ -225,7 +227,9 @@ class Agent:
         self.epoch_load_time = 0
         self.epoch_move_time = 0
 
+        num_samples = meters["num_samples"].sum.item()
         meters = {name: meter.avg.item() for name, meter in meters.items()}
+        meters["num_samples"] = num_samples
         meters["error1"] = 100.0 - meters["prec1"]
         meters["error5"] = 100.0 - meters["prec5"]
         meters["time"] = epoch_time
@@ -273,6 +277,7 @@ class Agent:
         meters["loss"].update(loss, x.size(0))
         meters["prec1"].update(prec1, x.size(0))
         meters["prec5"].update(prec5, x.size(0))
+        meters["num_samples"].update(self.batch_size)
 
     def after_all_tasks(self):
         pass
