@@ -118,7 +118,7 @@ class nil_cpp_agent(Agent):
             self.optimizer_regime.reset(self.model.parameters())
 
         # Create mask so the loss is only used for classes learnt during this task
-        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
+        self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self.device).float()
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """Forward pass for the current epoch"""
@@ -324,7 +324,10 @@ class nil_cpp_agent(Agent):
             if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
                 num_reps = aug_size - self.batch_size
                 if num_reps > 0:
-                    display(f"aug_batch_{self.epoch}_{i_batch}", current_minibatch.x[-num_reps:], captions=current_minibatch.y[-num_reps:])
+                    captions = []
+                    for label, weight in zip(current_minibatch.y[-num_reps:], current_minibatch.w[-num_reps:]):
+                        captions.append(f"y={label.item()} w={weight.item()}")
+                    display(f"aug_batch_{self.epoch}_{i_batch}", current_minibatch.x[-num_reps:], captions=captions)
 
             # In-advance preparation of next minibatch
             next_minibatch = self.get_next_augmented_minibatch()

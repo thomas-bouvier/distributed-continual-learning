@@ -65,6 +65,7 @@ class DataRegime(object):
         self.sampler = None
         self.loader = None
         self.classes_mask = None
+        self.previous_classes_mask = None
 
         self.config = self.get_config(config)
         if self.config["others"].get("use_dali", False):
@@ -169,8 +170,11 @@ class DataRegime(object):
                 self.continual_test_taskset.append(current_taskset)
                 return self.continual_test_taskset
         """
-        mask = np.zeros(self.total_num_classes)
-        mask[current_taskset.get_classes()] = 1
+        mask = np.zeros(self.total_num_classes, dtype=bool)
+        mask[current_taskset.get_classes()] = True
+        if self.previous_classes_mask is None:
+            self.previous_classes_mask = mask.copy()
+        self.previous_classes_mask[mask] = True
         self.classes_mask = mask
         return current_taskset
 
