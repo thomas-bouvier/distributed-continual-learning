@@ -128,12 +128,16 @@ class DaliDataLoader(object):
                 task_ids = task_ids.gpu()
             return images, target, task_ids
 
-        pipeline = callable_pipeline()
-        pipeline.build()
+        self.pipeline = callable_pipeline()
+        self.pipeline.build()
 
         self.iterator = DALIGenericIterator(
-            pipeline, ["x", "y", "t"], last_batch_padded=True,
+            self.pipeline, ["x", "y", "t"], last_batch_padded=True,
             prepare_first_batch=True, auto_reset=True)
+
+    def release(self):
+        del self.pipeline, self.iterator
+        #dali.backend.ReleaseUnusedMemory()
 
     def __len__(self):
         return self.external_data.full_iterations

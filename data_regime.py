@@ -104,6 +104,9 @@ class DataRegime(object):
                 self.config["loader"]["multiprocessing_context"] = "forkserver"
 
             if self.config["others"].get("use_dali", False):
+                if self.loader is not None:
+                    self.loader.release()
+
                 precision = 16 if self.config["others"].get(
                     "fp16_dali", False) else 32
                 self.loader = DaliDataLoader(
