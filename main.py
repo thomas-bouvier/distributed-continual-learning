@@ -335,6 +335,8 @@ def main():
     xp = Experiment(args, save_path)
     xp.run()
 
+    logging.info("Done!")
+
 
 class Experiment:
     def __init__(self, args, save_path=""):
@@ -744,7 +746,7 @@ class Experiment:
             },
             self.save_path,
             is_final=True,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
+            dummy=hvd.rank() > 0
         )
 
 

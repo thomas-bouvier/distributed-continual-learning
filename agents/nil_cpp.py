@@ -80,12 +80,15 @@ class nil_cpp_agent(Agent):
 
         shape = next(iter(train_data_regime.get_loader()))[0][0].size()
 
+        engine = rehearsal.EngineLoader(self.provider,
+            ctypes.c_uint16(hvd.rank()).value, self.cuda_rdma
+        )
         self.dsl = rehearsal.DistributedStreamLoader(
+            engine,
             rehearsal.Classification,
             train_data_regime.total_num_classes, self.rehearsal_size, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
-            ctypes.c_uint16(hvd.rank()).value, self.provider,
-            1, list(shape), self.cuda_rdma, self.discover_endpoints, self.log_level not in ('info')
+            1, list(shape), self.discover_endpoints, self.log_level not in ('info')
         )
         #self.dsl.enable_augmentation(True)
 
