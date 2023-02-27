@@ -561,12 +561,6 @@ class Experiment:
                             for metric in ["loss", "prec1", "prec5"]
                         })
 
-                    """ICARL
-                    if self.args.agent == "icarl":
-                        self.agent.update_exemplars(
-                            self.agent.nc, training=False)
-                    """
-
                     for test_task_id in range(0, task_id + 1):
                         self.validate_data_regime.set_task_id(test_task_id)
                         self.validate_data_regime.get_loader(True)
