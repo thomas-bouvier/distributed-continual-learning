@@ -169,11 +169,9 @@ parser.add_argument(
     help="SGD momentum (default: 0.5)",
 )
 parser.add_argument(
-    "--optimizer",
-    type=str,
-    default="SGD",
-    metavar="OPT",
-    help="optimizer function",
+    "--optimizer-regime",
+    default="",
+    help="optimizer regime, as an array of dicts containing the epoch key",
 )
 parser.add_argument(
     "--no-cuda",
@@ -283,13 +281,10 @@ def main():
     for k, v in params.items():
         yparam = yparams[k]
         if yparam:
-            if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config':
-                if v :
+            params[k] = yparam
+            if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config' or k == 'optimizer_regime':
+                if v:
                     params[k] = str(literal_eval(v) | literal_eval(yparam))
-                else:
-                    params[k] = yparam
-            else:
-                params[k] = yparam
     args = Namespace(**params)
 
     # Horovod: initialize library.
@@ -394,7 +389,7 @@ class Experiment:
             },
             self.save_path,
             is_initial=True,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
+            dummy=hvd.rank() > 0,
         )
         logging.info(
             f"Created model {self.args.model} with configuration: {model_config}"
@@ -404,8 +399,11 @@ class Experiment:
         model = move_cuda(model, self.args.cuda)
 
         # Building the optimizer regime
-        regime = getattr(model, "regime")
-        logging.info(f"Optimizer regime: {regime}")
+        if self.args.optimizer_regime != "":
+            optimizer_regime_dict = literal_eval(self.args.optimizer_regime)
+        else:
+            optimizer_regime_dict = getattr(model, "regime")
+        logging.info(f"Optimizer regime: {optimizer_regime_dict}")
         self.optimizer_regime = OptimizerRegime(
             model,
             self.args.lr * lr_scaler,
@@ -413,7 +411,7 @@ class Experiment:
             hvd.Adasum if self.args.use_adasum else hvd.Average,
             self.args.batches_per_allreduce,
             self.args.gradient_predivide_factor,
-            regime,
+            optimizer_regime_dict,
             self.args.use_amp
         )
 

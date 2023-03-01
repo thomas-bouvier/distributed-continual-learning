@@ -16,7 +16,9 @@ Make sure to install the [distributed rehearsal buffer](https://gitlab.inria.fr/
 
 ## Usage
 
-Parameters defined in the `config.yaml` override CLI parameters. However, values for `agent_config`, `model_config` and `tasksets_config` will be concatenated with those defined when there is no key conflict.
+Parameters defined in the `config.yaml` override CLI parameters. However, values for `agent_config`, `model_config`, `tasksets_config` will be concatenated with those defined by CLI, instead of override them ;
+
+Values for `optimizer_regime` will override regimes defined by `models/` in Python.
 
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|

@@ -15,7 +15,7 @@ base:
   epochs:
   lr:
   momentum:
-  optimizer:
+  optimizer_regime:
   no_cuda:
   seed:
   log_interval:
