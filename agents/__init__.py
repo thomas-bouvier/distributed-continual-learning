@@ -1,13 +1,14 @@
 from .base import *
-from .nil import *
-from .nil_cpp import *
-from .nil_local import *
 
 def nil(model, use_amp, config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics):
     implementation = config.get("implementation", "")
-    agent = nil_agent
     if implementation == "cpp":
+        from .nil_cpp import nil_cpp_agent
         agent = nil_cpp_agent
     elif implementation == "local":
+        from .nil_local import nil_local_agent
         agent = nil_local_agent
+    else:
+        from .nil import nil_agent
+        agent = nil_agent
     return agent(model, use_amp, config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics)
