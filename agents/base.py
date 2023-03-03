@@ -62,9 +62,11 @@ class Agent:
             self.initial_snapshot = copy.deepcopy(self.model.state_dict())
 
         self.epoch_load_time = 0
-        self.epoch_move_time = 0
+        self.epoch_train_time = 0
+
+        self.last_batch_time = 0
         self.last_batch_load_time = 0
-        self.last_batch_move_time = 0
+        self.last_batch_train_time = 0
 
     """Train for one epoch"""
     def train(self, data_regime):
@@ -124,15 +126,20 @@ class Agent:
               desc=f"{prefix} epoch #{self.epoch + 1}",
               disable=not enable_tqdm) as progress:
             for i_batch, (x, y, t) in dataloader_iter:
+                x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+
                 synchronize_cuda(self.cuda)
                 self.last_batch_load_time = time.time() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
 
                 self._step(i_batch, x, y, meters, training=training)
-
+    
                 synchronize_cuda(self.cuda)
-                batch_time = time.time() - start_batch_time
-                epoch_time += batch_time
+                self.last_batch_time = time.time() - start_batch_time
+                epoch_time += self.last_batch_time
+
+                self.last_batch_train_time = self.last_batch_time - self.last_batch_load_time
+                self.epoch_train_time += self.last_batch_train_time
 
                 if i_batch % self.log_interval == 0 or i_batch == len(
                     data_regime.get_loader()
@@ -150,13 +157,24 @@ class Agent:
                         )
                     )
 
-                    logging.debug(f"batch {i_batch} time {batch_time} sec")
+                    logging.debug(f"batch {i_batch} time {self.last_batch_time} sec")
                     logging.debug(
-                        f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/batch_time}%)")
+                        f"\t[Python] batch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
                     logging.debug(
-                        f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/batch_time}%)")
+                        f"\t[Python] batch train time {self.last_batch_train_time} sec ({self.last_batch_train_time*100/self.last_batch_time}%)")
 
                     if hvd.rank() == 0:
+                        if training and self.epoch < 5 and self.batch_metrics is not None:
+                            batch_metrics_values = dict(
+                                epoch=self.epoch,
+                                batch=i_batch,
+                                time=self.last_batch_time,
+                                load_time=self.last_batch_load_time,
+                                train_time=self.last_batch_train_time,
+                            )
+                            self.batch_metrics.add(**batch_metrics_values)
+                            self.batch_metrics.save()
+
                         if not previous_task:
                             wandb.log({"batch": self.global_batch,
                                     "epoch": self.global_epoch,
@@ -223,9 +241,9 @@ class Agent:
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
             logging.info(
-                f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
+                f"\tepoch train time {self.epoch_train_time} sec ({self.epoch_train_time*100/epoch_time}%)")
         self.epoch_load_time = 0
-        self.epoch_move_time = 0
+        self.epoch_train_time = 0
 
         num_samples = meters["num_samples"].sum.item()
         meters = {name: meter.avg.item() for name, meter in meters.items()}
@@ -248,11 +266,6 @@ class Agent:
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.batch)
-
-        start_move_time = time.time()
-        x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-        self.last_batch_move_time = time.time() - start_move_time
-        self.epoch_move_time += self.last_batch_move_time
 
         if self.use_amp:
             with autocast():

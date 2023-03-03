@@ -67,12 +67,7 @@ class nil_cpp_agent(Agent):
 
         self.num_reps = 0
 
-        self.epoch_load_time = 0
-        self.epoch_move_time = 0
         self.epoch_wait_time = 0
-        self.last_batch_time = 0
-        self.last_batch_load_time = 0
-        self.last_batch_move_time = 0
         self.last_batch_wait_time = 0
 
     def before_all_tasks(self, train_data_regime):
@@ -90,7 +85,7 @@ class nil_cpp_agent(Agent):
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             1, list(shape), self.discover_endpoints, self.log_level not in ('info')
         )
-        #self.dsl.enable_augmentation(True)
+        self.dsl.enable_augmentation(True)
 
         self.minibatches_ahead = 2
         self.next_minibatches = []
@@ -142,6 +137,8 @@ class nil_cpp_agent(Agent):
               desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
               disable=not enable_tqdm) as progress:
             for i_batch, (x, y, t) in dataloader_iter:
+                x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+
                 synchronize_cuda(self.cuda)
                 self.last_batch_load_time = time.time() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
@@ -151,6 +148,9 @@ class nil_cpp_agent(Agent):
                 synchronize_cuda(self.cuda)
                 self.last_batch_time = time.time() - start_batch_time
                 epoch_time += self.last_batch_time
+
+                self.last_batch_train_time = self.last_batch_time - self.last_batch_load_time - self.last_batch_wait_time
+                self.epoch_train_time += self.last_batch_train_time
 
                 if i_batch % self.log_interval == 0 or i_batch == len(
                     data_regime.get_loader()
@@ -170,23 +170,38 @@ class nil_cpp_agent(Agent):
 
                     logging.debug(f"batch {i_batch} time {self.last_batch_time} sec")
                     logging.debug(
-                        f"\tbatch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
+                        f"\t[Python] batch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
                     logging.debug(
-                        f"\tbatch move time {self.last_batch_move_time} sec ({self.last_batch_move_time*100/self.last_batch_time}%)")
+                        f"\t[Python] batch train time {self.last_batch_train_time} sec ({self.last_batch_train_time*100/self.last_batch_time}%)")
                     logging.debug(
-                        f"\tbatch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
+                        f"\t[Python] batch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
+                    perf_metrics = self.dsl.get_metrics(i_batch)
                     logging.debug(
-                        f"\trehearsal_size {self.get_rehearsal_size()}")
+                        f"\t[C++] batch copy time {perf_metrics[0]} sec")
+                    logging.debug(
+                        f"\t[C++] bulk prepare time {perf_metrics[1]} sec")
+                    logging.debug(
+                        f"\t[C++] rpcs resolve time {perf_metrics[2]} sec")
+                    logging.debug(
+                        f"\t[C++] representatives copy time {perf_metrics[3]} sec")
+                    logging.debug(
+                        f"\t[C++] buffer update time {perf_metrics[4]} sec")
+                    logging.debug(
+                        f"\t[C++] rehearsal_size {self.get_rehearsal_size()}")
 
                     if hvd.rank() == 0:
-                        if training and self.epoch < 5 and self.batch_metrics is not None:
+                        if training and self.epoch < 25 and self.batch_metrics is not None:
                             batch_metrics_values = dict(
                                 epoch=self.epoch,
                                 batch=i_batch,
                                 time=self.last_batch_time,
                                 load_time=self.last_batch_load_time,
-                                move_time=self.last_batch_move_time,
-                                wait_time=self.last_batch_wait_time,
+                                train_time=self.last_batch_train_time,
+                                copy_time=perf_metrics[0],
+                                bulk_prepare_time=perf_metrics[1],
+                                rpcs_resolve_time=perf_metrics[2],
+                                representatives_copy_time=perf_metrics[3],
+                                buffer_update_time=perf_metrics[4],
                                 num_reps=self.num_reps,
                             )
                             self.batch_metrics.add(**batch_metrics_values)
@@ -267,11 +282,11 @@ class nil_cpp_agent(Agent):
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
             logging.info(
-                f"\tepoch move time {self.epoch_move_time} sec ({self.epoch_move_time*100/epoch_time}%)")
+                f"\tepoch train time {self.epoch_train_time} sec ({self.epoch_train_time*100/epoch_time}%)")
             logging.info(
                 f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
         self.epoch_load_time = 0
-        self.epoch_move_time = 0
+        self.epoch_train_time = 0
         self.epoch_wait_time = 0
 
         num_samples = meters["num_samples"].sum.item()
@@ -293,24 +308,17 @@ class nil_cpp_agent(Agent):
         training=False,
         previous_task=False,
     ):
-        if training:
-            self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.batch)
-
-        start_move_time = time.time()
-        x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-        self.last_batch_move_time = time.time() - start_move_time
-        self.epoch_move_time += self.last_batch_move_time
-
         new_x = x
         new_y = y
         new_w = None
 
         if training:
+            self.optimizer_regime.zero_grad()
+            self.optimizer_regime.update(self.epoch, self.batch)
+
             if self.global_batch == 0 and self.num_reps == 0:
                 next_minibatch = self.get_next_augmented_minibatch()
                 self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
-                return
 
             # Get the representatives
             start_wait_time = time.time()
