@@ -177,15 +177,17 @@ class nil_cpp_agent(Agent):
                         f"\t[Python] batch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
                     perf_metrics = self.dsl.get_metrics(i_batch)
                     logging.debug(
-                        f"\t[C++] batch copy time {perf_metrics[0]} sec")
+                        f"\t[C++] batch accumulate time {perf_metrics[0]} sec")
                     logging.debug(
-                        f"\t[C++] bulk prepare time {perf_metrics[1]} sec")
+                        f"\t[C++] batch copy time {perf_metrics[1]} sec")
                     logging.debug(
-                        f"\t[C++] rpcs resolve time {perf_metrics[2]} sec")
+                        f"\t[C++] bulk prepare time {perf_metrics[2]} sec")
                     logging.debug(
-                        f"\t[C++] representatives copy time {perf_metrics[3]} sec")
+                        f"\t[C++] rpcs resolve time {perf_metrics[3]} sec")
                     logging.debug(
-                        f"\t[C++] buffer update time {perf_metrics[4]} sec")
+                        f"\t[C++] representatives copy time {perf_metrics[4]} sec")
+                    logging.debug(
+                        f"\t[C++] buffer update time {perf_metrics[5]} sec")
                     logging.debug(
                         f"\t[C++] rehearsal_size {self.get_rehearsal_size()}")
 
@@ -197,11 +199,13 @@ class nil_cpp_agent(Agent):
                                 time=self.last_batch_time,
                                 load_time=self.last_batch_load_time,
                                 train_time=self.last_batch_train_time,
-                                copy_time=perf_metrics[0],
-                                bulk_prepare_time=perf_metrics[1],
-                                rpcs_resolve_time=perf_metrics[2],
-                                representatives_copy_time=perf_metrics[3],
-                                buffer_update_time=perf_metrics[4],
+                                wait_time=self.last_batch_wait_time,
+                                accumulate_time=perf_metrics[0],
+                                copy_time=perf_metrics[1],
+                                bulk_prepare_time=perf_metrics[2],
+                                rpcs_resolve_time=perf_metrics[3],
+                                representatives_copy_time=perf_metrics[4],
+                                buffer_update_time=perf_metrics[5],
                                 num_reps=self.num_reps,
                             )
                             self.batch_metrics.add(**batch_metrics_values)
