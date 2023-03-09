@@ -108,11 +108,17 @@ parser.add_argument(
     help="additional model architecture configuration",
 )
 parser.add_argument(
-    "--checkpoint",
+    "--load-checkpoint",
     default="",
     type=str,
     metavar="PATH",
     help="path to latest checkpoint (default: none)",
+)
+parser.add_argument(
+    "--save-all-checkpoints",
+    action="store_true",
+    default=False,
+    help="save a ceckpoint after every epoch",
 )
 parser.add_argument(
     "--batch-size",
@@ -334,6 +340,9 @@ def main():
 
 
 class Experiment:
+    resume_from_task = 0
+    resume_from_epoch = 0
+
     def __init__(self, args, save_path=""):
         self.args = args
         self.save_path = save_path
@@ -359,6 +368,7 @@ class Experiment:
             if self.args.use_adasum and hvd.nccl_built():
                 lr_scaler = self.args.batches_per_allreduce * hvd.local_size()
 
+        # Creating the model
         model_name = models.__dict__[self.args.model]
         model_config = {
             "num_classes": total_num_classes,
@@ -367,30 +377,6 @@ class Experiment:
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
         model = model_name(model_config)
-
-        # Building the model
-        if self.args.checkpoint:
-            if not path.isfile(self.args.checkpoint):
-                parser.error(f"Invalid checkpoint: {self.args.checkpoint}")
-            checkpoint = torch.load(self.args.checkpoint, map_location="cpu")
-            # Overrride configuration with checkpoint info
-            model_name = checkpoint.get("model", model_name)
-            model_config = checkpoint.get("config", model_config)
-            # Load checkpoint
-            logging.info(f"Loading model {self.args.checkpoint}..")
-            model.load_state_dict(checkpoint["state_dict"])
-        save_checkpoint(
-            {
-                "task": 0,
-                "epoch": 0,
-                "model": self.args.model,
-                "model_config": self.args.model_config,
-                "state_dict": model.state_dict(),
-            },
-            self.save_path,
-            is_initial=True,
-            dummy=hvd.rank() > 0,
-        )
         logging.info(
             f"Created model {self.args.model} with configuration: {model_config}"
         )
@@ -404,7 +390,7 @@ class Experiment:
         else:
             optimizer_regime_dict = getattr(model, "regime")
         logging.info(f"Optimizer regime: {optimizer_regime_dict}")
-        self.optimizer_regime = OptimizerRegime(
+        optimizer_regime = OptimizerRegime(
             model,
             self.args.lr * lr_scaler,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
@@ -415,6 +401,27 @@ class Experiment:
             self.args.use_amp
         )
 
+        # Loading the checkpoint if given
+        if hvd.rank() == 0 and self.args.load_checkpoint:
+            if not path.isfile(self.args.load_checkpoint):
+                parser.error(f"Invalid checkpoint: {self.args.load_checkpoint}")
+            checkpoint = torch.load(self.args.load_checkpoint, map_location="cpu")
+            # Overrride configuration with checkpoint info
+            model_name = checkpoint.get("model", model_name)
+            model_config = checkpoint.get("config", model_config)
+            # Load checkpoint
+            logging.info(f"Loading model {self.args.load_checkpoint}..")
+            model.load_state_dict(checkpoint["state_dict"])
+            optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
+            # Broadcast resume information
+            resume_from_task = checkpoint["task"]
+        self.resume_from_task = hvd.broadcast(torch.tensor(resume_from_task), root_rank=0,
+                    name='resume_from_task').item()
+        resume_from_epoch = checkpoint["epoch"]
+        self.resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
+                    name='resume_from_epoch').item()
+
+        # Creating the agent
         agent = (
             agents.__dict__[self.args.agent]
             if self.args.agent is not None
@@ -428,7 +435,7 @@ class Experiment:
             model,
             self.args.use_amp,
             agent_config,
-            self.optimizer_regime,
+            optimizer_regime,
             self.args.batch_size * self.args.batches_per_allreduce,
             self.args.cuda,
             self.args.log_level,
@@ -438,6 +445,21 @@ class Experiment:
         )
         self.agent.epochs = self.args.epochs
         logging.info(f"Created agent with configuration: {agent_config}")
+
+        # Saving an initial checkpoint
+        save_checkpoint(
+            {
+                "task": 0,
+                "epoch": 0,
+                "model": self.args.model,
+                "model_config": self.args.model_config,
+                "state_dict": self.agent.model.state_dict(),
+                "optimizer_state_dict": self.agent.optimizer_regime.state_dict(),
+            },
+            self.save_path,
+            is_initial=True,
+            dummy=hvd.rank() > 0,
+        )
 
         if self.args.tensorboard:
             self.agent.set_tensorboard_writer(
@@ -528,7 +550,7 @@ class Experiment:
         total_start = time.time()
         self.agent.before_all_tasks(self.train_data_regime)
 
-        for task_id in range(0, len(self.train_data_regime.tasksets)):
+        for task_id in range(self.resume_from_task, len(self.train_data_regime.tasksets)):
             start = time.time()
             training_time = time.time()
 
@@ -536,10 +558,10 @@ class Experiment:
 
             self.train_data_regime.set_task_id(task_id)
             self.agent.before_every_task(task_id, self.train_data_regime)
-            self.optimizer_regime.num_steps = len(
+            self.agent.optimizer_regime.num_steps = len(
                 self.train_data_regime.get_loader())
 
-            for i_epoch in range(0, self.args.epochs):
+            for i_epoch in range(self.resume_from_epoch, self.args.epochs):
                 logging.info(f"TRAINING on task {task_id + 1}/{len(self.train_data_regime.tasksets)}, epoch: {i_epoch + 1}/{self.args.epochs}, {hvd.size()} device(s)")
                 self.agent.epoch = i_epoch
 
@@ -668,24 +690,21 @@ class Experiment:
                         {"train_total_img_sec": img_sec * hvd.size()}
                     )
                     dl_metrics.add(**dl_metrics_values)
-                    """
-                    dl_metrics.plot(x='epoch', y=['training loss', 'validation loss'],
-                                    legend=['training', 'validation'],
-                                    title='Loss', ylabel='loss')
-                    dl_metrics.plot(x='epoch', y=['training prec1', 'validation prec1'],
-                                    legend=['training', 'validation'],
-                                    title='Prec@1', ylabel='prec %')
-                    dl_metrics.plot(x='epoch', y=['training prec5', 'validation prec5'],
-                                    legend=['training', 'validation'],
-                                    title='Prec@5', ylabel='prec %')
-                    dl_metrics.plot(x='epoch', y=['training error1', 'validation error1'],
-                                    legend=['training', 'validation'],
-                                    title='Error@1', ylabel='error %')
-                    dl_metrics.plot(x='epoch', y=['training error5', 'validation error5'],
-                                    legend=['training', 'validation'],
-                                    title='Error@5', ylabel='error %')
-                    """
                     dl_metrics.save()
+
+                if self.args.save_all_checkpoints:
+                    save_checkpoint(
+                        {
+                            "task": task_id,
+                            "epoch": i_epoch,
+                            "model": self.args.model,
+                            "model_config": self.args.model_config,
+                            "state_dict": self.agent.model.state_dict(),
+                            "optimizer_state_dict": self.agent.optimizer_regime.state_dict()
+                        },
+                        self.save_path,
+                        dummy=hvd.rank() > 0
+                    )
 
             end = time.time()
             task_metrics.update({"time": end - start})
@@ -730,11 +749,12 @@ class Experiment:
 
         save_checkpoint(
             {
-                "task": len(self.train_data_regime.tasksets),
-                "epoch": self.args.epochs,
+                "task": len(self.train_data_regime.tasksets) - 1,
+                "epoch": self.args.epochs - 1,
                 "model": self.args.model,
                 "model_config": self.args.model_config,
                 "state_dict": self.agent.model.state_dict(),
+                "optimizer_state_dict": self.agent.optimizer_regime.state_dict()
             },
             self.save_path,
             is_final=True,
