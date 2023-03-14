@@ -19,16 +19,13 @@ from utils.meters import AverageMeter, accuracy
 
 
 class AugmentedMinibatch:
-    def __init__(self, batch_size, num_representatives, shape, device):
-        self.x = torch.zeros(
-            batch_size + num_representatives, *shape, device=device)
-        self.y = torch.randint(high=1000, size=(
-            batch_size + num_representatives,), device=device)
-        self.w = torch.zeros(
-            batch_size + num_representatives, device=device)
+    def __init__(self, num_representatives, shape, device):
+        self.x = torch.zeros(num_representatives, *shape, device=device)
+        self.y = torch.randint(high=1000, size=(num_representatives,), device=device)
+        self.w = torch.zeros(num_representatives, device=device)
 
 
-class nil_cpp_agent(Agent):
+class nil_cpp_cat_agent(Agent):
     def __init__(
         self,
         model,
@@ -43,7 +40,7 @@ class nil_cpp_agent(Agent):
         batch_metrics=None,
         state_dict=None,
     ):
-        super(nil_cpp_agent, self).__init__(
+        super(nil_cpp_cat_agent, self).__init__(
             model,
             use_amp,
             config,
@@ -76,6 +73,7 @@ class nil_cpp_agent(Agent):
         super().before_all_tasks(train_data_regime)
 
         shape = next(iter(train_data_regime.get_loader()))[0][0].size()
+        self.next_minibatch = AugmentedMinibatch(self.num_representatives, shape, self.device)
 
         engine = rehearsal.EngineLoader(self.provider,
             ctypes.c_uint16(hvd.rank()).value, self.cuda_rdma
@@ -88,11 +86,7 @@ class nil_cpp_agent(Agent):
             1, list(shape), self.discover_endpoints, self.log_level not in ('info')
         )
         self.dsl.enable_augmentation(True)
-
-        self.minibatches_ahead = 2
-        self.next_minibatches = []
-        for i in range(self.minibatches_ahead):
-            self.next_minibatches.append(AugmentedMinibatch(self.batch_size, self.num_representatives, shape, self.device))
+        self.dsl.use_these_allocated_variables(self.next_minibatch.x, self.next_minibatch.y, self.next_minibatch.w)
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id
@@ -322,15 +316,14 @@ class nil_cpp_agent(Agent):
     ):
         new_x = x
         new_y = y
-        new_w = None
+        w = torch.ones(self.batch_size, device=self.device)
 
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.batch)
 
             if self.global_batch == 0 and self.num_reps == 0:
-                next_minibatch = self.get_next_augmented_minibatch()
-                self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
+                self.dsl.accumulate(x, y)
 
             # Get the representatives
             start_wait_time = time.time()
@@ -340,10 +333,9 @@ class nil_cpp_agent(Agent):
 
             # Assemble the minibatch
             start_assemble_time = time.time()
-            current_minibatch = self.get_current_augmented_minibatch()
-            new_x = current_minibatch.x[:self.aug_size]
-            new_y = current_minibatch.y[:self.aug_size]
-            new_w = current_minibatch.w[:self.aug_size]
+            new_x = torch.cat((x, next_minibatch.x[:(self.aug_size - self.batch_size)]))
+            new_y = torch.cat((y, next_minibatch.y[:(self.aug_size - self.batch_size)]))
+            new_w = torch.cat((w, next_minibatch.w[:(self.aug_size - self.batch_size)]))
             self.last_batch_assemble_time = time.time() - start_assemble_time
             self.epoch_assemble_time += self.last_batch_assemble_time
 
@@ -352,13 +344,12 @@ class nil_cpp_agent(Agent):
                 num_reps = self.aug_size - self.batch_size
                 if num_reps > 0:
                     captions = []
-                    for label, weight in zip(current_minibatch.y[-num_reps:], current_minibatch.w[-num_reps:]):
+                    for label, weight in zip(next_minibatch.y[-num_reps:], next_minibatch.w[-num_reps:]):
                         captions.append(f"y={label.item()} w={weight.item()}")
-                    display(f"aug_batch_{self.epoch}_{i_batch}", current_minibatch.x[-num_reps:], captions=captions)
+                    display(f"aug_batch_{self.epoch}_{i_batch}", next_minibatch.x[-num_reps:], captions=captions)
 
             # In-advance preparation of next minibatch
-            next_minibatch = self.get_next_augmented_minibatch()
-            self.dsl.accumulate(x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w)
+            self.dsl.accumulate(x, y)
 
             if self.use_amp:
                 with autocast():
@@ -377,7 +368,7 @@ class nil_cpp_agent(Agent):
                 loss = nn.CrossEntropyLoss()(output, new_y)
 
         if training:
-            # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
+            # https://stackoverflow.com/questions/43451125/pytorch-what-a-re-the-gradient-arguments
             total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)
             dw = new_w / total_weight
 
@@ -407,9 +398,3 @@ class nil_cpp_agent(Agent):
 
     def get_rehearsal_size(self):
         return self.num_reps
-
-    def get_current_augmented_minibatch(self):
-        return self.next_minibatches[self.global_batch % self.minibatches_ahead]
-
-    def get_next_augmented_minibatch(self):
-        return self.next_minibatches[(self.global_batch + 1) % self.minibatches_ahead]

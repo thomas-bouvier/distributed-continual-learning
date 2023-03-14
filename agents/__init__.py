@@ -5,6 +5,9 @@ def nil(model, use_amp, config, optimizer_regime, batch_size, cuda, log_level, l
     if implementation == "cpp":
         from .nil_cpp import nil_cpp_agent
         agent = nil_cpp_agent
+    elif implementation == "cpp_cat":
+        from .nil_cpp_cat import nil_cpp_cat_agent
+        agent = nil_cpp_cat_agent
     elif implementation == "local":
         from .nil_local import nil_local_agent
         agent = nil_local_agent

@@ -133,7 +133,7 @@ class Agent:
                 self.epoch_load_time += self.last_batch_load_time
 
                 self._step(i_batch, x, y, meters, training=training)
-    
+
                 synchronize_cuda(self.cuda)
                 self.last_batch_time = time.time() - start_batch_time
                 epoch_time += self.last_batch_time
@@ -230,7 +230,6 @@ class Agent:
                     self.global_batch += 1
                     self.batch += 1
 
-                synchronize_cuda(self.cuda)
                 start_batch_time = time.time()
                 start_load_time = start_batch_time
 

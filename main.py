@@ -402,6 +402,8 @@ class Experiment:
         )
 
         # Loading the checkpoint if given
+        resume_from_task = 0
+        resume_from_epoch = 0
         if hvd.rank() == 0 and self.args.load_checkpoint:
             if not path.isfile(self.args.load_checkpoint):
                 parser.error(f"Invalid checkpoint: {self.args.load_checkpoint}")
@@ -415,9 +417,9 @@ class Experiment:
             optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
             # Broadcast resume information
             resume_from_task = checkpoint["task"]
+            resume_from_epoch = checkpoint["epoch"]
         self.resume_from_task = hvd.broadcast(torch.tensor(resume_from_task), root_rank=0,
                     name='resume_from_task').item()
-        resume_from_epoch = checkpoint["epoch"]
         self.resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
                     name='resume_from_epoch').item()
 
@@ -703,6 +705,7 @@ class Experiment:
                             "optimizer_state_dict": self.agent.optimizer_regime.state_dict()
                         },
                         self.save_path,
+                        filename=f"checkpoint_task_{task_id}_epoch_{i_epoch}.pth.tar",
                         dummy=hvd.rank() > 0
                     )
 
