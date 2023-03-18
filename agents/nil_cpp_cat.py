@@ -333,20 +333,20 @@ class nil_cpp_cat_agent(Agent):
 
             # Assemble the minibatch
             start_assemble_time = time.time()
-            new_x = torch.cat((x, next_minibatch.x[:(self.aug_size - self.batch_size)]))
-            new_y = torch.cat((y, next_minibatch.y[:(self.aug_size - self.batch_size)]))
-            new_w = torch.cat((w, next_minibatch.w[:(self.aug_size - self.batch_size)]))
+            new_x = torch.cat((x, self.next_minibatch.x[:self.aug_size]))
+            new_y = torch.cat((y, self.next_minibatch.y[:self.aug_size]))
+            new_w = torch.cat((w, self.next_minibatch.w[:self.aug_size]))
             self.last_batch_assemble_time = time.time() - start_assemble_time
             self.epoch_assemble_time += self.last_batch_assemble_time
 
-            logging.debug(f"Received {self.aug_size - self.batch_size} samples from other nodes")
+            logging.debug(f"Received {self.aug_size} samples from other nodes")
             if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
-                num_reps = self.aug_size - self.batch_size
+                num_reps = self.aug_size
                 if num_reps > 0:
                     captions = []
-                    for label, weight in zip(next_minibatch.y[-num_reps:], next_minibatch.w[-num_reps:]):
+                    for label, weight in zip(self.next_minibatch.y[-num_reps:], self.next_minibatch.w[-num_reps:]):
                         captions.append(f"y={label.item()} w={weight.item()}")
-                    display(f"aug_batch_{self.epoch}_{i_batch}", next_minibatch.x[-num_reps:], captions=captions)
+                    display(f"aug_batch_{self.epoch}_{i_batch}", self.next_minibatch.x[-num_reps:], captions=captions)
 
             # In-advance preparation of next minibatch
             self.dsl.accumulate(x, y)
