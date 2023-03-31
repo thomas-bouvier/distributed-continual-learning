@@ -10,9 +10,9 @@ Datasets should be added in `datasets/`, or using the following:
 ln -s /home/tbouvier/Documents/datasets/ datasets
 ```
 
-## Distributed buffer
+## Neomem
 
-Make sure to install the [distributed rehearsal buffer](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/distributed-rehearsal-buffer). Simlink it using `ln -s ../distributed-rehearsal-buffer cpp_loader`.
+Make sure to install [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/distributed-rehearsal-buffer). Simlink it using `ln -s ../distributed-rehearsal-buffer cpp_loader`.
 
 ## Usage
 

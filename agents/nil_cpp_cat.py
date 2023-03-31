@@ -10,7 +10,7 @@ import torchvision
 import wandb
 
 import ctypes
-from cpp_loader import rehearsal
+import neomem
 
 from agents.base import Agent
 from torch.cuda.amp import GradScaler, autocast
@@ -75,17 +75,17 @@ class nil_cpp_cat_agent(Agent):
         shape = next(iter(train_data_regime.get_loader()))[0][0].size()
         self.next_minibatch = AugmentedMinibatch(self.num_representatives, shape, self.device)
 
-        engine = rehearsal.EngineLoader(self.provider,
+        engine = neomem.EngineLoader(self.provider,
             ctypes.c_uint16(hvd.rank()).value, self.cuda_rdma
         )
-        self.dsl = rehearsal.DistributedStreamLoader(
+        self.dsl = neomem.DistributedStreamLoader(
             engine,
-            rehearsal.Classification,
+            neomem.Classification,
             train_data_regime.total_num_classes, self.rehearsal_size, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             1, list(shape), self.discover_endpoints, self.log_level not in ('info')
         )
-        self.dsl.enable_augmentation(True)
+        #self.dsl.enable_augmentation(True)
         self.dsl.use_these_allocated_variables(self.next_minibatch.x, self.next_minibatch.y, self.next_minibatch.w)
 
     def before_every_task(self, task_id, train_data_regime):
