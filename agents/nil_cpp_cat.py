@@ -81,12 +81,13 @@ class nil_cpp_cat_agent(Agent):
         self.dsl = neomem.DistributedStreamLoader(
             engine,
             neomem.Classification,
-            train_data_regime.total_num_classes, self.rehearsal_size, self.num_candidates,
+            train_data_regime.total_num_classes, self.rehearsal_size, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             1, list(shape), self.discover_endpoints, self.log_level not in ('info')
         )
         #self.dsl.enable_augmentation(True)
         self.dsl.use_these_allocated_variables(self.next_minibatch.x, self.next_minibatch.y, self.next_minibatch.w)
+        self.dsl.start()
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id

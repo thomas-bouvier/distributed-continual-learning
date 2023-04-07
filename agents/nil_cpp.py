@@ -83,11 +83,12 @@ class nil_cpp_agent(Agent):
         self.dsl = neomem.DistributedStreamLoader(
             engine,
             neomem.Classification,
-            train_data_regime.total_num_classes, self.rehearsal_size, self.num_candidates,
+            train_data_regime.total_num_classes, self.rehearsal_size, self.num_representatives, self.num_candidates,
             ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
             1, list(shape), self.discover_endpoints, self.log_level not in ('info')
         )
         #self.dsl.enable_augmentation(True)
+        self.dsl.start()
 
         self.minibatches_ahead = 2
         self.next_minibatches = []
