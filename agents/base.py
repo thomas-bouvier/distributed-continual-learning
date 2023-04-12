@@ -34,6 +34,7 @@ class Agent:
         self.optimizer_regime = optimizer_regime
         self.batch_size = batch_size
         self.cuda = cuda
+        self.device = 'cuda' if self.cuda else 'cpu'
         self.log_level = log_level
         self.log_buffer = log_buffer
         self.log_interval = log_interval
@@ -60,13 +61,6 @@ class Agent:
             self.initial_snapshot = copy.deepcopy(state_dict)
         else:
             self.initial_snapshot = copy.deepcopy(self.model.state_dict())
-
-        self.epoch_load_time = 0
-        self.epoch_train_time = 0
-
-        self.last_batch_time = 0
-        self.last_batch_load_time = 0
-        self.last_batch_train_time = 0
 
     """Train for one epoch"""
     def train(self, data_regime):
@@ -118,7 +112,7 @@ class Agent:
         epoch_time = 0
         dataloader_iter = enumerate(data_regime.get_loader())
 
-        start_batch_time = time.time()
+        start_batch_time = time.perf_counter()
         start_load_time = start_batch_time
 
         enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
@@ -129,13 +123,13 @@ class Agent:
                 x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
 
                 synchronize_cuda(self.cuda)
-                self.last_batch_load_time = time.time() - start_load_time
+                self.last_batch_load_time = time.perf_counter() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
 
                 self._step(i_batch, x, y, meters, training=training)
 
                 synchronize_cuda(self.cuda)
-                self.last_batch_time = time.time() - start_batch_time
+                self.last_batch_time = time.perf_counter() - start_batch_time
                 epoch_time += self.last_batch_time
 
                 self.last_batch_train_time = self.last_batch_time - self.last_batch_load_time
@@ -230,7 +224,7 @@ class Agent:
                     self.global_batch += 1
                     self.batch += 1
 
-                start_batch_time = time.time()
+                start_batch_time = time.perf_counter()
                 start_load_time = start_batch_time
 
         if training:

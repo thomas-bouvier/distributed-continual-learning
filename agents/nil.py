@@ -45,7 +45,6 @@ class nil_agent(Agent):
             state_dict,
         )
 
-        self.device = "cuda" if self.buffer_cuda else 'cpu'
         self.rehearsal_size = config.get("rehearsal_size", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_representatives = config.get("num_representatives", 20)
@@ -297,7 +296,7 @@ class nil_agent(Agent):
         }
         epoch_time = 0
 
-        start_batch_time = time.time()
+        start_batch_time = time.perf_counter()
         start_load_time = start_batch_time
 
         with tqdm(total=len(data_regime.get_loader()),
@@ -305,13 +304,13 @@ class nil_agent(Agent):
               disable=self.log_level not in ('info')) as progress:
             for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
                 synchronize_cuda(self.cuda)
-                self.last_batch_load_time = time.time() - start_load_time
+                self.last_batch_load_time = time.perf_counter() - start_load_time
                 self.epoch_load_time += self.last_batch_load_time
 
                 self._step(i_batch, x, y, meters, training=training)
 
                 synchronize_cuda(self.cuda)
-                self.last_batch_time = time.time() - start_batch_time
+                self.last_batch_time = time.perf_counter() - start_batch_time
                 epoch_time += self.last_batch_time
 
                 if i_batch % self.log_interval == 0 or i_batch == len(
@@ -427,7 +426,7 @@ class nil_agent(Agent):
                     self.batch += 1
         
                 synchronize_cuda(self.cuda)
-                start_batch_time = time.time()
+                start_batch_time = time.perf_counter()
                 start_load_time = start_batch_time
 
         if training:
@@ -468,37 +467,30 @@ class nil_agent(Agent):
         meters,
         training=False,
     ):
+        w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
+        x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
+            y, self.cuda and self.buffer_cuda)
+
         if training:
             self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.batch)
 
-        w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-        start_move_time = time.time()
-        x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
-            y, self.cuda and self.buffer_cuda)
-        self.last_batch_move_time = time.time() - start_move_time
-        self.epoch_move_time += self.last_batch_move_time
-
-        if training:
-            start_acc_time = time.time()
-            if self.buffer_cuda:
-                self.accumulate(x, y)
-            else:
-                self.accumulate(x.cpu(), y.cpu())
-            self.last_batch_acc_time = time.time() - start_acc_time
-            self.epoch_acc_time += self.last_batch_acc_time
-
             # Get the representatives
-            start_wait_time = time.time()
+            synchronize_cuda(self.cuda)
+            start_wait_time = time.perf_counter()
             (
                 rep_values,
                 rep_labels,
                 rep_weights,
             ) = self.get_samples()
-            self.last_batch_wait_time = time.time() - start_wait_time
+            synchronize_cuda(self.cuda)
+            self.last_batch_wait_time = time.perf_counter() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
             num_reps = len(rep_values)
 
+            # Assemble the minibatch
+            synchronize_cuda(self.cuda)
+            start_assemble_time = time.perf_counter()
             if num_reps > 0:
                 rep_values, rep_labels, rep_weights = (
                     move_cuda(rep_values, self.cuda),
@@ -506,18 +498,20 @@ class nil_agent(Agent):
                     move_cuda(rep_weights, self.cuda),
                 )
                 # Concatenates the training samples with the representatives
-                start_cat_time = time.time()
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
-                self.last_batch_cat_time = time.time() - start_cat_time
-                self.epoch_cat_time += self.last_batch_cat_time
+            synchronize_cuda(self.cuda)
+            self.last_batch_assemble_time = time.perf_counter() - start_assemble_time
+            self.epoch_assemble_time += self.last_batch_assemble_time
 
             # Log representatives
             if self.writer is not None and self.writer_images and num_reps > 0:
                 fig = plot_representatives(rep_values, rep_labels, 5)
                 self.writer.add_figure(
                     "representatives", fig, self.global_batch)
+
+            self.accumulate(x, y)
 
         if self.use_amp:
             with autocast():

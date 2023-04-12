@@ -1,8 +1,11 @@
 import horovod.torch as hvd
 import torch
 
+from utils.log import PerformanceResultsLog
+from utils.utils import synchronize_cuda
 
-class AverageMeter(object):
+
+class AverageMeter:
     """Computes and stores the average and current value"""
 
     def __init__(self, name):
@@ -21,6 +24,31 @@ class AverageMeter(object):
         self.sum += self.val * n
         self.count += n
         self.avg = self.sum / self.count
+
+
+class MeasureTime:
+    def __init__(self, batch, name, perf_metrics: PerformanceResultsLog, cuda=True, dummy=False):
+        self.batch = batch
+        self.name = name
+        self.perf_metrics = perf_metrics
+        self.cuda = cuda
+        self.dummy = dummy
+
+    def __enter__(self):
+        if not self.dummy:
+            self.start = torch.cuda.Event(enable_timing=True)
+            self.end = torch.cuda.Event(enable_timing=True)
+            synchronize_cuda(self.cuda)
+            self.start.record()
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        if not self.dummy:
+            self.end.record()
+            synchronize_cuda(self.cuda)
+            time = self.start.elapsed_time(self.end)
+
+            self.perf_metrics.add(self.batch, time, key=self.name)
 
 
 def accuracy(output, target, topk=(1,)):

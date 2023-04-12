@@ -45,7 +45,6 @@ class nil_local_agent(Agent):
             state_dict,
         )
 
-        self.device = "cuda" if self.buffer_cuda else 'cpu'
         self.rehearsal_size = config.get("rehearsal_size", 60)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_representatives = config.get("num_representatives", 20)
@@ -226,18 +225,18 @@ class nil_local_agent(Agent):
         epoch_time = 0
         step_count = 0
 
-        start_batch_time = time.time()
+        start_batch_time = time.perf_counter()
         start_load_time = start_batch_time
         for i_batch, (x, y, t) in enumerate(data_regime.get_loader()):
             synchronize_cuda(self.cuda)
-            self.last_batch_load_time = time.time() - start_load_time
+            self.last_batch_load_time = time.perf_counter() - start_load_time
             self.epoch_load_time += self.last_batch_load_time
 
             output, loss = self._step(
                 i_batch, x, y, training=training
             )
             synchronize_cuda(self.cuda)
-            self.last_batch_time = time.time() - start_batch_time
+            self.last_batch_time = time.perf_counter() - start_batch_time
             epoch_time += self.last_batch_time
 
             # measure accuracy and record loss
@@ -343,7 +342,7 @@ class nil_local_agent(Agent):
                         )
             step_count += 1
             synchronize_cuda(self.cuda)
-            start_batch_time = time.time()
+            start_batch_time = time.perf_counter()
             start_load_time = start_batch_time
 
         if training:
@@ -389,33 +388,33 @@ class nil_local_agent(Agent):
 
         # Create batch weights
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-        start_move_time = time.time()
+        start_move_time = time.perf_counter()
         x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
-        self.last_batch_move_time = time.time() - start_move_time
+        self.last_batch_move_time = time.perf_counter() - start_move_time
         self.epoch_move_time += self.last_batch_move_time
 
         if training:
-            start_acc_time = time.time()
+            start_acc_time = time.perf_counter()
             if self.buffer_cuda:
                 self.accumulate(x, y)
             else:
                 self.accumulate(x.cpu(), y.cpu())
-            self.last_batch_acc_time = time.time() - start_acc_time
+            self.last_batch_acc_time = time.perf_counter() - start_acc_time
             self.epoch_acc_time += self.last_batch_acc_time
 
             # Get the representatives
-            start_wait_time = time.time()
+            start_wait_time = time.perf_counter()
             (
                 rep_values,
                 rep_labels,
                 rep_weights,
             ) = self.get_samples()
-            self.last_batch_wait_time = time.time() - start_wait_time
+            self.last_batch_wait_time = time.perf_counter() - start_wait_time
             self.epoch_wait_time += self.last_batch_wait_time
             num_reps = len(rep_values)
 
             if num_reps > 0:
-                start_cat_time = time.time()
+                start_cat_time = time.perf_counter()
                 rep_values, rep_labels, rep_weights = (
                     move_cuda(rep_values, self.cuda),
                     move_cuda(rep_labels, self.cuda),
@@ -425,7 +424,7 @@ class nil_local_agent(Agent):
                 w = torch.cat((w, rep_weights))
                 x = torch.cat((x, rep_values))
                 y = torch.cat((y, rep_labels))
-                self.last_batch_cat_time = time.time() - start_cat_time
+                self.last_batch_cat_time = time.perf_counter() - start_cat_time
                 self.epoch_cat_time += self.last_batch_cat_time
 
             # Log representatives

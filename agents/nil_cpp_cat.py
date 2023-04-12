@@ -14,8 +14,9 @@ import neomem
 
 from agents.base import Agent
 from torch.cuda.amp import GradScaler, autocast
-from utils.utils import get_device, move_cuda, plot_representatives, synchronize_cuda, display
-from utils.meters import AverageMeter, accuracy
+from utils.utils import get_device, move_cuda, display
+from utils.log import PerformanceResultsLog
+from utils.meters import AverageMeter, MeasureTime, accuracy
 
 
 class AugmentedMinibatch:
@@ -54,7 +55,6 @@ class nil_cpp_cat_agent(Agent):
             state_dict,
         )
 
-        self.device = 'cuda' if self.cuda else 'cpu'
         self.rehearsal_size = config.get("rehearsal_size", 100)
         self.num_candidates = config.get("num_candidates", 20)
         self.num_representatives = config.get("num_representatives", 20)
@@ -62,17 +62,18 @@ class nil_cpp_cat_agent(Agent):
         self.discover_endpoints = config.get('discover_endpoints', True)
         self.cuda_rdma = config.get('cuda_rdma', False)
 
-        self.num_reps = 0
+        self.current_rehearsal_size = 0
+        self.perf_metrics = PerformanceResultsLog()
 
-        self.epoch_wait_time = 0
-        self.epoch_assemble_time = 0
-        self.last_batch_wait_time = 0
-        self.last_batch_assemble_time = 0
+    def measure_performance(self):
+        assert self.current_rehearsal_size > 0
+        return self.task_id == 0 and self.global_epoch == 0
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
 
-        shape = next(iter(train_data_regime.get_loader()))[0][0].size()
+        x, y, _ = next(iter(train_data_regime.get_loader()))
+        shape = x[0].size()
         self.next_minibatch = AugmentedMinibatch(self.num_representatives, shape, self.device)
 
         engine = neomem.EngineLoader(self.provider,
@@ -88,6 +89,8 @@ class nil_cpp_cat_agent(Agent):
         #self.dsl.enable_augmentation(True)
         self.dsl.use_these_allocated_variables(self.next_minibatch.x, self.next_minibatch.y, self.next_minibatch.w)
         self.dsl.start()
+
+        self.dsl.accumulate(x, y)
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id
@@ -124,165 +127,132 @@ class nil_cpp_cat_agent(Agent):
             for metric in ["loss", "prec1", "prec5", "num_samples"]
         }
         epoch_time = 0
-        dataloader_iter = enumerate(data_regime.get_loader())
-
-        start_batch_time = time.time()
-        start_load_time = start_batch_time
+        last_batch_time = 0
+        loader = data_regime.get_loader()
 
         enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
-        with tqdm(total=len(data_regime.get_loader()),
+        with tqdm(total=len(loader),
               desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
-              disable=not enable_tqdm) as progress:
-            for i_batch, (x, y, t) in dataloader_iter:
+              disable=not enable_tqdm
+        ) as progress:
+            timer = self.get_timer('load', previous_iteration=True)
+            timer.__enter__()
+            start_batch_time = time.perf_counter()
+
+            for x, y, t in loader:
                 x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+                timer.__exit__(None, None, None)
 
-                synchronize_cuda(self.cuda)
-                self.last_batch_load_time = time.time() - start_load_time
-                self.epoch_load_time += self.last_batch_load_time
+                self._step(x, y, meters, training=training, previous_task=previous_task)
 
-                self._step(i_batch, x, y, meters, training=training, previous_task=previous_task)
+                last_batch_time = time.perf_counter() - start_batch_time
+                epoch_time += last_batch_time
 
-                synchronize_cuda(self.cuda)
-                self.last_batch_time = time.time() - start_batch_time
-                epoch_time += self.last_batch_time
+                if hvd.rank() == 0:
+                    # Performance metrics
+                    if not previous_task:
+                        wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                                "batch": self.global_batch,
+                                "epoch": self.global_epoch,
+                                f"{prefix}_prec1": meters["prec1"].avg,
+                                f"{prefix}_prec5": meters["prec5"].avg})
 
-                self.last_batch_train_time = self.last_batch_time - self.last_batch_load_time - self.last_batch_wait_time - self.last_batch_assemble_time
-                self.epoch_train_time += self.last_batch_train_time
-
-                if i_batch % self.log_interval == 0 or i_batch == len(
-                    data_regime.get_loader()
-                ):
-                    logging.debug(
-                        "{0}: epoch: {1} [{2}/{3}]\t"
-                        "Loss {meters[loss].avg:.4f}\t"
-                        "Prec@1 {meters[prec1].avg:.3f}\t"
-                        "Prec@5 {meters[prec5].avg:.3f}\t".format(
-                            prefix,
-                            self.epoch + 1,
-                            i_batch,
-                            len(data_regime.get_loader()),
-                            meters=meters,
-                        )
-                    )
-
-                    logging.debug(f"batch {i_batch} time {self.last_batch_time} sec")
-                    logging.debug(
-                        f"\t[Python] batch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
-                    logging.debug(
-                        f"\t[Python] batch train time {self.last_batch_train_time} sec ({self.last_batch_train_time*100/self.last_batch_time}%)")
-                    logging.debug(
-                        f"\t[Python] batch wait time {self.last_batch_wait_time} sec ({self.last_batch_wait_time*100/self.last_batch_time}%)")
-                    logging.debug(
-                        f"\t[Python] batch assemble time {self.last_batch_assemble_time} sec ({self.last_batch_assemble_time*100/self.last_batch_time}%)")
-                    perf_metrics = self.dsl.get_metrics(i_batch)
-                    logging.debug(
-                        f"\t[C++] batch accumulate time {perf_metrics[0]} sec")
-                    logging.debug(
-                        f"\t[C++] batch copy time {perf_metrics[1]} sec")
-                    logging.debug(
-                        f"\t[C++] bulk prepare time {perf_metrics[2]} sec")
-                    logging.debug(
-                        f"\t[C++] rpcs resolve time {perf_metrics[3]} sec")
-                    logging.debug(
-                        f"\t[C++] representatives copy time {perf_metrics[4]} sec")
-                    logging.debug(
-                        f"\t[C++] buffer update time {perf_metrics[5]} sec")
-                    logging.debug(
-                        f"\t[C++] rehearsal_size {self.get_rehearsal_size()}")
-
-                    if hvd.rank() == 0:
-                        if training and self.epoch < 25 and self.batch_metrics is not None:
-                            batch_metrics_values = dict(
-                                epoch=self.epoch,
-                                batch=i_batch,
-                                time=self.last_batch_time,
-                                load_time=self.last_batch_load_time,
-                                train_time=self.last_batch_train_time,
-                                wait_time=self.last_batch_wait_time,
-                                assemble_time=self.last_batch_assemble_time,
-                                accumulate_time=perf_metrics[0],
-                                copy_time=perf_metrics[1],
-                                bulk_prepare_time=perf_metrics[2],
-                                rpcs_resolve_time=perf_metrics[3],
-                                representatives_copy_time=perf_metrics[4],
-                                buffer_update_time=perf_metrics[5],
-                                aug_size=self.aug_size,
-                                num_reps=self.num_reps,
-                            )
-                            self.batch_metrics.add(**batch_metrics_values)
-                            self.batch_metrics.save()
-
-                        if not previous_task:
-                            wandb.log({f"{prefix}_loss": meters["loss"].avg,
+                        if training:
+                            wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                    "rehearsal_size": self.current_rehearsal_size,
                                     "batch": self.global_batch,
-                                    "epoch": self.global_epoch,
-                                    "batch": i_batch,
-                                    f"{prefix}_prec1": meters["prec1"].avg,
-                                    f"{prefix}_prec5": meters["prec5"].avg})
-                            if training:
-                                wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                        "num_reps": self.get_rehearsal_size(),
-                                        "batch": self.global_batch,
-                                        "epoch": self.global_epoch})
-                    """
-                    if self.writer is not None:
-                        self.writer.add_scalar(
-                            f"{prefix}_loss", meters["loss"].avg, self.global_batch
-                        )
-                        self.writer.add_scalar(
-                            f"{prefix}_prec1",
-                            meters["prec1"].avg,
-                            self.global_batch,
-                        )
-                        self.writer.add_scalar(
-                            f"{prefix}_prec5",
-                            meters["prec5"].avg,
-                            self.global_batch,
-                        )
-                        if training:
-                            self.writer.add_scalar(
-                                "lr", self.optimizer_regime.get_lr()[
-                                    0], self.global_batch
+                                    "epoch": self.global_epoch})
+
+                            if self.measure_performance() and self.batch_metrics is not None:
+                                metrics = self.perf_metrics.get(self.batch-1)
+                                batch_metrics_values = dict(
+                                    epoch=self.epoch,
+                                    batch=self.batch,
+                                    time=last_batch_time,
+                                    load_time=metrics.get('load', 0),
+                                    wait_time=metrics.get('wait', 0),
+                                    assemble_time=metrics.get('assemble', 0),
+                                    train_time=metrics.get('train', 0),
+                                    accumulate_time=metrics[0],
+                                    copy_time=metrics[1],
+                                    bulk_prepare_time=metrics[2],
+                                    rpcs_resolve_time=metrics[3],
+                                    representatives_copy_time=metrics[4],
+                                    buffer_update_time=metrics[5],
+                                    aug_size=self.repr_size,
+                                    rehearsal_size=self.current_rehearsal_size,
+                                )
+                                self.batch_metrics.add(**batch_metrics_values)
+                                self.batch_metrics.save()
+
+                    # Logging
+                    if self.batch % self.log_interval == 0 or self.batch == len(
+                        data_regime.get_loader()
+                    ):
+                        logging.debug(
+                            "{0}: epoch: {1} [{2}/{3}]\t"
+                            "Loss {meters[loss].avg:.4f}\t"
+                            "Prec@1 {meters[prec1].avg:.3f}\t"
+                            "Prec@5 {meters[prec5].avg:.3f}\t".format(
+                                prefix,
+                                self.epoch + 1,
+                                self.batch + 1,
+                                len(data_regime.get_loader()),
+                                meters=meters,
                             )
-                            self.writer.add_scalar(
-                                "rehearsal_size",
-                                self.get_rehearsal_size(),
-                                self.global_batch,
-                            )
-                        self.writer.flush()
-                    if self.watcher is not None:
-                        self.observe(
-                            trainer=self,
-                            model=self.model,
-                            optimizer=self.optimizer_regime.optimizer,
-                            data=(x, y),
                         )
-                        self.stream_meters(meters, prefix=prefix)
-                        if training:
-                            self.write_stream(
-                                "lr",
-                                (self.global_batch,
-                                self.optimizer_regime.get_lr()[0]),
-                            )
-                    """
+
+                        if self.measure_performance() and training:
+                            metrics = self.perf_metrics.get(self.batch-1)
+                            logging.debug(f"batch {self.batch} time {last_batch_time} sec")
+                            logging.debug(
+                                f"\t[C++] rehearsal_size {self.current_rehearsal_size}")
+                            logging.debug(
+                                f"\t[Python] batch wait time {metrics.get('wait', 0)} sec ({metrics.get('wait', 0)*100/last_batch_time}%)")
+                            logging.debug(
+                                f"\t[Python] batch load time {metrics.get('load', 0)} sec ({metrics.get('load', 0)*100/last_batch_time}%)")
+                            logging.debug(
+                                f"\t[Python] batch assemble time {metrics.get('assemble', 0)} sec ({metrics.get('assemble', 0)*100/last_batch_time}%)")
+                            logging.debug(
+                                f"\t[Python] batch train time {metrics.get('train', 0)} sec ({metrics.get('train', 0)*100/last_batch_time}%)")
+
+                            logging.debug(
+                                f"\t[C++] batch accumulate time {metrics[0]} sec")
+                            logging.debug(
+                                f"\t[C++] batch copy time {metrics[1]} sec")
+                            logging.debug(
+                                f"\t[C++] bulk prepare time {metrics[2]} sec")
+                            logging.debug(
+                                f"\t[C++] rpcs resolve time {metrics[3]} sec")
+                            logging.debug(
+                                f"\t[C++] representatives copy time {metrics[4]} sec")
+                            logging.debug(
+                                f"\t[C++] buffer update time {metrics[5]} sec")
+
+
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
                            'accuracy': meters["prec1"].avg.item(),
-                           'representatives': self.num_reps})
+                           'augmented': self.repr_size,
+                           'rehearsal_size': self.current_rehearsal_size})
                 progress.update(1)
 
                 if not previous_task:
                     self.global_batch += 1
                     self.batch += 1
 
-                start_batch_time = time.time()
-                start_load_time = start_batch_time
+                timer = self.get_timer('load', previous_iteration=True)
+                timer.__enter__()
+                start_batch_time = time.perf_counter()
 
         if training:
             self.global_epoch += 1
+            self.epoch += 1
+
             logging.info(f"\nCUMULATED VALUES:")
             logging.info(
-                f"\trehearsal_size {self.get_rehearsal_size()}")
+                f"\trehearsal_size {self.current_rehearsal_size}")
             logging.info(f"epoch time {epoch_time} sec")
+            """
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
             logging.info(
@@ -291,10 +261,7 @@ class nil_cpp_cat_agent(Agent):
                 f"\tepoch wait time {self.epoch_wait_time} sec ({self.epoch_wait_time*100/epoch_time}%)")
             logging.info(
                 f"\tepoch assemble time {self.epoch_assemble_time} sec ({self.epoch_assemble_time*100/epoch_time}%)")
-        self.epoch_load_time = 0
-        self.epoch_train_time = 0
-        self.epoch_wait_time = 0
-        self.epoch_assemble_time = 0
+            """
 
         num_samples = meters["num_samples"].sum.item()
         meters = {name: meter.avg.item() for name, meter in meters.items()}
@@ -308,94 +275,92 @@ class nil_cpp_cat_agent(Agent):
 
     def _step(
         self,
-        i_batch,
         x,
         y,
         meters,
         training=False,
         previous_task=False,
     ):
-        new_x = x
-        new_y = y
-        w = torch.ones(self.batch_size, device=self.device)
-
         if training:
-            self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.batch)
-
-            if self.global_batch == 0 and self.num_reps == 0:
-                self.dsl.accumulate(x, y)
-
             # Get the representatives
-            start_wait_time = time.time()
-            self.aug_size = self.dsl.wait()
-            self.last_batch_wait_time = time.time() - start_wait_time
-            self.epoch_wait_time += self.last_batch_wait_time
+            with self.get_timer('wait', previous_iteration=True):
+                self.repr_size = self.dsl.wait()
+                logging.debug(f"Received {self.repr_size} samples from other nodes")
+
+                if self.measure_performance():
+                    cpp_metrics = self.dsl.get_metrics(self.batch)
+                    self.perf_metrics.add(self.batch-1, cpp_metrics)
 
             # Assemble the minibatch
-            start_assemble_time = time.time()
-            new_x = torch.cat((x, self.next_minibatch.x[:self.aug_size]))
-            new_y = torch.cat((y, self.next_minibatch.y[:self.aug_size]))
-            new_w = torch.cat((w, self.next_minibatch.w[:self.aug_size]))
-            self.last_batch_assemble_time = time.time() - start_assemble_time
-            self.epoch_assemble_time += self.last_batch_assemble_time
+            with self.get_timer('assemble'):
+                w = torch.ones(self.batch_size, device=self.device)
+                new_x = torch.cat((x, self.next_minibatch.x[:self.repr_size]))
+                new_y = torch.cat((y, self.next_minibatch.y[:self.repr_size]))
+                new_w = torch.cat((w, self.next_minibatch.w[:self.repr_size]))
 
-            logging.debug(f"Received {self.aug_size} samples from other nodes")
-            if self.log_buffer and i_batch % self.log_interval == 0 and hvd.rank() == 0:
-                num_reps = self.aug_size
-                if num_reps > 0:
+            if self.log_buffer and self.batch % self.log_interval == 0 and hvd.rank() == 0:
+                if self.repr_size > 0:
                     captions = []
-                    for label, weight in zip(self.next_minibatch.y[-num_reps:], self.next_minibatch.w[-num_reps:]):
-                        captions.append(f"y={label.item()} w={weight.item()}")
-                    display(f"aug_batch_{self.epoch}_{i_batch}", self.next_minibatch.x[-num_reps:], captions=captions)
+                    for y, w in zip(self.next_minibatch.y[-self.repr_size:], self.next_minibatch.w[-self.repr_size:]):
+                        captions.append(f"y={y.item()} w={w.item()}")
+                    display(f"aug_batch_{self.epoch}_{self.batch}", self.next_minibatch.x[-self.repr_size:], captions=captions)
 
             # In-advance preparation of next minibatch
-            self.dsl.accumulate(x, y)
+            with self.get_timer('accumulate'):
+                self.dsl.accumulate(x, y)
 
-            if self.use_amp:
-                with autocast():
+            # Train
+            with self.get_timer('train'):
+                self.optimizer_regime.zero_grad()
+                self.optimizer_regime.update(self.epoch, self.batch)
+
+                if self.use_amp:
+                    with autocast():
+                        output = self.model(new_x)
+                        loss = self.criterion(output, new_y)
+                else:
                     output = self.model(new_x)
                     loss = self.criterion(output, new_y)
-            else:
-                output = self.model(new_x)
-                loss = self.criterion(output, new_y)
+
+                # https://stackoverflow.com/questions/43451125/pytorch-what-a-re-the-gradient-arguments
+                total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)
+                dw = new_w / total_weight
+
+                if self.use_amp:
+                    self.scaler.scale(loss).backward(dw)
+                    self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
+                else:
+                    loss.backward(dw)
+                    self.optimizer_regime.step()
+
+                self.current_rehearsal_size = self.dsl.get_rehearsal_size()
+                meters["num_samples"].update(self.repr_size)
+
+                # measure accuracy and record loss
+                prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
+                # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
+                meters["loss"].update(loss.sum() / self.mask[new_y].sum(), new_x.size(0))
+
         else:
             if self.use_amp:
                 with autocast():
-                    output = self.model(new_x)
-                    loss = nn.CrossEntropyLoss()(output, new_y)
+                    output = self.model(x)
+                    loss = nn.CrossEntropyLoss()(output, y)
             else:
-                output = self.model(new_x)
-                loss = nn.CrossEntropyLoss()(output, new_y)
+                output = self.model(x)
+                loss = nn.CrossEntropyLoss()(output, y)
 
-        if training:
-            # https://stackoverflow.com/questions/43451125/pytorch-what-a-re-the-gradient-arguments
-            total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)
-            dw = new_w / total_weight
+            prec1, prec5 = accuracy(output, y, topk=(1, 5))
+            meters["loss"].update(loss, x.size(0))
 
-            if self.use_amp:
-                self.scaler.scale(loss).backward(dw)
-                self.optimizer_regime.optimizer.synchronize()
-                with self.optimizer_regime.optimizer.skip_synchronize():
-                    self.scaler.step(self.optimizer_regime.optimizer)
-                    self.scaler.update()
-            else:
-                loss.backward(dw)
-                self.optimizer_regime.step()
+        meters["prec1"].update(prec1, x.size(0))
+        meters["prec5"].update(prec5, x.size(0))
 
-            self.num_reps = self.dsl.get_rehearsal_size()
-            meters["num_samples"].update(self.aug_size)
-
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
-            # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
-            meters["loss"].update(loss.sum() / self.mask[new_y].sum(), new_x.size(0))
-        else:
-            prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
-            meters["loss"].update(loss, new_x.size(0))
-
-        meters["prec1"].update(prec1, new_x.size(0))
-        meters["prec5"].update(prec5, new_x.size(0))
-
-    def get_rehearsal_size(self):
-        return self.num_reps
+    def get_timer(self, name, previous_iteration=False):
+        batch = self.batch
+        if previous_iteration:
+            batch -= 1
+        return MeasureTime(batch, name, self.perf_metrics, self.cuda, not self.measure_performance())

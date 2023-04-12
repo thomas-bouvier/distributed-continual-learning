@@ -86,7 +86,7 @@ def plot_figure(
     return f
 
 
-class ResultsLog(object):
+class ResultsLog:
 
     supported_data_formats = ["csv", "json"]
 
@@ -116,7 +116,7 @@ class ResultsLog(object):
         self.dummy = dummy
         self.clear()
 
-        if data_format not in ResultsLog.supported_data_formats:
+        if data_format not in self.supported_data_formats:
             raise ValueError(
                 "data_format must of the following: "
                 + "|".join(["{}".format(k)
@@ -207,6 +207,23 @@ class ResultsLog(object):
                 wandb.save(self.data_path)
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
+
+
+class PerformanceResultsLog:
+    perf_metrics = {}
+
+    def add(self, batch, value, key=None):
+        if batch not in self.perf_metrics:
+            self.perf_metrics[batch] = {}
+
+        if key is not None:
+            self.perf_metrics[batch] |= {key: value}
+        elif isinstance(value, list):
+            for i in range(len(value)):
+                self.perf_metrics[batch] |= {i: value[i]}
+
+    def get(self, batch):
+        return self.perf_metrics[batch]
 
 
 def save_checkpoint(

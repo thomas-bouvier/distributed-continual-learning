@@ -549,12 +549,12 @@ class Experiment:
         img_secs = []
         evaluate_durations = []
 
-        total_start = time.time()
+        total_start = time.perf_counter()
         self.agent.before_all_tasks(self.train_data_regime)
 
         for task_id in range(self.resume_from_task, len(self.train_data_regime.tasksets)):
-            start = time.time()
-            training_time = time.time()
+            start = time.perf_counter()
+            training_time = time.perf_counter()
 
             task_metrics = {"task_id": task_id, "test_tasks_metrics": [], "task_averages": []}
 
@@ -574,7 +574,7 @@ class Experiment:
                 train_results = self.agent.train(self.train_data_regime)
 
                 # evaluate on test set
-                before_evaluate_time = time.time()
+                before_evaluate_time = time.perf_counter()
                 meters = []
                 if self.args.evaluate:
                     for test_task_id in range(0, task_id + 1):
@@ -647,7 +647,7 @@ class Experiment:
                             self.agent.model.state_dict()
                         )
 
-                evaluate_durations.append(time.time() - before_evaluate_time)
+                evaluate_durations.append(time.perf_counter() - before_evaluate_time)
 
                 self.agent.after_every_epoch()
 
@@ -709,7 +709,7 @@ class Experiment:
                         dummy=hvd.rank() > 0
                     )
 
-            end = time.time()
+            end = time.perf_counter()
             task_metrics.update({"time": end - start})
             # logging.debug(f"\nTask metrics : {task_metrics}")
             tasks_metrics.add(**task_metrics)
@@ -718,7 +718,7 @@ class Experiment:
             self.agent.after_every_task()
 
         self.agent.after_all_tasks()
-        total_end = time.time()
+        total_end = time.perf_counter()
 
         if hvd.rank() == 0:
             img_sec_mean = np.mean(img_secs)
