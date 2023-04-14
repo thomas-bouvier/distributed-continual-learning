@@ -8,8 +8,9 @@ import torch.nn as nn
 import wandb
 
 from torch.cuda.amp import GradScaler, autocast
-from utils.meters import AverageMeter, accuracy
-from utils.utils import move_cuda, synchronize_cuda, display
+from utils.log import PerformanceResultsLog
+from utils.meters import AverageMeter, MeasureTime, accuracy
+from utils.utils import move_cuda, display
 
 
 class Agent:
@@ -53,7 +54,6 @@ class Agent:
 
         if self.use_amp:
             self.scaler = GradScaler()
-
         self.criterion = nn.CrossEntropyLoss()
 
         if state_dict is not None:
@@ -61,6 +61,11 @@ class Agent:
             self.initial_snapshot = copy.deepcopy(state_dict)
         else:
             self.initial_snapshot = copy.deepcopy(self.model.state_dict())
+
+        self.perf_metrics = PerformanceResultsLog()
+
+    def measure_performance(self):
+        return self.task_id == 0 and self.global_epoch == 0
 
     """Train for one epoch"""
     def train(self, data_regime):
@@ -110,34 +115,54 @@ class Agent:
             for metric in ["loss", "prec1", "prec5", "num_samples"]
         }
         epoch_time = 0
-        dataloader_iter = enumerate(data_regime.get_loader())
-
-        start_batch_time = time.perf_counter()
-        start_load_time = start_batch_time
+        last_batch_time = 0
+        loader = data_regime.get_loader()
 
         enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
-        with tqdm(total=len(data_regime.get_loader()),
+        with tqdm(total=len(loader),
               desc=f"{prefix} epoch #{self.epoch + 1}",
-              disable=not enable_tqdm) as progress:
-            for i_batch, (x, y, t) in dataloader_iter:
+              disable=not enable_tqdm
+        ) as progress:
+            timer = self.get_timer('load')
+            timer.__enter__()
+            start_batch_time = time.perf_counter()
+
+            for x, y, t in loader:
                 x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+                timer.__exit__(None, None, None)
 
-                synchronize_cuda(self.cuda)
-                self.last_batch_load_time = time.perf_counter() - start_load_time
-                self.epoch_load_time += self.last_batch_load_time
+                self._step(x, y, meters, training=training)
 
-                self._step(i_batch, x, y, meters, training=training)
+                last_batch_time = time.perf_counter() - start_batch_time
+                epoch_time += last_batch_time
 
-                synchronize_cuda(self.cuda)
-                self.last_batch_time = time.perf_counter() - start_batch_time
-                epoch_time += self.last_batch_time
+                if hvd.rank() == 0:
+                    # Performance metrics
+                    if not previous_task:
+                        wandb.log({"batch": self.global_batch,
+                                "epoch": self.global_epoch,
+                                f"{prefix}_loss": meters["loss"].avg,
+                                f"{prefix}_prec1": meters["prec1"].avg,
+                                f"{prefix}_prec5": meters["prec5"].avg})
 
-                self.last_batch_train_time = self.last_batch_time - self.last_batch_load_time
-                self.epoch_train_time += self.last_batch_train_time
+                        if training:
+                            wandb.log({"lr": self.optimizer_regime.get_lr()[0],
+                                    "batch": self.global_batch,
+                                    "epoch": self.global_epoch})
 
-                if i_batch % self.log_interval == 0 or i_batch == len(
-                    data_regime.get_loader()
-                ):
+                        if self.measure_performance() and self.batch_metrics is not None:
+                            metrics = self.perf_metrics.get(self.batch)
+                            batch_metrics_values = dict(
+                                epoch=self.epoch,
+                                batch=self.batch,
+                                time=last_batch_time,
+                                load_time=metrics.get('load', 0),
+                                train_time=metrics.get('train', 0)
+                            )
+                            self.batch_metrics.add(**batch_metrics_values)
+                            self.batch_metrics.save()
+
+                if self.batch % self.log_interval == 0 or self.batch == len(loader):
                     logging.debug(
                         "{0}: epoch: {1} [{2}/{3}]\t"
                         "Loss {meters[loss].avg:.4f}\t"
@@ -145,77 +170,20 @@ class Agent:
                         "Prec@5 {meters[prec5].avg:.3f}\t".format(
                             prefix,
                             self.epoch + 1,
-                            i_batch,
-                            len(data_regime.get_loader()),
+                            self.batch + 1,
+                            len(loader),
                             meters=meters,
                         )
                     )
 
-                    logging.debug(f"batch {i_batch} time {self.last_batch_time} sec")
-                    logging.debug(
-                        f"\t[Python] batch load time {self.last_batch_load_time} sec ({self.last_batch_load_time*100/self.last_batch_time}%)")
-                    logging.debug(
-                        f"\t[Python] batch train time {self.last_batch_train_time} sec ({self.last_batch_train_time*100/self.last_batch_time}%)")
+                    if training and self.measure_performance():
+                        metrics = self.perf_metrics.get(self.batch)
+                        logging.debug(f"batch {self.batch} time {last_batch_time} sec")
+                        logging.debug(
+                            f"\t[Python] batch load time {metrics.get('load', 0)} sec ({metrics.get('load', 0)*100/last_batch_time}%)")
+                        logging.debug(
+                            f"\t[Python] batch train time {metrics.get('train', 0)} sec ({metrics.get('train', 0)*100/last_batch_time}%)")
 
-                    if hvd.rank() == 0:
-                        if training and self.epoch < 5 and self.batch_metrics is not None:
-                            batch_metrics_values = dict(
-                                epoch=self.epoch,
-                                batch=i_batch,
-                                time=self.last_batch_time,
-                                load_time=self.last_batch_load_time,
-                                train_time=self.last_batch_train_time,
-                            )
-                            self.batch_metrics.add(**batch_metrics_values)
-                            self.batch_metrics.save()
-
-                        if not previous_task:
-                            wandb.log({"batch": self.global_batch,
-                                    "epoch": self.global_epoch,
-                                    "batch": i_batch,
-                                    f"{prefix}_loss": meters["loss"].avg,
-                                    f"{prefix}_prec1": meters["prec1"].avg,
-                                    f"{prefix}_prec5": meters["prec5"].avg})
-                            if training:
-                                wandb.log({"lr": self.optimizer_regime.get_lr()[0],
-                                        "batch": self.global_batch,
-                                        "epoch": self.global_epoch})
-                    """
-                    if self.writer is not None:
-                        self.writer.add_scalar(
-                            f"{prefix}_loss", meters["loss"].avg, self.global_batch
-                        )
-                        self.writer.add_scalar(
-                            f"{prefix}_prec1",
-                            meters["prec1"].avg,
-                            self.global_batch,
-                        )
-                        self.writer.add_scalar(
-                            f"{prefix}_prec5",
-                            meters["prec5"].avg,
-                            self.global_batch,
-                        )
-                        if training:
-                            self.writer.add_scalar(
-                                "lr", self.optimizer_regime.get_lr()[
-                                    0], self.global_batch
-                            )
-                        self.writer.flush()
-                    if self.watcher is not None:
-                        self.observe(
-                            trainer=self,
-                            model=self.model,
-                            optimizer=self.optimizer_regime.optimizer,
-                            data=(x, y),
-                        )
-                        self.stream_meters(meters, prefix=prefix)
-                        if training:
-                            self.write_stream(
-                                "lr",
-                                (self.global_batch,
-                                self.optimizer_regime.get_lr()[0]),
-                            )
-                    """
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
                             'accuracy': meters["prec1"].avg.item()})
                 progress.update(1)
@@ -224,19 +192,20 @@ class Agent:
                     self.global_batch += 1
                     self.batch += 1
 
+                timer = self.get_timer('load')
+                timer.__enter__()
                 start_batch_time = time.perf_counter()
-                start_load_time = start_batch_time
 
         if training:
             self.global_epoch += 1
             logging.info(f"\nCUMULATED VALUES:")
             logging.info(f"epoch time {epoch_time} sec")
+            """
             logging.info(
                 f"\tepoch load time {self.epoch_load_time} sec ({self.epoch_load_time*100/epoch_time}%)")
             logging.info(
                 f"\tepoch train time {self.epoch_train_time} sec ({self.epoch_train_time*100/epoch_time}%)")
-        self.epoch_load_time = 0
-        self.epoch_train_time = 0
+            """
 
         num_samples = meters["num_samples"].sum.item()
         meters = {name: meter.avg.item() for name, meter in meters.items()}
@@ -250,35 +219,44 @@ class Agent:
 
     def _step(
         self,
-        i_batch,
         x,
         y,
         meters,
         training=False,
     ):
         if training:
-            self.optimizer_regime.zero_grad()
-            self.optimizer_regime.update(self.epoch, self.batch)
+            # Train
+            with self.get_timer('train'):
+                self.optimizer_regime.zero_grad()
+                self.optimizer_regime.update(self.epoch, self.batch)
 
-        if self.use_amp:
-            with autocast():
+                if self.use_amp:
+                    with autocast():
+                        output = self.model(x)
+                        loss = self.criterion(output, y)
+                else:
+                    output = self.model(x)
+                    loss = self.criterion(output, y)
+
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                    self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
+                else:
+                    loss.backward()
+                    self.optimizer_regime.step()
+
+        else:
+            if self.use_amp:
+                with autocast():
+                    output = self.model(x)
+                    loss = self.criterion(output, y)
+            else:
                 output = self.model(x)
                 loss = self.criterion(output, y)
-        else:
-            output = self.model(x)
-            loss = self.criterion(output, y)
 
-        if training:
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-                self.optimizer_regime.optimizer.synchronize()
-                with self.optimizer_regime.optimizer.skip_synchronize():
-                    self.scaler.step(self.optimizer_regime.optimizer)
-                    self.scaler.update()
-            else:
-                loss.backward()
-                self.optimizer_regime.step()
-        
         prec1, prec5 = accuracy(output, y, topk=(1, 5))
         meters["loss"].update(loss, x.size(0))
         meters["prec1"].update(prec1, x.size(0))
@@ -356,6 +334,8 @@ class Agent:
         if stream is not None:
             stream.write(values)
 
+    def get_timer(self, name):
+        return MeasureTime(self.batch, name, self.perf_metrics, self.cuda, not self.measure_performance())
 
 def base(model, use_amp, agent_config, optimizer_regime, cuda, log_level, buffer_cuda, log_buffer, log_interval, batch_metrics):
     return Agent(
