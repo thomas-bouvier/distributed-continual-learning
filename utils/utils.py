@@ -35,7 +35,7 @@ def move_cuda(item, use_cuda=True, cuda_device=-1):
 
 def synchronize_cuda(use_cuda=True):
     if use_cuda:
-        torch.cuda.synchronize()
+        torch.cuda.current_stream().synchronize()
 
 
 # Find 2D index from accumulated list of lengths
