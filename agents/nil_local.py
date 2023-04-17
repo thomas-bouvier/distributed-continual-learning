@@ -215,8 +215,7 @@ class nil_local_agent(Agent):
     """
     Forward pass for the current epoch
     """
-
-    def loop(self, data_regime, training=False):
+    def train_one_epoch(self, data_regime, training=False):
         prefix = "train" if training else "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")

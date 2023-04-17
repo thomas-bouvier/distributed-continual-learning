@@ -590,8 +590,7 @@ class Experiment:
 
                         logging.info(f"EVALUATING on task {test_task_id + 1}..{task_id + 1}")
 
-                        validate_results = self.agent.validate(
-                            self.validate_data_regime, previous_task=(test_task_id != task_id))
+                        validate_results = self.agent.validate(self.validate_data_regime)
                         meters[test_task_id]["loss"] = validate_results["loss"]
                         meters[test_task_id]["prec1"] = validate_results["prec1"]
                         meters[test_task_id]["prec5"] = validate_results["prec5"]

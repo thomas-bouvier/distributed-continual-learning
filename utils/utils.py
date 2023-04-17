@@ -10,9 +10,7 @@ from six import string_types
 
 
 def get_device(use_cuda=True):
-    if use_cuda:
-        return "cuda"
-    return "cpu"
+    return "cuda" if use_cuda else "cpu"
 
 
 def move_cuda(item, use_cuda=True, cuda_device=-1):
