@@ -343,19 +343,6 @@ class Agent:
         self.writer = SummaryWriter(log_dir=save_path)
         return True
 
-    def set_tensorwatch_watcher(self, filename, port=0, dummy=False):
-        if dummy:
-            return False
-        import tensorwatch
-        self.watcher = tensorwatch.Watcher(filename=filename, port=port)
-        self.get_stream("train_loss")
-        self.get_stream("val_loss")
-        self.get_stream("train_prec1")
-        self.get_stream("val_prec1")
-        self.get_stream("lr")
-        self.watcher.make_notebook()
-        return True
-
     def get_state_dict(self):
         return self.model.state_dict()
 

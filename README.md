@@ -22,12 +22,13 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|
-| `--model` | Yes | DL model to instanciate  | `mnistnet`, `resnet` |
-| `--model-config` |   | Model-specific parameters  | Res-Net models accept `"{'depth': 50}"` |
+| `--model` | Yes | DL model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `convnext` |
+| `--model-config` |   | Model-specific parameters  | ConvNext requires `"{'lr_min': 1e-6}"` |
 | `--agent` | Default: `base` | DL model to instanciate  | `base`, `nil` |
 | `--agent-config` |   | Agent-specific parameters  | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"` allows to reset the model internal state between tasks<br>Instance-incremental scenario (domain) with 2 tasks: `"{'scenario': 'domain', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
 | `--dataset` |   | Dataset  | `mnist`, `cifar10`, `cifar100`, `tinyimagenet`, `imagenet`, `imagenet_blurred` |
+
 ## Examples
 
 ### Deep learning
@@ -76,6 +77,8 @@ python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets
 
 **nil**: global sampling in Python, very inefficient
 
-**nil_cpp**: global sampling with C++ backend
+**nil_cpp**: global sampling with Neomem
+
+**nil_cpp_cat**: global sampling with Neomem, variant of `nil_cpp`
 
 **nil_local**: local sampling in Python, not correct as representatives are not shared between workers

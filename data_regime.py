@@ -207,7 +207,7 @@ class DataRegime(object):
                     trsf=[self.config["data"]["transform"]]
                 )
             ]
-        logging.info(f"Prepared {len(self.tasksets)} tasksets")
+        logging.info(f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets")
         self.total_num_classes = len(dataset.list_classes)
 
     def set_epoch(self, epoch):

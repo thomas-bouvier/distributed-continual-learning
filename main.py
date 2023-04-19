@@ -264,15 +264,6 @@ parser.add_argument(
     default=False,
     help="set tensorboard logging",
 )
-parser.add_argument(
-    "--tensorwatch",
-    action="store_true",
-    default=False,
-    help="set tensorwatch logging",
-)
-parser.add_argument(
-    "--tensorwatch-port", default=0, type=int, help="set tensorwatch port"
-)
 
 
 def main():
@@ -381,7 +372,7 @@ class Experiment:
                 model_config, **literal_eval(self.args.model_config))
         model = model_name(model_config, len(self.train_data_regime.get_loader()))
         logging.info(
-            f"Created model {self.args.model} with configuration: {model_config}"
+            f"Created model {self.args.model} with configuration: {json.dumps(model_config, indent=2)}"
         )
         num_parameters = sum([l.nelement() for l in model.parameters()])
         logging.info(f"Number of parameters: {num_parameters}")
@@ -453,7 +444,7 @@ class Experiment:
             batch_metrics
         )
         self.agent.epochs = self.args.epochs
-        logging.info(f"Created agent with configuration: {agent_config}")
+        logging.info(f"Created agent with configuration: {json.dumps(agent_config, indent=2)}")
 
         # Saving an initial checkpoint
         save_checkpoint(
@@ -474,13 +465,6 @@ class Experiment:
             self.agent.set_tensorboard_writer(
                 save_path=self.save_path,
                 images=self.args.buffer_tensorboard,
-                dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
-            )
-        if self.args.tensorwatch:
-            self.agent.set_tensorwatch_watcher(
-                filename=path.abspath(
-                    path.join(self.save_path, "tensorwatch.log")),
-                port=self.args.tensorwatch_port,
                 dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
             )
 
@@ -518,8 +502,7 @@ class Experiment:
                 "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
             },
         )
-        logging.info("Created train data regime: %s",
-                     repr(self.train_data_regime))
+        logging.info(f"Created train data regime: {str(self.train_data_regime.config)}")
 
         self.validate_data_regime = DataRegime(
             hvd,
@@ -531,8 +514,7 @@ class Experiment:
                 else self.args.batch_size * self.args.batches_per_allreduce,
             },
         )
-        logging.info("Created test data regime: %s",
-                     repr(self.validate_data_regime))
+        logging.info(f"Created test data regime: {str(self.validate_data_regime.config)}")
 
         return self.train_data_regime.total_num_classes
 
@@ -677,12 +659,10 @@ class Experiment:
                         wandb.log({"epoch": self.agent.global_epoch,
                                    "epoch_time": train_results["time"],
                                    "img_sec": img_sec * hvd.size()})
-                    """
                     if self.agent.writer is not None:
                         self.agent.writer.add_scalar(
                             "img_sec", img_sec * hvd.size(), self.agent.global_epoch
                         )
-                    """
                     dl_metrics_values = dict(
                         task_id=task_id,
                         epoch=self.agent.global_epoch,
