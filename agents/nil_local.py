@@ -394,10 +394,7 @@ class nil_local_agent(Agent):
 
         if training:
             start_acc_time = time.perf_counter()
-            if self.buffer_cuda:
-                self.accumulate(x, y)
-            else:
-                self.accumulate(x.cpu(), y.cpu())
+            self.accumulate(x.cpu(), y.cpu())
             self.last_batch_acc_time = time.perf_counter() - start_acc_time
             self.epoch_acc_time += self.last_batch_acc_time
 

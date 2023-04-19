@@ -468,8 +468,7 @@ class nil_agent(Agent):
         training=False,
     ):
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))
-        x, y = move_cuda(x, self.cuda and self.buffer_cuda), move_cuda(
-            y, self.cuda and self.buffer_cuda)
+        x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
 
         if training:
             self.optimizer_regime.zero_grad()

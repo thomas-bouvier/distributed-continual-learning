@@ -29,6 +29,7 @@ class nil_cpp_cat_agent(Agent):
     def __init__(
         self,
         model,
+        use_mask,
         use_amp,
         config,
         optimizer_regime,
@@ -42,6 +43,7 @@ class nil_cpp_cat_agent(Agent):
     ):
         super(nil_cpp_cat_agent, self).__init__(
             model,
+            use_mask,
             use_amp,
             config,
             optimizer_regime,
@@ -113,9 +115,10 @@ class nil_cpp_cat_agent(Agent):
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
 
-        # Create mask so the loss is only used for classes learnt during this task
-        self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self.device).float()
-        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
+        if self.use_mask:
+            # Create mask so the loss is only used for classes learnt during this task
+            self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self.device).float()
+            self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """Forward pass for the current epoch"""
     def train_one_epoch(self, data_regime):

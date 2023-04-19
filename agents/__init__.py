@@ -1,7 +1,7 @@
 from .base import *
 
-def nil(model, use_amp, config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics):
-    implementation = config.get("implementation", "")
+def nil(model, use_mask, use_amp, agent_config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics):
+    implementation = agent_config.get("implementation", "")
     if implementation == "cpp":
         from .nil_cpp import nil_cpp_agent
         agent = nil_cpp_agent
@@ -14,4 +14,4 @@ def nil(model, use_amp, config, optimizer_regime, batch_size, cuda, log_level, l
     else:
         from .nil import nil_agent
         agent = nil_agent
-    return agent(model, use_amp, config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics)
+    return agent(model, use_mask, use_amp, agent_config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics)

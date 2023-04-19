@@ -48,7 +48,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--config",
-    default="base",
+    default="",
     type=str,
     help="name of desired config in yaml file",
 )
@@ -70,12 +70,6 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="sample data from a same subset of the dataset at each epoch",
-)
-parser.add_argument(
-    "--buffer-cuda",
-    action="store_true",
-    default=False,
-    help="store replay buffers in CUDA memory rather than cpu",
 )
 parser.add_argument(
     "--log-buffer",
@@ -106,6 +100,11 @@ parser.add_argument(
     "--model-config",
     default="",
     help="additional model architecture configuration",
+)
+parser.add_argument(
+    "--use-mask",
+    action="store_true",
+    help="use a continual mask on classes seen so far"
 )
 parser.add_argument(
     "--load-checkpoint",
@@ -254,8 +253,11 @@ parser.add_argument(
     default="./results",
     help="results dir",
 )
-parser.add_argument("--save-dir", metavar="SAVE_DIR",
-                    default="", help="saved folder")
+parser.add_argument("--save-dir",
+    metavar="SAVE_DIR",
+    default="",
+    help="saved folder"
+)
 parser.add_argument(
     "--tensorboard",
     action="store_true",
@@ -276,21 +278,21 @@ parser.add_argument(
 def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-    args.buffer_cuda = args.buffer_cuda and args.cuda
     args.buffer_tensorboard = args.log_buffer and args.tensorboard
     args.evaluate = not args.training_only
 
     mp.set_start_method("spawn")
 
     params = vars(args)
-    yparams = YParams(os.path.abspath(args.yaml_config), args.config)
-    for k, v in params.items():
-        yparam = yparams[k]
-        if yparam:
-            params[k] = yparam
-            if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config' or k == 'optimizer_regime':
-                if v:
-                    params[k] = str(literal_eval(v) | literal_eval(yparam))
+    if args.config:
+        yparams = YParams(os.path.abspath(args.yaml_config), args.config)
+        for k, v in params.items():
+            yparam = yparams[k]
+            if yparam:
+                params[k] = yparam
+                if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config' or k == 'optimizer_regime':
+                    if v:
+                        params[k] = str(literal_eval(v) | literal_eval(yparam))
     args = Namespace(**params)
 
     # Horovod: initialize library.
@@ -372,11 +374,12 @@ class Experiment:
         model_name = models.__dict__[self.args.model]
         model_config = {
             "num_classes": total_num_classes,
+            "lr": self.args.lr * lr_scaler,
         }
         if self.args.model_config != "":
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
-        model = model_name(model_config)
+        model = model_name(model_config, len(self.train_data_regime.get_loader()))
         logging.info(
             f"Created model {self.args.model} with configuration: {model_config}"
         )
@@ -392,7 +395,6 @@ class Experiment:
         logging.info(f"Optimizer regime: {optimizer_regime_dict}")
         optimizer_regime = OptimizerRegime(
             model,
-            self.args.lr * lr_scaler,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
             hvd.Adasum if self.args.use_adasum else hvd.Average,
             self.args.batches_per_allreduce,
@@ -408,16 +410,20 @@ class Experiment:
             if not path.isfile(self.args.load_checkpoint):
                 parser.error(f"Invalid checkpoint: {self.args.load_checkpoint}")
             checkpoint = torch.load(self.args.load_checkpoint, map_location="cpu")
-            # Overrride configuration with checkpoint info
+
+            # Override configuration with checkpoint info
             model_name = checkpoint.get("model", model_name)
             model_config = checkpoint.get("config", model_config)
+
             # Load checkpoint
             logging.info(f"Loading model {self.args.load_checkpoint}..")
             model.load_state_dict(checkpoint["state_dict"])
             optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
+
             # Broadcast resume information
             resume_from_task = checkpoint["task"]
             resume_from_epoch = checkpoint["epoch"]
+
         self.resume_from_task = hvd.broadcast(torch.tensor(resume_from_task), root_rank=0,
                     name='resume_from_task').item()
         self.resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
@@ -435,6 +441,7 @@ class Experiment:
                 agent_config, **literal_eval(self.args.agent_config))
         self.agent = agent(
             model,
+            self.args.use_mask,
             self.args.use_amp,
             agent_config,
             optimizer_regime,
@@ -497,8 +504,8 @@ class Experiment:
             "shard": self.args.shard,
             "continual": tasksets_config.get("continual"),
             "scenario": tasksets_config.get("scenario", "class"),
-            "initial_increment": tasksets_config.get("initial_increment", 0),
-            "increment": tasksets_config.get("increment", 1),
+            "initial_increment": tasksets_config.get("initial_increment", -1),
+            "increment": tasksets_config.get("increment", -1),
             "num_tasks": tasksets_config.get("num_tasks", None),
             "concatenate_tasksets": tasksets_config.get("concatenate_tasksets", False),
         }
@@ -560,8 +567,6 @@ class Experiment:
 
             self.train_data_regime.set_task_id(task_id)
             self.agent.before_every_task(task_id, self.train_data_regime)
-            self.agent.optimizer_regime.num_steps = len(
-                self.train_data_regime.get_loader())
 
             for i_epoch in range(self.resume_from_epoch, self.args.epochs):
                 logging.info(f"TRAINING on task {task_id + 1}/{len(self.train_data_regime.tasksets)}, epoch: {i_epoch + 1}/{self.args.epochs}, {hvd.size()} device(s)")

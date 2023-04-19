@@ -17,6 +17,7 @@ class Agent:
     def __init__(
         self,
         model,
+        use_mask,
         use_amp,
         config,
         optimizer_regime,
@@ -30,6 +31,7 @@ class Agent:
     ):
         super(Agent, self).__init__()
         self.model = model
+        self.use_mask = use_mask
         self.use_amp = use_amp
         self.config = config
         self.optimizer_regime = optimizer_regime
@@ -54,7 +56,6 @@ class Agent:
 
         if self.use_amp:
             self.scaler = GradScaler()
-        self.criterion = nn.CrossEntropyLoss()
 
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
@@ -82,7 +83,8 @@ class Agent:
             return self.validate_one_epoch(data_regime)
 
     def before_all_tasks(self, train_data_regime):
-        pass
+        self.mask = torch.ones(train_data_regime.total_num_classes, device=self.device).float()
+        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     def before_every_task(self, task_id, train_data_regime):
         self.task_id = task_id
@@ -104,6 +106,11 @@ class Agent:
                 self.model.load_state_dict(
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.model.parameters())
+
+        if self.use_mask:
+            # Create mask so the loss is only used for classes learnt during this task
+            self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self.device).float()
+            self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """
     Forward pass for the current epoch
@@ -232,18 +239,22 @@ class Agent:
                 output = self.model(x)
                 loss = self.criterion(output, y)
 
+            if torch.isnan(loss).any(): # this could trigger if using AMP
+                print("Loss is NaN, stopping training")
+                assert torch.isnan(loss).any()
+
             if self.use_amp:
-                self.scaler.scale(loss).backward()
+                self.scaler.scale(loss).backward(torch.ones_like(loss))
                 self.optimizer_regime.optimizer.synchronize()
                 with self.optimizer_regime.optimizer.skip_synchronize():
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
             else:
-                loss.backward()
+                loss.backward(torch.ones_like(loss))
                 self.optimizer_regime.step()
 
             prec1, prec5 = accuracy(output, y, topk=(1, 5))
-            meters["loss"].update(loss, x.size(0))
+            meters["loss"].update(loss.sum() / self.mask[y].sum(), x.size(0))
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
             meters["num_samples"].update(self.batch_size)
@@ -383,15 +394,16 @@ class Agent:
     def get_timer(self, name):
         return MeasureTime(self.batch, name, self.perf_metrics, self.cuda, not self.measure_performance())
 
-def base(model, use_amp, agent_config, optimizer_regime, cuda, log_level, buffer_cuda, log_buffer, log_interval, batch_metrics):
+def base(model, use_mask, use_amp, agent_config, optimizer_regime, batch_size, cuda, log_level, log_buffer, log_interval, batch_metrics):
     return Agent(
         model,
+        use_mask,
         use_amp,
         agent_config,
         optimizer_regime,
+        batch_size,
         cuda,
         log_level,
-        buffer_cuda,
         log_buffer,
         log_interval,
         batch_metrics
