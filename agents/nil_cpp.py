@@ -149,7 +149,7 @@ class nil_cpp_agent(Agent):
             start_batch_time = time.perf_counter()
 
             for x, y, t in loader:
-                x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+                x, y = move_cuda(x, self.cuda), move_cuda(y.long(), self.cuda)
                 timer.__exit__(None, None, None)
 
                 self.train_one_step(x, y, meters)
