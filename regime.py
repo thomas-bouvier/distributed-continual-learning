@@ -4,7 +4,7 @@ from copy import deepcopy
 from utils.utils import eval_func
 
 
-class Regime(object):
+class Regime:
     """
     Examples for regime:
     1)  "[{'epoch': 0, 'optimizer': 'Adam', 'lr': 1e-3},
@@ -21,7 +21,13 @@ class Regime(object):
         self.current_regime_phase = None
 
     def update(self, epoch, steps):
-        """Adjusts config according to current epoch or steps and regime."""
+        """
+        Adjusts config according to current epoch or steps and regime.
+        
+        Args:
+            epoch (int): Current local epoch (within the current task).
+            steps (int): Current local step number (within the current task).
+        """
         if self.regime is None:
             return False
 
@@ -54,18 +60,10 @@ class Regime(object):
             if steps % decay_steps == 0:
                 decay_rate = config.pop("lr_decay")
                 config["lr"] *= decay_rate ** (steps / decay_steps)
-        elif "lr_rampup" in config and "lr" in config and config["lr_rampup"]:
-            # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
-            # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
-            # the first warmup_epochs epochs.
-            # See https://arxiv.org/abs/1706.02677 for details.
-            warmup_epochs = config.pop("warmup_epochs", 5)
-            lr_epoch = epoch + float(steps + 1) / self.num_steps
-            config["lr"] *= (
-                1.0 / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
-            )
+
         elif "step_lambda" in config:
             config.update(eval_func(config.pop("step_lambda"), steps))
+
         elif "epoch_lambda" in config:
             config.update(eval_func(config.pop("epoch_lambda"), epoch))
 
