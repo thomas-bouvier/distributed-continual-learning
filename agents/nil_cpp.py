@@ -309,8 +309,8 @@ class nil_cpp_agent(Agent):
 
         # Train
         with self.get_timer('train'):
-            self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.batch)
+            self.optimizer_regime.zero_grad()
 
             if self.use_amp:
                 with autocast():
@@ -320,9 +320,7 @@ class nil_cpp_agent(Agent):
                 output = self.model(new_x)
                 loss = self.criterion(output, new_y)
 
-            if torch.isnan(loss).any(): # this could trigger if using AMP
-                print("Loss is NaN, stopping training")
-                assert torch.isnan(loss).any()
+            assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
 
             # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
             total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)

@@ -14,19 +14,21 @@ def resnet50(config, steps_per_epoch):
     # passing num_classes
     model = rn50(**config)
 
-    def rampup_lr(step, steps_per_epoch):
+    def rampup_lr(lr, step, steps_per_epoch, warmup_epochs):
         # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
         # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
         # the first warmup_epochs epochs.
         # See https://arxiv.org/abs/1706.02677 for details.
-        warmup_epochs = config.pop("warmup_epochs", 5)
         lr_epoch = step / steps_per_epoch
-        return 1.0 / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
+        return lr * 1.0 / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
 
     def config_by_step(step):
-        return {
-            'lr': lr * rampup_lr(step, steps_per_epoch=steps_per_epoch)
-        }
+        warmup_epochs = config.pop("warmup_epochs", 5)
+        warmup_steps = warmup_epochs * steps_per_epoch
+
+        if step < warmup_steps:
+            return {'lr': rampup_lr(lr, step, steps_per_epoch, warmup_epochs)}
+        return {}
 
     model.regime = [
         {
@@ -41,4 +43,5 @@ def resnet50(config, steps_per_epoch):
         {"epoch": 60, "lr": lr * 1e-2},
         {"epoch": 80, "lr": lr * 1e-3},
     ]
+
     return model

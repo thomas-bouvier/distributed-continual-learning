@@ -21,36 +21,48 @@ class OptimizerRegime(Regime):
         defaults={},
     ):
         super(OptimizerRegime, self).__init__(regime, defaults)
+        self.parameters = list(model.parameters())
+        self.named_parameters = list(model.named_parameters())
         self.compression = compression
         self.reduction = reduction
         self.batches_per_allreduce = batches_per_allreduce
         self.gradient_predivide_factor = gradient_predivide_factor
         self.use_amp = use_amp
 
-        optimizer = torch.optim.SGD(model.parameters(), lr=0)
+        self.optimizer = None
+        #self.create_optimizer(self.config)
+
+    def create_optimizer(self, config):
+        optim_method = _OPTIMIZERS[config.get("optimizer", "SGD")]
+        if not isinstance(self.optimizer, optim_method):
+            self.create_distributed_optimizer(optim_method(self.parameters, lr=0))
+            logging.debug(
+                f"OPTIMIZER REGIME - setting method = {config['optimizer']}"
+            )
+
+    def create_distributed_optimizer(self, optimizer):
+        # Horovod: broadcast optimizer state and parameters
+        hvd.broadcast_parameters(self.named_parameters, root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
         # Horovod: wrap optimizer with DistributedOptimizer.
         self.optimizer = hvd.DistributedOptimizer(
             optimizer,
-            named_parameters=model.named_parameters(),
+            named_parameters=self.named_parameters,
             compression=self.compression,
             op=self.reduction,
             backward_passes_per_step=self.batches_per_allreduce,
             gradient_predivide_factor=self.gradient_predivide_factor,
         )
 
-        # Horovod: broadcast optimizer state and parameters
-        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
-
     def update(self, epoch, steps):
         """
         Adjusts config according to current epoch or steps and regime.
-        
+
         Args:
             epoch (int): Current local epoch (within the current task).
             steps (int): Current local step number (within the current task).
-        
+
         Returns:
             boolean: whether the regime has been updated.
         """
@@ -69,12 +81,7 @@ class OptimizerRegime(Regime):
 
     def adjust_from_config(self, config):
         if "optimizer" in config:
-            optim_method = _OPTIMIZERS[config.get("optimizer", "SGD")]
-            if not isinstance(self.optimizer, optim_method):
-                self.optimizer = optim_method(self.optimizer.param_groups)
-                logging.debug(
-                    f"OPTIMIZER REGIME - setting method = {config['optimizer']}"
-                )
+            self.create_optimizer(config)
 
         for param_group in self.optimizer.param_groups:
             for key in param_group.keys():

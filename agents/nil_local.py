@@ -382,8 +382,8 @@ class nil_local_agent(Agent):
         training=False,
     ):
         if training:
-            self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.batch)
+            self.optimizer_regime.zero_grad()
 
         # Create batch weights
         w = torch.ones(len(x), device=torch.device(get_device(self.cuda)))

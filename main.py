@@ -447,6 +447,7 @@ class Experiment:
         logging.info(f"Created agent with configuration: {json.dumps(agent_config, indent=2)}")
 
         # Saving an initial checkpoint
+        """
         save_checkpoint(
             {
                 "task": 0,
@@ -460,6 +461,7 @@ class Experiment:
             is_initial=True,
             dummy=hvd.rank() > 0,
         )
+        """
 
         if self.args.tensorboard:
             self.agent.set_tensorboard_writer(

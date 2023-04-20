@@ -228,8 +228,8 @@ class Agent:
     ):
         # Train
         with self.get_timer('train'):
-            self.optimizer_regime.zero_grad()
             self.optimizer_regime.update(self.epoch, self.batch)
+            self.optimizer_regime.zero_grad()
 
             if self.use_amp:
                 with autocast():
@@ -239,9 +239,7 @@ class Agent:
                 output = self.model(x)
                 loss = self.criterion(output, y)
 
-            if torch.isnan(loss).any(): # this could trigger if using AMP
-                print("Loss is NaN, stopping training")
-                assert torch.isnan(loss).any()
+            assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
 
             if self.use_amp:
                 self.scaler.scale(loss).backward(torch.ones_like(loss))
