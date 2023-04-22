@@ -150,9 +150,16 @@ parser.add_argument(
 parser.add_argument(
     "--epochs",
     type=int,
-    default=10,
+    default=25,
     metavar="N",
-    help="number of epochs to train (default: 10)",
+    help="number of epochs to train (default: 25)",
+)
+parser.add_argument(
+    "--warmup-epochs",
+    type=int,
+    default=5,
+    metavar="N",
+    help="number of epochs to warmup LR, if scheduler supports (default: 5)",
 )
 parser.add_argument(
     "--training-only",
@@ -315,6 +322,7 @@ def main():
 
         with open(path.join(save_path, "args.json"), "w") as f:
             json.dump(args.__dict__, f, indent=2)
+            wandb.save(path.join(save_path, "args.json"))
         wandb.config.update(args)
 
         setup_logging(path.join(save_path, "log.txt"),
@@ -366,6 +374,7 @@ class Experiment:
         model_config = {
             "num_classes": total_num_classes,
             "lr": self.args.lr * lr_scaler,
+            "warmup_epochs": self.args.warmup_epochs,
         }
         if self.args.model_config != "":
             model_config = dict(
@@ -579,7 +588,7 @@ class Experiment:
 
                         logging.info(f"EVALUATING on task {test_task_id + 1}..{task_id + 1}")
 
-                        validate_results = self.agent.validate(self.validate_data_regime)
+                        validate_results = self.agent.validate(self.validate_data_regime, previous_task=(test_task_id != task_id))
                         meters[test_task_id]["loss"] = validate_results["loss"]
                         meters[test_task_id]["prec1"] = validate_results["prec1"]
                         meters[test_task_id]["prec5"] = validate_results["prec5"]

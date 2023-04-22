@@ -76,11 +76,11 @@ class Agent:
         return self.train_one_epoch(data_regime)
 
     """Validate on one epoch"""
-    def validate(self, data_regime):
+    def validate(self, data_regime, previous_task=False):
         # switch to evaluate mode
         self.model.eval()
         with torch.no_grad():
-            return self.validate_one_epoch(data_regime)
+            return self.validate_one_epoch(data_regime, previous_task=previous_task)
 
     def before_all_tasks(self, train_data_regime):
         self.mask = torch.ones(train_data_regime.total_num_classes, device=self.device).float()
@@ -257,7 +257,7 @@ class Agent:
             meters["prec5"].update(prec5, x.size(0))
             meters["num_samples"].update(self.batch_size)
 
-    def validate_one_epoch(self, data_regime):
+    def validate_one_epoch(self, data_regime, previous_task=False):
         prefix = "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -299,12 +299,11 @@ class Agent:
                            'accuracy': meters["prec1"].avg.item()})
                 progress.update(1)
 
-        if hvd.rank() == 0:
+        if hvd.rank() == 0 and not previous_task:
             wandb.log({"epoch": self.global_epoch,
                     f"{prefix}_loss": meters["loss"].avg,
                     f"{prefix}_prec1": meters["prec1"].avg,
-                    f"{prefix}_prec5": meters["prec5"].avg,
-                    "lr": self.optimizer_regime.get_lr()[0]})
+                    f"{prefix}_prec5": meters["prec5"].avg})
 
         logging.info(f"epoch time {epoch_time} sec")
 

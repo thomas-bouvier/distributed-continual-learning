@@ -10,6 +10,7 @@ __all__ = ["resnet50"]
 
 def resnet50(config, steps_per_epoch):
     lr = config.pop("lr")
+    warmup_epochs = config.pop("warmup_epochs", 0)
 
     # passing num_classes
     model = rn50(**config)
@@ -23,7 +24,6 @@ def resnet50(config, steps_per_epoch):
         return lr * 1.0 / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
 
     def config_by_step(step):
-        warmup_epochs = config.pop("warmup_epochs", 5)
         warmup_steps = warmup_epochs * steps_per_epoch
 
         if step < warmup_steps:
@@ -39,9 +39,9 @@ def resnet50(config, steps_per_epoch):
             "step_lambda": config_by_step,
         },
         {"epoch": 5, "lr": lr},
-        {"epoch": 30, "lr": lr * 1e-1},
-        {"epoch": 60, "lr": lr * 1e-2},
-        {"epoch": 80, "lr": lr * 1e-3},
+        {"epoch": 18, "lr": lr * 1e-1},
+        {"epoch": 23, "lr": lr * 1e-2},
+        {"epoch": 30, "lr": lr * 1e-3},
     ]
 
     return model

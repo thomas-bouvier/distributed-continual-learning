@@ -203,6 +203,7 @@ def convnext_xlarge(pretrained=False, in_22k=False, **kwargs):
 def convnext(config, steps_per_epoch):
     lr = config.pop("lr") # 4e-3
     lr_min = config.pop("lr_min") # 1e-6
+    warmup_epochs = config.pop("warmup_epochs", 0)
 
     model = convnext_base(**config)
 
@@ -217,7 +218,6 @@ def convnext(config, steps_per_epoch):
         return eta_min + (lr - eta_min) * (1 + math.cos(math.pi * step / T_max)) / 2
 
     def config_by_step(step):
-        warmup_epochs = config.pop("warmup_epochs", 5)
         warmup_steps = warmup_epochs * steps_per_epoch
 
         if step < warmup_steps:

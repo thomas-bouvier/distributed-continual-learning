@@ -336,7 +336,7 @@ class nil_cpp_cat_agent(Agent):
             meters["prec1"].update(prec1, new_x.size(0))
             meters["prec5"].update(prec5, new_x.size(0))
 
-    def validate_one_epoch(self, data_regime):
+    def validate_one_epoch(self, data_regime, previous_task=False):
         prefix = "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -380,13 +380,11 @@ class nil_cpp_cat_agent(Agent):
                            'rehearsal_size': self.current_rehearsal_size})
                 progress.update(1)
 
-        if hvd.rank() == 0:
+        if hvd.rank() == 0 and not previous_task:
             wandb.log({"epoch": self.global_epoch,
                     f"{prefix}_loss": meters["loss"].avg,
                     f"{prefix}_prec1": meters["prec1"].avg,
-                    f"{prefix}_prec5": meters["prec5"].avg,
-                    "lr": self.optimizer_regime.get_lr()[0],
-                    "rehearsal_size": self.current_rehearsal_size})
+                    f"{prefix}_prec5": meters["prec5"].avg})
 
         logging.info(f"epoch time {epoch_time} sec")
 

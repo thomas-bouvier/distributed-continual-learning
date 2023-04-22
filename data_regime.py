@@ -51,7 +51,7 @@ _OTHER_ARGS = {
     "shard"
 }
 
-
+#TODO: plug this class onto augmented mini-batches in Neomem
 class DataRegime(object):
     def __init__(self, hvd, config={}):
         self.hvd = hvd
