@@ -238,21 +238,22 @@ class Agent:
             else:
                 output = self.model(x)
                 loss = self.criterion(output, y)
+            loss = loss.sum() / self.mask[y].sum()
 
             assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
 
             if self.use_amp:
-                self.scaler.scale(loss).backward(torch.ones_like(loss))
+                self.scaler.scale(loss).backward()
                 self.optimizer_regime.optimizer.synchronize()
                 with self.optimizer_regime.optimizer.skip_synchronize():
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
             else:
-                loss.backward(torch.ones_like(loss))
+                loss.backward()
                 self.optimizer_regime.step()
 
             prec1, prec5 = accuracy(output, y, topk=(1, 5))
-            meters["loss"].update(loss.sum() / self.mask[y].sum(), x.size(0))
+            meters["loss"].update(loss)
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
             meters["num_samples"].update(self.batch_size)

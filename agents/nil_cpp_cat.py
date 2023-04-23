@@ -314,7 +314,7 @@ class nil_cpp_cat_agent(Agent):
 
             # https://stackoverflow.com/questions/43451125/pytorch-what-a-re-the-gradient-arguments
             total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)
-            dw = new_w / total_weight
+            dw = new_w / total_weight * self.batch_size * hvd.size() / self.batch_size
 
             if self.use_amp:
                 self.scaler.scale(loss).backward(dw)
@@ -327,14 +327,14 @@ class nil_cpp_cat_agent(Agent):
                 self.optimizer_regime.step()
 
             self.current_rehearsal_size = self.dsl.get_rehearsal_size()
-            meters["num_samples"].update(self.repr_size)
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
             # https://discuss.pytorch.org/t/passing-the-weights-to-crossentropyloss-correctly/14731/10
-            meters["loss"].update(loss.sum() / self.mask[new_y].sum(), new_x.size(0))
+            meters["loss"].update(loss.sum() / self.mask[new_y].sum())
             meters["prec1"].update(prec1, new_x.size(0))
             meters["prec5"].update(prec5, new_x.size(0))
+            meters["num_samples"].update(self.repr_size)
 
     def validate_one_epoch(self, data_regime, previous_task=False):
         prefix = "val"
