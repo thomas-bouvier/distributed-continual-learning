@@ -5,6 +5,9 @@ import json
 import logging
 import numpy as np
 import os
+import signal
+import sys
+import subprocess
 import time
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
@@ -760,5 +763,14 @@ class Experiment:
         )
 
 
+def on_exit(sig, frame):
+    logging.info("Interrupted")
+    wandb.finish()
+    os.system("kill $(ps aux | grep multiprocessing.spawn | grep -v grep | awk '{print $2}')")
+    sys.exit(0)
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, on_exit)
+    signal.signal(signal.SIGTERM, on_exit)
+
     main()
