@@ -44,7 +44,7 @@ parser = argparse.ArgumentParser(
     description="Distributed deep/continual learning with Horovod + PyTorch"
 )
 parser.add_argument(
-    "--yaml_config",
+    "--yaml-config",
     default="config.yaml",
     type=str,
     help="path to yaml file containing training configs",
@@ -167,7 +167,7 @@ parser.add_argument(
 parser.add_argument(
     "--training-only",
     action="store_true",
-    help="don't validate between training phases",
+    help="don't validate after every epoch, only after training on a new task",
 )
 parser.add_argument(
     "--lr",
@@ -339,8 +339,10 @@ def main():
 
     xp = Experiment(args, save_path)
     xp.run()
+    wandb.finish()
 
     logging.info("Done!")
+    sys.exit(0)
 
 
 class Experiment:
@@ -421,11 +423,12 @@ class Experiment:
             # Load checkpoint
             logging.info(f"Loading model {self.args.load_checkpoint}..")
             model.load_state_dict(checkpoint["state_dict"])
-            optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
+            #optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
 
             # Broadcast resume information
             resume_from_task = checkpoint["task"]
             resume_from_epoch = checkpoint["epoch"]
+            logging.info(f"Resuming from task {resume_from_task} epoch {resume_from_epoch}")
 
         self.resume_from_task = hvd.broadcast(torch.tensor(resume_from_task), root_rank=0,
                     name='resume_from_task').item()
@@ -577,7 +580,7 @@ class Experiment:
                 # evaluate on test set
                 before_evaluate_time = time.perf_counter()
                 meters = []
-                if self.args.evaluate:
+                if self.args.evaluate or i_epoch + 1 == self.args.epochs:
                     for test_task_id in range(0, task_id + 1):
                         meters.append({
                             metric: AverageMeter(f"task_{metric}")
@@ -669,10 +672,9 @@ class Experiment:
                         )
                     )
 
-                    if hvd.rank() == 0:
-                        wandb.log({"epoch": self.agent.global_epoch,
-                                   "epoch_time": train_results["time"],
-                                   "img_sec": img_sec * hvd.size()})
+                    wandb.log({"epoch": self.agent.global_epoch,
+                                "epoch_time": train_results["time"],
+                                "img_sec": img_sec * hvd.size()})
                     if self.agent.writer is not None:
                         self.agent.writer.add_scalar(
                             "img_sec", img_sec * hvd.size(), self.agent.global_epoch

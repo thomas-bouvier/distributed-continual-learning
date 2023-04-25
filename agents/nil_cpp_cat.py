@@ -334,7 +334,7 @@ class nil_cpp_cat_agent(Agent):
             meters["loss"].update(loss.sum() / self.mask[new_y].sum())
             meters["prec1"].update(prec1, new_x.size(0))
             meters["prec5"].update(prec5, new_x.size(0))
-            meters["num_samples"].update(self.repr_size)
+            meters["num_samples"].update(self.batch_size + self.repr_size)
 
     def validate_one_epoch(self, data_regime, previous_task=False):
         prefix = "val"
