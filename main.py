@@ -672,27 +672,33 @@ class Experiment:
                         )
                     )
 
-                    wandb.log({"epoch": self.agent.global_epoch,
-                                "epoch_time": train_results["time"],
-                                "img_sec": img_sec * hvd.size()})
-                    if self.agent.writer is not None:
-                        self.agent.writer.add_scalar(
-                            "img_sec", img_sec * hvd.size(), self.agent.global_epoch
-                        )
+                    # DL metrics
                     dl_metrics_values = dict(
                         task_id=task_id,
                         epoch=self.agent.global_epoch,
                         batch=self.agent.global_batch,
                     )
-                    dl_metrics_values.update(
-                        {"train_" + k: v for k, v in train_results.items()}
-                    )
-                    dl_metrics_values.update({"train_img_sec": img_sec})
-                    dl_metrics_values.update(
-                        {"train_total_img_sec": img_sec * hvd.size()}
-                    )
+                    dl_metrics_values.update({
+                        "train_" + k: v for k, v in train_results.items()
+                    })
+                    dl_metrics_values.update({
+                        "train_img_sec": img_sec,
+                        "train_total_img_sec": img_sec * hvd.size(),
+                        "train_cumulated_time": time.perf_counter() - total_start - sum(evaluate_durations),
+                    })
                     dl_metrics.add(**dl_metrics_values)
                     dl_metrics.save()
+
+                    # Time metrics
+                    wandb.log({"epoch": self.agent.global_epoch,
+                               "train_time": dl_metrics_values["train_time"],
+                               "train_total_img_sec": dl_metrics_values["train_total_img_sec"],
+                               "train_cumulated_time": dl_metrics_values["train_cumulated_time"],
+                    })
+                    if self.agent.writer is not None:
+                        self.agent.writer.add_scalar(
+                            "img_sec", img_sec * hvd.size(), self.agent.global_epoch
+                        )
 
                 if self.args.save_all_checkpoints:
                     save_checkpoint(
@@ -743,9 +749,9 @@ class Experiment:
             )
             values = {
                 "total_time": total_time,
-                "total_training_time": total_training_time,
-                "training img_sec": img_sec_mean,
-                "training total_img_sec": img_sec_mean * hvd.size(),
+                "total_train_time": total_training_time,
+                "train_img_sec": img_sec_mean,
+                "train_total_img_sec": img_sec_mean * hvd.size(),
             }
             time_metrics.add(**values)
             time_metrics.save()
