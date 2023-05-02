@@ -8,10 +8,10 @@ __all__ = ["resnet18"]
 
 def resnet18(config):
     optimizer = config.pop('optimizer')
-    lr = config.pop('lr')
-    lr_scaler = config.pop('lr_scaler')
+    lr = config.pop('lr') * hvd.size()
     momentum = config.pop('momentum')
     weight_decay = config.pop('weight_decay')
+    config.pop("num_epochs", None)
 
     # passing num_classes
     model = rn18(**config)

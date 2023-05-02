@@ -14,7 +14,6 @@ class OptimizerRegime(Regime):
         model,
         compression,
         reduction,
-        batches_per_allreduce,
         gradient_predivide_factor,
         regime,
         use_amp,
@@ -25,12 +24,10 @@ class OptimizerRegime(Regime):
         self.named_parameters = list(model.named_parameters())
         self.compression = compression
         self.reduction = reduction
-        self.batches_per_allreduce = batches_per_allreduce
         self.gradient_predivide_factor = gradient_predivide_factor
         self.use_amp = use_amp
 
         self.optimizer = None
-        #self.create_optimizer(self.config)
 
     def create_optimizer(self, config):
         optim_method = _OPTIMIZERS[config.get("optimizer", "SGD")]
@@ -51,7 +48,6 @@ class OptimizerRegime(Regime):
             named_parameters=self.named_parameters,
             compression=self.compression,
             op=self.reduction,
-            backward_passes_per_step=self.batches_per_allreduce,
             gradient_predivide_factor=self.gradient_predivide_factor,
         )
 

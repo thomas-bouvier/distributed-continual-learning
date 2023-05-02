@@ -9,8 +9,9 @@ __all__ = ["resnet50"]
 
 
 def resnet50(config, steps_per_epoch):
-    lr = config.pop("lr")
+    lr = config.pop("lr") * hvd.size()
     warmup_epochs = config.pop("warmup_epochs", 0)
+    config.pop("num_epochs", None)
 
     # passing num_classes
     model = rn50(**config)

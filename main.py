@@ -137,14 +137,6 @@ parser.add_argument(
     help="input batch size for testing (default: same as training)",
 )
 parser.add_argument(
-    "--batches-per-allreduce",
-    type=int,
-    default=1,
-    help="number of batches processed locally before "
-    "executing allreduce across workers; it multiplies "
-    "total batch size.",
-)
-parser.add_argument(
     "--dataloader-workers",
     type=int,
     default=0,
@@ -236,12 +228,6 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="use fp16 compression during allreduce",
-)
-parser.add_argument(
-    "--use-adasum",
-    action="store_true",
-    default=False,
-    help="use adasum algorithm to do reduction",
 )
 parser.add_argument(
     "--gradient-predivide-factor",
@@ -362,24 +348,13 @@ class Experiment:
         self.create_agent(total_num_classes, batch_metrics)
 
     def create_agent(self, total_num_classes, batch_metrics=None):
-        # By default, Adasum doesn't need scaling up learning rate.
-        # For sum/average with gradient Accumulation: scale learning rate by batches_per_allreduce
-        lr_scaler = (
-            self.args.batches_per_allreduce * hvd.size()
-            if not self.args.use_adasum
-            else 1
-        )
-        if self.args.cuda:
-            # If using GPU Adasum allreduce, scale learning rate by local_size.
-            if self.args.use_adasum and hvd.nccl_built():
-                lr_scaler = self.args.batches_per_allreduce * hvd.local_size()
-
         # Creating the model
         model_name = models.__dict__[self.args.model]
         model_config = {
             "num_classes": total_num_classes,
-            "lr": self.args.lr * lr_scaler,
+            "lr": self.args.lr,
             "warmup_epochs": self.args.warmup_epochs,
+            "num_epochs": self.args.epochs,
         }
         if self.args.model_config != "":
             model_config = dict(
@@ -401,8 +376,7 @@ class Experiment:
         optimizer_regime = OptimizerRegime(
             model,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
-            hvd.Adasum if self.args.use_adasum else hvd.Average,
-            self.args.batches_per_allreduce,
+            hvd.Average,
             self.args.gradient_predivide_factor,
             optimizer_regime_dict,
             self.args.use_amp
@@ -451,7 +425,7 @@ class Experiment:
             self.args.use_amp,
             agent_config,
             optimizer_regime,
-            self.args.batch_size * self.args.batches_per_allreduce,
+            self.args.batch_size,
             self.args.cuda,
             self.args.log_level,
             self.args.log_buffer,
@@ -516,7 +490,7 @@ class Experiment:
             {
                 **defaults,
                 "split": "train",
-                "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
+                "batch_size": self.args.batch_size,
             },
         )
         logging.info(f"Created train data regime: {str(self.train_data_regime.config)}")
@@ -528,7 +502,7 @@ class Experiment:
                 "split": "validate",
                 "batch_size": self.args.eval_batch_size
                 if self.args.eval_batch_size > 0
-                else self.args.batch_size * self.args.batches_per_allreduce,
+                else self.args.batch_size,
             },
         )
         logging.info(f"Created test data regime: {str(self.validate_data_regime.config)}")

@@ -70,7 +70,7 @@ class nil_cpp_agent(Agent):
 
     def measure_performance(self):
         #assert self.current_rehearsal_size > 0
-        return self.task_id == 0 and self.global_epoch == 0
+        return self.task_id == 1 and self.epoch == 10
 
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
