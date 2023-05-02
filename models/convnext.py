@@ -23,7 +23,7 @@ def convnext(config, steps_per_epoch):
     model = timm.create_model('convnext_base', pretrained=False, drop_rate=0.5, **config)
 
     def rampup_lr(lr, step, steps_per_epoch, warmup_epochs):
-        return lr * step / steps_per_epoch * warmup_epochs
+        return lr * step / (steps_per_epoch * warmup_epochs)
 
     def cosine_anneal_lr(lr, step, T_max, eta_min=1e-6):
         """
