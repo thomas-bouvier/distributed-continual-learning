@@ -24,7 +24,7 @@ class AugmentedMinibatch:
             batch_size + num_representatives, *shape, device=device)
         self.y = torch.randint(high=1000, size=(
             batch_size + num_representatives,), device=device)
-        self.w = torch.zeros(
+        self.w = torch.ones(
             batch_size + num_representatives, device=device)
 
 
@@ -75,7 +75,7 @@ class nil_cpp_agent(Agent):
     def before_all_tasks(self, train_data_regime):
         super().before_all_tasks(train_data_regime)
 
-        x, y, _ = next(iter(train_data_regime.get_loader()))
+        x, y, _ = next(iter(train_data_regime.get_loader(0)))
         shape = x[0].size()
 
         engine = neomem.EngineLoader(self.provider,
@@ -101,32 +101,10 @@ class nil_cpp_agent(Agent):
                                   self.next_minibatches[0].w)
 
     def before_every_task(self, task_id, train_data_regime):
-        self.task_id = task_id
-        self.batch = 0
-
-        # Distribute the data
-        train_data_regime.get_loader(True)
-
-        if self.best_model is not None:
-            logging.debug(
-                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
-            )
-            self.model.load_state_dict(self.best_model)
-            self.minimal_eval_loss = float("inf")
+        super().before_every_task(task_id, train_data_regime)
 
         if task_id > 0:
             self.dsl.enable_augmentation(True)
-
-            if self.config.get("reset_state_dict", False):
-                logging.debug("Resetting model internal state..")
-                self.model.load_state_dict(
-                    copy.deepcopy(self.initial_snapshot))
-            self.optimizer_regime.reset(self.model.parameters())
-
-        if self.use_mask:
-            # Create mask so the loss is only used for classes learnt during this task
-            self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self.device).float()
-            self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     """Forward pass for the current epoch"""
     def train_one_epoch(self, data_regime):
@@ -137,7 +115,7 @@ class nil_cpp_agent(Agent):
         }
         epoch_time = 0
         last_batch_time = 0
-        loader = data_regime.get_loader()
+        loader = data_regime.get_loader(self.task_id)
 
         enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
         with tqdm(total=len(loader),
@@ -148,11 +126,17 @@ class nil_cpp_agent(Agent):
             timer.__enter__()
             start_batch_time = time.perf_counter()
 
-            for x, y, t in loader:
+            for x, y, _ in loader:
                 x, y = move_cuda(x, self.cuda), move_cuda(y.long(), self.cuda)
                 timer.__exit__(None, None, None)
 
                 self.train_one_step(x, y, meters)
+
+                if hvd.rank() == 0 and False:
+                    captions = []
+                    for label in y:
+                        captions.append(f"y={label.item()}")
+                    display(f"train_batch_{self.task_id}_{self.epoch}_{self.batch}", x, captions=captions)
 
                 last_batch_time = time.perf_counter() - start_batch_time
                 epoch_time += last_batch_time
@@ -176,7 +160,7 @@ class nil_cpp_agent(Agent):
                             representatives_copy_time=metrics[4],
                             buffer_update_time=metrics[5],
                             aug_size=self.aug_size,
-                            rehearsal_size=self.current_rehearsal_size,
+                            local_rehearsal_size=self.current_rehearsal_size,
                         )
                         self.batch_metrics.add(**batch_metrics_values)
                         self.batch_metrics.save()
@@ -200,7 +184,7 @@ class nil_cpp_agent(Agent):
                         metrics = self.perf_metrics.get(self.batch-1)
                         logging.debug(f"batch {self.batch} time {last_batch_time} sec")
                         logging.debug(
-                            f"\t[C++] rehearsal_size {self.current_rehearsal_size}")
+                            f"\t[C++] local_rehearsal_size {self.current_rehearsal_size}")
                         logging.debug(
                             f"\t[Python] batch wait time {metrics.get('wait', 0)} sec ({metrics.get('wait', 0)*100/last_batch_time}%)")
                         logging.debug(
@@ -226,7 +210,7 @@ class nil_cpp_agent(Agent):
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
                            'accuracy': meters["prec1"].avg.item(),
                            'augmented': self.aug_size - self.batch_size,
-                           'rehearsal_size': self.current_rehearsal_size})
+                           'local_rehearsal_size': self.current_rehearsal_size})
                 progress.update(1)
 
                 self.global_batch += 1
@@ -242,14 +226,14 @@ class nil_cpp_agent(Agent):
                     f"{prefix}_prec1": meters["prec1"].avg,
                     f"{prefix}_prec5": meters["prec5"].avg,
                     "lr": self.optimizer_regime.get_lr()[0],
-                    "rehearsal_size": self.current_rehearsal_size})
+                    "local_rehearsal_size": self.current_rehearsal_size})
 
         self.global_epoch += 1
         self.epoch += 1
 
         logging.info(f"\nCUMULATED VALUES:")
         logging.info(
-            f"\trehearsal_size {self.current_rehearsal_size}")
+            f"\tlocal_rehearsal_size {self.current_rehearsal_size}")
         logging.info(f"epoch time {epoch_time} sec")
         """
         logging.info(
@@ -300,7 +284,7 @@ class nil_cpp_agent(Agent):
                 captions = []
                 for label, weight in zip(new_y[-repr_size:], new_w[-repr_size:]):
                     captions.append(f"y={label.item()} w={weight.item()}")
-                display(f"aug_batch_{self.epoch}_{self.batch}", new_x[-repr_size:], captions=captions)
+                display(f"aug_batch_{self.task_id}_{self.epoch}_{self.batch}", new_x[-repr_size:], captions=captions)
 
         # In-advance preparation of next minibatch
         with self.get_timer('accumulate'):
@@ -345,7 +329,9 @@ class nil_cpp_agent(Agent):
             meters["prec5"].update(prec5, new_x.size(0))
             meters["num_samples"].update(self.aug_size)
 
-    def validate_one_epoch(self, data_regime, previous_task=False):
+    def validate_one_epoch(self, data_regime, task_id):
+        previous_task = task_id != self.task_id
+
         prefix = "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -353,19 +339,25 @@ class nil_cpp_agent(Agent):
         }
         epoch_time = 0
         last_batch_time = 0
-        loader = data_regime.get_loader()
+        loader = data_regime.get_loader(task_id)
 
         criterion = torch.nn.CrossEntropyLoss()
 
         enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
         with tqdm(total=len(loader),
-              desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch + 1}",
+              desc=f"Task #{self.task_id + 1} {prefix} epoch #{self.epoch}",
               disable=not enable_tqdm
         ) as progress:
             start_batch_time = time.perf_counter()
 
-            for x, y, t in loader:
+            for x, y, _ in loader:
                 x, y = move_cuda(x, self.cuda), move_cuda(y, self.cuda)
+
+                if hvd.rank() == 0 and False:
+                    captions = []
+                    for label in y:
+                        captions.append(f"y={label.item()}")
+                    display(f"val_batch_{self.task_id}_{task_id}_{self.epoch}_{self.batch}", x, captions=captions)
 
                 if self.use_amp:
                     with autocast():
@@ -386,7 +378,7 @@ class nil_cpp_agent(Agent):
                 progress.set_postfix({'loss': meters["loss"].avg.item(),
                            'accuracy': meters["prec1"].avg.item(),
                            'augmented': self.aug_size - self.batch_size,
-                           'rehearsal_size': self.current_rehearsal_size})
+                           'local_rehearsal_size': self.current_rehearsal_size})
                 progress.update(1)
 
         if hvd.rank() == 0 and not previous_task:

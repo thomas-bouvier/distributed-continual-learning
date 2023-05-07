@@ -1,6 +1,12 @@
 # distributed-continual-learning
 
-Distributed continual learning with Horovod + PyTorch.
+This is a PyTorch + Horovod implementation of the continual learning experiments with deep neural networks described in the following article:
+
+* [Three types of incremental learning](https://www.nature.com/articles/s42256-022-00568-3) (2022, *Nature Machine Intelligence*)
+
+Continual learning approaches implemented here are based on rehearsal, which is delegated in a separate high-performance C++ backend [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/neomem).
+
+This repository supports experiments in the academic continual learning setting, whereby a classification-based problem is split up into multiple, non-overlapping tasks that must be learned sequentially.
 
 ## Installation
 

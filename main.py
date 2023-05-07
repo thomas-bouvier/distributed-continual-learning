@@ -359,7 +359,7 @@ class Experiment:
         if self.args.model_config != "":
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
-        model = model_name(model_config, len(self.train_data_regime.get_loader()))
+        model = model_name(model_config, len(self.train_data_regime.get_loader(0)))
         logging.info(
             f"Created model {self.args.model} with configuration: {json.dumps(model_config, indent=2)}"
         )
@@ -538,7 +538,6 @@ class Experiment:
 
             task_metrics = {"task_id": task_id, "test_tasks_metrics": [], "task_averages": []}
 
-            self.train_data_regime.set_task_id(task_id)
             self.agent.before_every_task(task_id, self.train_data_regime)
 
             for i_epoch in range(self.resume_from_epoch, self.args.epochs):
@@ -562,13 +561,11 @@ class Experiment:
                         })
 
                     for test_task_id in range(0, task_id + 1):
-                        self.validate_data_regime.set_task_id(test_task_id)
-                        self.validate_data_regime.get_loader(True)
                         self.validate_data_regime.set_epoch(i_epoch)
 
                         logging.info(f"EVALUATING on task {test_task_id + 1}..{task_id + 1}")
 
-                        validate_results = self.agent.validate(self.validate_data_regime, previous_task=(test_task_id != task_id))
+                        validate_results = self.agent.validate(self.validate_data_regime, test_task_id)
                         meters[test_task_id]["loss"] = validate_results["loss"]
                         meters[test_task_id]["prec1"] = validate_results["prec1"]
                         meters[test_task_id]["prec5"] = validate_results["prec5"]

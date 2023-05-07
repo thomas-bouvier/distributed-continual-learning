@@ -52,20 +52,23 @@ _OTHER_ARGS = {
 }
 
 #TODO: plug this class onto augmented mini-batches in Neomem
-class DataRegime(object):
+class DataRegime:
     def __init__(self, hvd, config={}):
         self.hvd = hvd
         self.config = config
         self.epoch = 0
-        self.task_id = 0
+        self.task_id = -1
         self.tasksets = None
         self.total_num_classes = 0
         self.concat_taskset = None
         self.continual_test_taskset = []
         self.sampler = None
         self.loader = None
+        self.data_len = 0
         self.classes_mask = None
+
         self.previous_classes_mask = None
+        self.previous_loaders = {}
 
         self.config = self.get_config(config)
         if self.config["others"].get("use_dali", False):
@@ -76,72 +79,47 @@ class DataRegime(object):
                 raise ImportError(
                     "Please install NVIDIA DALI to run this app.")
 
-        self.get_data(True)
+        self.prepare_tasksets()
+        self.get_data()
 
-    """Get the current taskset"""
-    def get_data(self, force_update=False):
-        if force_update:
-            self._transform = get_transform(training=self.config["data"].get(
-                "split", True) == "train", **self.config["transform"])
-            self.config["data"].setdefault("transform", self._transform)
-            self._data = self.get_taskset()
-            logging.debug(
-                f"DATA LOADER {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(self._data)}"
-            )
+    def prepare_tasksets(self):
+        dataset = get_dataset(**self.config["data"])
 
-        return self._data
+        if self.config["data"].get("continual", False):
+            continual_config = self.config["continual"]
+            if continual_config.get("scenario") == "class":
+                ii = continual_config.get("initial_increment")
+                i = continual_config.get("increment")
 
-    def get_loader(self, force_update=False):
-        if self.loader is None or force_update:
-            # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
-            # issues with Infiniband implementations that are not fork-safe
-            if (
-                self.config["loader"]["num_workers"] > 0
-                and hasattr(mp, "_supports_context")
-                and mp._supports_context
-                and "forkserver" in mp.get_all_start_methods()
-            ):
-                self.config["loader"]["multiprocessing_context"] = "forkserver"
-
-            if self.config["others"].get("use_dali", False):
-                if self.loader is not None:
-                    self.loader.release()
-
-                precision = 16 if self.config["others"].get(
-                    "fp16_dali", False) else 32
-                self.loader = DaliDataLoader(
-                    self._data, self.task_id,
-                    self.config["others"].get("use_dali_cuda", False),
-                    device_id=hvd.local_rank(), shard_id=hvd.rank(),
-                    num_shards=hvd.size(), precision=precision,
-                    training=self.config["data"].get("split", True) == "train",
-                    **self.config["loader"])
-                logging.debug(
-                    f"DATA LOADER {self.config['data']['split']} - data distributed using DALI")
+                self.tasksets = ClassIncremental(
+                    dataset,
+                    initial_increment=ii,
+                    increment=i,
+                    transformations=[self.config["transform"]],
+                )
             else:
-                if self.config["others"].get("distributed", False):
-                    if self.config["others"].get("shard", False):
-                        self.config["loader"]["sampler"] = MyDistributedSampler(
-                            self._data, num_replicas=hvd.size(), rank=hvd.rank()
-                        )
-                    else:
-                        self.config["loader"]["sampler"] = DistributedSampler(
-                            self._data, num_replicas=hvd.size(), rank=hvd.rank()
-                        )
-                    self.sampler = self.config["loader"]["sampler"]
-                self.config["loader"]["shuffle"] = self.sampler is None
-                self.loader = DataLoader(self._data, **self.config["loader"])
-                logging.debug(
-                    f"DATA LOADER {self.config['data']['split']} - data distributed using sampler")
+                self.tasksets = InstanceIncremental(
+                    dataset,
+                    nb_tasks=continual_config.get("num_tasks"),
+                    transformations=[self.config["transform"]],
+                )
+        else:
+            self.tasksets = [
+                dataset.to_taskset(
+                    trsf=[self.config["transform"]]
+                )
+            ]
+        logging.info(f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets")
+        self.total_num_classes = len(dataset.list_classes)
 
-        return self.loader
 
-    """Get the taskset refered by self.task_id"""
+    """
+    Get the taskset refered to by self.task_id, with all previous data
+    accumulated if enabled by parameter `concatenate_tasksets`.
+    """
     def get_taskset(self):
-        if self.tasksets is None:
-            self.prepare_tasksets()
-
         current_taskset = self.tasksets[self.task_id]
+
         if self.config["data"].get("split") == "train":
             if self.config["continual"].get("concatenate_tasksets", False):
                 if self.concat_taskset is None:
@@ -167,48 +145,98 @@ class DataRegime(object):
                         data_type=current_taskset.data_type,
                     )
                 return self.concat_taskset
-        """
-        else:
-            if self.config['continual'].get('scenario', 'class'):
-                self.continual_test_taskset.append(current_taskset)
-                return self.continual_test_taskset
-        """
+
+        # Update the mask of observed classes so far
         mask = np.zeros(self.total_num_classes, dtype=bool)
         mask[current_taskset.get_classes()] = True
         if self.previous_classes_mask is None:
             self.previous_classes_mask = mask.copy()
         self.previous_classes_mask[mask] = True
         self.classes_mask = mask
+
         return current_taskset
 
-    def prepare_tasksets(self):
-        dataset = get_dataset(**self.config["data"])
-        if self.config["data"].get("continual", False):
-            continual_config = self.config["continual"]
-            if continual_config.get("scenario") == "class":
-                ii = continual_config.get("initial_increment")
-                i = continual_config.get("increment")
 
-                self.tasksets = ClassIncremental(
-                    dataset,
-                    initial_increment=ii,
-                    increment=i,
-                    transformations=[self.config["data"]["transform"]],
-                )
-            else:
-                self.tasksets = InstanceIncremental(
-                    dataset,
-                    nb_tasks=continual_config.get("num_tasks"),
-                    transformations=[self.config["data"]["transform"]],
-                )
+    """Get the current taskset"""
+    def get_data(self):
+        self._transform = get_transform(training=self.config["data"].get(
+            "split", True) == "train", **self.config["transform"])
+        self.config["data"].setdefault("transform", self._transform)
+        data = self.get_taskset()
+        logging.debug(
+            f"DATA LOADER {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(data)}"
+        )
+
+        return data
+
+    """
+    Get the loader refered to by self.task_id
+    """
+    def get_loader(self, task_id):
+        if task_id == self.task_id:
+            return self.loader
+
+        if task_id in self.previous_loaders.keys():
+            self.data_len = self.previous_loaders[task_id][1]
+            return self.previous_loaders[task_id][0]
+
+        logging.debug(
+            f"DATA LOADER {self.config['data']['split']} - set task id: {task_id}"
+        )
+        self.task_id = task_id
+
+        data = self.get_data()
+        self.data_len = len(data)
+
+        # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
+        # issues with Infiniband implementations that are not fork-safe
+        if (
+            self.config["loader"]["num_workers"] > 0
+            and hasattr(mp, "_supports_context")
+            and mp._supports_context
+            and "forkserver" in mp.get_all_start_methods()
+        ):
+            self.config["loader"]["multiprocessing_context"] = "forkserver"
+
+        if self.config["others"].get("use_dali", False):
+            # If the current data regime is used for training, we can deallocate
+            # the current data loader
+            if self.config["data"].get("split") == "train" and self.loader is not None:
+                self.loader.release()
+
+            precision = 16 if self.config["others"].get(
+                "fp16_dali", False) else 32
+            self.loader = DaliDataLoader(
+                data, self.task_id,
+                self.config["others"].get("use_dali_cuda", False),
+                device_id=hvd.local_rank(), shard_id=hvd.rank(),
+                num_shards=hvd.size(), precision=precision,
+                training=self.config["data"].get("split", True) == "train",
+                **self.config["loader"])
+            logging.debug(
+                f"DATA LOADER {self.config['data']['split']} - data distributed using DALI")
+
         else:
-            self.tasksets = [
-                dataset.to_taskset(
-                    trsf=[self.config["data"]["transform"]]
-                )
-            ]
-        logging.info(f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets")
-        self.total_num_classes = len(dataset.list_classes)
+            if self.config["others"].get("distributed", False):
+                if self.config["others"].get("shard", False):
+                    self.config["loader"]["sampler"] = MyDistributedSampler(
+                        data, num_replicas=hvd.size(), rank=hvd.rank()
+                    )
+                else:
+                    self.config["loader"]["sampler"] = DistributedSampler(
+                        data, num_replicas=hvd.size(), rank=hvd.rank()
+                    )
+                self.sampler = self.config["loader"]["sampler"]
+            self.config["loader"]["shuffle"] = self.sampler is None
+            self.loader = DataLoader(data, **self.config["loader"])
+            logging.debug(
+                f"DATA LOADER {self.config['data']['split']} - data distributed using sampler")
+
+        if self.config["data"].get("split") == "validate":
+            self.previous_loaders[self.task_id] = (self.loader, self.data_len)
+        
+        return self.loader
+
 
     def set_epoch(self, epoch):
         logging.debug(
@@ -218,22 +246,6 @@ class DataRegime(object):
         if self.sampler is not None and hasattr(self.sampler, "set_epoch"):
             self.sampler.set_epoch(epoch)
 
-    def set_task_id(self, task_id):
-        logging.debug(
-            f"DATA LOADER {self.config['data']['split']} - set task id: {task_id}"
-        )
-        if self.task_id != task_id:
-            self.task_id = task_id
-            self.get_data(True)
-
-    def __len__(self):
-        return len(self._data) or 1
-
-    def __str__(self):
-        return str(self.config)
-
-    def __repr__(self):
-        return str(self.config)
 
     def get_config(self, config):
         loader_config = {k: v for k,

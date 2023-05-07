@@ -78,30 +78,10 @@ class nil_agent(Agent):
         self.global_counts = None
 
     def before_every_task(self, task_id, train_data_regime):
-        self.task_id = task_id
-        self.batch = 0
+        super().before_every_task(task_id, train_data_regime)
+
         if task_id > self.highest_task_so_far:
             self.highest_task_so_far = task_id
-
-        # Distribute the data
-        train_data_regime.get_loader(True)
-
-        if self.best_model is not None:
-            logging.debug(
-                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
-            )
-            self.model.load_state_dict(self.best_model)
-            self.minimal_eval_loss = float("inf")
-        if task_id > 0:
-            if self.config.get("reset_state_dict", False):
-                logging.debug("Resetting model internal state..")
-                self.model.load_state_dict(
-                    copy.deepcopy(self.initial_snapshot))
-            self.optimizer_regime.reset(self.model.parameters())
-        
-        # Create mask so the loss is only used for classes learnt during this task
-        self.mask = torch.tensor(train_data_regime.classes_mask, device=self.device).float()
-        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
     def get_samples(self):
         """Select or retrieves the representatives from the data

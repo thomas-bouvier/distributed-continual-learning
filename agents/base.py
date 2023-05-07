@@ -76,11 +76,11 @@ class Agent:
         return self.train_one_epoch(data_regime)
 
     """Validate on one epoch"""
-    def validate(self, data_regime, previous_task=False):
+    def validate(self, data_regime, task_id):
         # switch to evaluate mode
         self.model.eval()
         with torch.no_grad():
-            return self.validate_one_epoch(data_regime, previous_task=previous_task)
+            return self.validate_one_epoch(data_regime, task_id)
 
     def before_all_tasks(self, train_data_regime):
         self.mask = torch.ones(train_data_regime.total_num_classes, device=self.device).float()
@@ -91,7 +91,7 @@ class Agent:
         self.batch = 0
 
         # Distribute the data
-        train_data_regime.get_loader(True)
+        train_data_regime.get_loader(task_id)
 
         if self.best_model is not None:
             logging.debug(
@@ -123,7 +123,7 @@ class Agent:
         }
         epoch_time = 0
         last_batch_time = 0
-        loader = data_regime.get_loader()
+        loader = data_regime.get_loader(self.task_id)
 
         enable_tqdm = self.log_level in ('info') and hvd.rank() == 0
         with tqdm(total=len(loader),
@@ -258,7 +258,9 @@ class Agent:
             meters["prec5"].update(prec5, x.size(0))
             meters["num_samples"].update(self.batch_size)
 
-    def validate_one_epoch(self, data_regime, previous_task=False):
+    def validate_one_epoch(self, data_regime, task_id):
+        previous_task = task_id != self.task_id
+
         prefix = "val"
         meters = {
             metric: AverageMeter(f"{prefix}_{metric}")
@@ -266,7 +268,7 @@ class Agent:
         }
         epoch_time = 0
         last_batch_time = 0
-        loader = data_regime.get_loader()
+        loader = data_regime.get_loader(task_id)
 
         criterion = torch.nn.CrossEntropyLoss()
 
