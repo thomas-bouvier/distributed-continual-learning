@@ -60,6 +60,7 @@ class DataRegime:
         self.task_id = -1
         self.tasksets = None
         self.total_num_classes = 0
+        self.total_num_samples = 0
         self.concat_taskset = None
         self.continual_test_taskset = []
         self.sampler = None
@@ -84,6 +85,7 @@ class DataRegime:
 
     def prepare_tasksets(self):
         dataset = get_dataset(**self.config["data"])
+        self.total_num_samples = len(dataset.get_data()[0])
 
         if self.config["data"].get("continual", False):
             continual_config = self.config["continual"]

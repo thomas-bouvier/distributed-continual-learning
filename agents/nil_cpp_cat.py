@@ -56,9 +56,9 @@ class nil_cpp_cat_agent(Agent):
             state_dict,
         )
 
-        self.rehearsal_size = config.get("rehearsal_size", 100)
-        self.num_candidates = config.get("num_candidates", 20)
-        self.num_representatives = config.get("num_representatives", 20)
+        self.rehearsal_size = config.get("rehearsal_size", 16)
+        self.num_candidates = config.get("num_candidates", 8)
+        self.num_representatives = config.get("num_representatives", 8)
         self.provider = config.get('provider', 'na+sm')
         self.discover_endpoints = config.get('discover_endpoints', True)
         self.cuda_rdma = config.get('cuda_rdma', False)
