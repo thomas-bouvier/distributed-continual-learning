@@ -1,33 +1,46 @@
 import math
 import torch.nn as nn
-
-from torchvision.models import resnet18 as rn18
+import torchvision.models as models
 
 __all__ = ["resnet18"]
 
 
 def resnet18(config):
-    optimizer = config.pop('optimizer')
-    lr = config.pop('lr') * hvd.size()
-    momentum = config.pop('momentum')
-    weight_decay = config.pop('weight_decay')
-    config.pop("num_epochs", None)
+    lr = config.pop("lr") * hvd.size()
+    config.pop("warmup_epochs")
+    config.pop("num_epochs")
+    num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
-    model = rn18(**config)
-    lr = lr * lr_scaler
+    model = models.resnet18(**config)
+
+    def rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs):
+        # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
+        # accuracy. Scale the learning rate `lr = base_lr` ---> `lr = base_lr * hvd.size()` during
+        # the first warmup_epochs epochs.
+        # See https://arxiv.org/abs/1706.02677 for details.
+        lr_epoch = step / num_steps_per_epoch
+        return lr * 1.0 / hvd.size() * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
+
+    def config_by_step(step):
+        warmup_steps = warmup_epochs * num_steps_per_epoch
+
+        if step < warmup_steps:
+            return {'lr': rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs)}
+        return {}
+
     model.regime = [
         {
             "epoch": 0,
             "optimizer": "SGD",
-            "lr": lr,
-            "lr_rampup": True,
-            "momentum": 0.875,
-            "weight_decay": 3.0517578125e-5,
+            "momentum": 0.9,
+            "weight_decay": 0.00005,
+            "step_lambda": config_by_step,
         },
-        {"epoch": 5, "lr": lr * 1.0, "lr_rampup": False},
-        {"epoch": 30, "lr": lr * 1e-1, "weight_decay": 0},
-        {"epoch": 45, "lr": lr * 1e-2},
-        {"epoch": 80, "lr": lr * 1e-3},
+        {"epoch": warmup_epochs, "lr": lr},
+        {"epoch": 18, "lr": lr * 1e-1},
+        {"epoch": 23, "lr": lr * 1e-2},
+        {"epoch": 30, "lr": lr * 1e-3},
     ]
+
     return model

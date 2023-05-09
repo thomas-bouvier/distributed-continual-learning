@@ -251,7 +251,9 @@ class nil_cpp_cat_agent(Agent):
         # Get the representatives
         with self.get_timer('wait', previous_iteration=True):
             self.repr_size = self.dsl.wait()
-            logging.debug(f"Received {self.repr_size} samples from other nodes")
+            n = self.repr_size
+            if n > 0:
+                logging.debug(f"Received {n} samples from other nodes")
 
             if self.measure_performance():
                 cpp_metrics = self.dsl.get_metrics(self.batch)

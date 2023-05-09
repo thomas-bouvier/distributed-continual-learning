@@ -356,11 +356,12 @@ class Experiment:
             "lr": self.args.lr,
             "warmup_epochs": self.args.warmup_epochs,
             "num_epochs": self.args.epochs,
+            "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
         }
         if self.args.model_config != "":
             model_config = dict(
                 model_config, **literal_eval(self.args.model_config))
-        model = model_name(model_config, len(self.train_data_regime.get_loader(0)))
+        model = model_name(model_config)
         logging.info(
             f"Created model {self.args.model} with configuration: {json.dumps(model_config, indent=2)}"
         )

@@ -4,6 +4,7 @@ filelock
 horovod[pytorch]
 ruamel.yaml
 tensorboard
+timm
 torch
 torchvision
 tqdm

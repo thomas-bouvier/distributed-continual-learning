@@ -67,6 +67,9 @@ class Regime:
         elif "epoch_lambda" in config:
             config.update(eval_func(config.pop("epoch_lambda"), epoch))
 
+        if 'execute' in config:
+            config.pop('execute')()
+
         if config == self.config:
             return False
         else:

@@ -265,7 +265,9 @@ class nil_cpp_agent(Agent):
         # Get the representatives
         with self.get_timer('wait', previous_iteration=True):
             self.aug_size = self.dsl.wait()
-            logging.debug(f"Received {self.aug_size - self.batch_size} samples from other nodes")
+            n = self.aug_size - self.batch_size
+            if n > 0:
+                logging.debug(f"Received {n} samples from other nodes")
 
             if self.measure_performance():
                 cpp_metrics = self.dsl.get_metrics(self.batch)
