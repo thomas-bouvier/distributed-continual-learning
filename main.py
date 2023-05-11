@@ -90,7 +90,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--agent-config",
-    default="",
+    default="{}",
     help="additional agent configuration"
 )
 parser.add_argument(
@@ -417,15 +417,12 @@ class Experiment:
             if self.args.agent is not None
             else agents.base
         )
-        if self.args.agent_config != "":
+        agent_config = literal_eval(self.args.agent_config)
+        if bool(agent_config):
             rehearsal_ratio = literal_eval(self.args.agent_config).get("rehearsal_ratio", 30)
-            agent_config = {
+            agent_config |= {
                 "rehearsal_size": math.floor(self.train_data_regime.total_num_samples * rehearsal_ratio / 100 / total_num_classes / hvd.size())
             }
-            agent_config = dict(
-                agent_config,
-                **literal_eval(self.args.agent_config)
-            )
         self.agent = agent(
             model,
             self.args.use_mask,

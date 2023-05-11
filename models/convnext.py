@@ -15,8 +15,8 @@ __all__ = ["convnext"]
 
 
 def convnext(config):
-    lr = config.pop("lr") # 4e-3
-    lr_min = config.pop("lr_min") # 1e-6
+    lr = config.pop("lr") * hvd.size() # 4e-3 * world_size
+    lr_min = config.pop("lr_min") * hvd.size() # 1e-6 * world_size
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
