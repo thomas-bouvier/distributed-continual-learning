@@ -1,4 +1,7 @@
-def validate_one_epoch(self, data_regime, task_id):
+def evaluate_one_epoch(model, data_regime, task_id):
+    model.eval()
+
+    with torch.no_grad():
         previous_task = task_id != self.task_id
 
         prefix = "val"
@@ -30,10 +33,10 @@ def validate_one_epoch(self, data_regime, task_id):
 
                 if self.use_amp:
                     with autocast():
-                        output = self.model(x)
+                        output = model(x)
                         loss = criterion(output, y)
                 else:
-                    output = self.model(x)
+                    output = model(x)
                     loss = criterion(output, y)
 
                 prec1, prec5 = accuracy(output, y, topk=(1, 5))

@@ -1,5 +1,7 @@
 """Forward pass for the current epoch"""
 def train_one_epoch(model, data_regime):
+    model.train()
+
     prefix = "train"
     meters = {
         metric: AverageMeter(f"{prefix}_{metric}")
