@@ -1,6 +1,6 @@
 import math
 import torch.nn as nn
-import torchvision.models as models
+import timm
 
 __all__ = ["resnet18"]
 
@@ -12,7 +12,7 @@ def resnet18(config):
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
-    model = models.resnet18(**config)
+    model = timm.create_model("resnet18", **config)
 
     def rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs):
         # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final

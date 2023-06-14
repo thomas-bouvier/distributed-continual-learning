@@ -349,6 +349,12 @@ class Experiment:
         self.create_agent(total_num_classes, batch_metrics)
 
     def create_agent(self, total_num_classes, batch_metrics=None):
+        #-------------------------------------------------------------------------------------------------#
+
+        #-----------------#
+        #----- MODEL -----#
+        #-----------------#
+
         # Creating the model
         model_name = models.__dict__[self.args.model]
         model_config = {
@@ -384,6 +390,12 @@ class Experiment:
             self.args.use_amp
         )
 
+        #-------------------------------------------------------------------------------------------------#
+
+        #----------------------#
+        #----- CHECKPOINT -----#
+        #----------------------#
+
         # Loading the checkpoint if given
         resume_from_task = 0
         resume_from_epoch = 0
@@ -410,6 +422,12 @@ class Experiment:
                     name='resume_from_task').item()
         self.resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
                     name='resume_from_epoch').item()
+
+        #-------------------------------------------------------------------------------------------------#
+
+        #-----------------#
+        #----- AGENT -----#
+        #-----------------#
 
         # Creating the agent
         agent = (
@@ -456,12 +474,6 @@ class Experiment:
         )
         """
 
-        if self.args.tensorboard:
-            self.agent.set_tensorboard_writer(
-                save_path=self.save_path,
-                images=self.args.buffer_tensorboard,
-                dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
-            )
 
     def prepare_dataset(self):
         tasksets_config = {"continual": bool(self.args.tasksets_config)}

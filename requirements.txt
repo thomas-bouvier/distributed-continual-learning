@@ -2,11 +2,11 @@ bokeh
 continuum
 filelock
 horovod[pytorch]
+nvtx
 ruamel.yaml
 tensorboard
 timm
 torch
-torchvision
 tqdm
 torchsummary
 pandas
