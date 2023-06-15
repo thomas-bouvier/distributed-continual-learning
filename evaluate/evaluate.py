@@ -70,3 +70,42 @@ def evaluate_one_epoch(model, data_regime, task_id):
         meters["batch"] = self.batch
 
         return meters
+
+
+    def validate(self):
+        tot_val_loss = 0.0
+        val_loss_ph = 0.0
+        hvd_val_loss = Metric('val_loss')
+        with tqdm(total=len(self.data_regime.get_validate_loader()),
+                  desc='Validate Epoch     #{}'.format(self.epoch + 1)) as bar:
+            for ft_images, phs, t in self.data_regime.get_validate_loader():
+                ft_images = ft_images.to(self.device)
+                phs = phs.to(self.device)
+                pred_phs = self.model(ft_images)
+
+                val_loss_p = self.criterion(
+                    pred_phs, phs, len(self.data_regime.validate_data))
+                val_loss = val_loss_p
+
+                # try complex valued diff
+                #diff_real = pred_amps * torch.cos(pred_phs) - amps * torch.cos(phs)
+                #diff_imag = pred_amps * torch.sin(pred_phs) - amps * torch.sin(phs)
+                #val_loss = torch.mean(torch.abs(diff_real + diff_imag))
+                tot_val_loss += val_loss.detach().item()
+                val_loss_ph += val_loss_p.detach().item()
+                hvd_val_loss.update(val_loss_p)
+
+                bar.set_postfix({'loss': val_loss.detach().item()})
+                bar.update(1)
+
+        self.metrics['val_losses'].append([tot_val_loss, hvd_val_loss.avg])
+
+        self.saveMetrics(self.metrics, self.output_path, self.output_suffix)
+        # Update saved model if val loss is lower
+
+        if (tot_val_loss < self.metrics['best_val_loss']):
+            logging.info(
+                f"Saving improved model after Val Loss improved from {self.metrics['best_val_loss']} to {tot_val_loss}")
+            self.metrics['best_val_loss'] = tot_val_loss
+            self.updateSavedModel(
+                self.model, self.output_path, self.output_suffix)

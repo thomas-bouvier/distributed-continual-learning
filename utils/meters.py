@@ -1,4 +1,5 @@
 import horovod.torch as hvd
+#import nvtx
 import torch
 
 from utils.log import PerformanceResultsLog
@@ -33,6 +34,7 @@ class MeasureTime:
         self.perf_metrics = perf_metrics
         self.cuda = cuda
         self.dummy = dummy
+        self.rng = None
 
     def __enter__(self):
         if not self.dummy:
@@ -40,10 +42,12 @@ class MeasureTime:
             self.end = torch.cuda.Event(enable_timing=True)
             synchronize_cuda(self.cuda)
             self.start.record()
+            #self.rng = nvtx.start_range(message=self.name)
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
         if not self.dummy:
+            #nvtx.end_range(self.rng)
             self.end.record()
             synchronize_cuda(self.cuda)
             time = self.start.elapsed_time(self.end)

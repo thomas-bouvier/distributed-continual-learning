@@ -5,10 +5,8 @@ from torch.nn import functional as F
 from utils import get_data_loader
 import copy
 import numpy as np
-from models.cl.fromp_optimizer import softmax_hessian
 
-
-class CppMemoryBuffer(nn.Module, metaclass=abc.ABCMeta):
+class Buffer(nn.Module, metaclass=abc.ABCMeta):
     """Abstract module for a classifier that enables it to maintain a memory buffer."""
 
     def __init__(self):

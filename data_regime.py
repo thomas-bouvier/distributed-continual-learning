@@ -9,9 +9,9 @@ from continuum.tasks import TaskSet
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from dataset import get_dataset
-from preprocess import get_transform
-from sampler import MyDistributedSampler
+from data.datasets import get_dataset
+from data.preprocess import get_transform
+from data.sample import MyDistributedSampler
 
 
 _DATA_ARGS = {
@@ -75,7 +75,7 @@ class DataRegime:
         if self.config["others"].get("use_dali", False):
             try:
                 global DaliDataLoader
-                from data_loader_dali import DaliDataLoader
+                from data.load import DaliDataLoader
             except ImportError:
                 raise ImportError(
                     "Please install NVIDIA DALI to run this app.")
