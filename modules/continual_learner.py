@@ -4,9 +4,6 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 from torch.nn import functional as F
-from utils import get_data_loader
-from models import fc
-from models.utils.ncl import additive_nearest_kf
 
 
 class ContinualLearner(nn.Module, metaclass=abc.ABCMeta):
@@ -17,3 +14,7 @@ class ContinualLearner(nn.Module, metaclass=abc.ABCMeta):
 
         self.optimizer_regime = None
         self.data_regime = None
+
+
+    def _device(self):
+        return next(self.backbone_model.parameters()).device

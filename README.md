@@ -37,10 +37,10 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|
-| `--model` | Yes | DL model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
-| `--model-config` |   | Model-specific parameters  | ConvNext requires `"{'lr_min': 1e-6}"` |
-| `--agent` | Default: `base` | Continual Learning strategy | `base`, `er` |
-| `--agent-config` |   | Agent-specific parameters  | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
+| `--backbone` | Yes | DL model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
+| `--backbone-config` |   | Model-specific parameters  | ConvNext requires `"{'lr_min': 1e-6}"` |
+| `--model` | Default: `base` | Continual Learning strategy | `base`, `er` |
+| `--model-config` |   | Agent-specific parameters  | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"` allows to reset the model internal state between tasks<br>Instance-incremental scenario (domain) with 2 tasks: `"{'scenario': 'domain', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
 | `--dataset` |   | Dataset  | `mnist`, `cifar10`, `cifar100`, `tinyimagenet`, `imagenet`, `imagenet_blurred`, `ptycho` |
 
@@ -51,21 +51,21 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 Usual deep learning can be done using this project:
 
 ```
-python main.py --model mnistnet --dataset mnist
-python main.py --model resnet18 --dataset cifar100
-python main.py --model resnet50 --dataset tinyimagenet
-python main.py --model efficientnetv2 --dataset imagenet_blurred
+python main.py --backbone mnistnet --dataset mnist
+python main.py --backbone resnet18 --dataset cifar100
+python main.py --backbone resnet50 --dataset tinyimagenet
+python main.py --backbone efficientnetv2 --dataset imagenet_blurred
 ```
 
 ### Continual learning
 
 ```
-python main.py --model mnistnet --dataset mnist --tasksets-config "{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"
-python main.py --model resnet18 --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
-python main.py --model resnet18 --agent er --dataset cifar100 --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
-python main.py --model resnet18 --agent er --agent-config "{'rehearsal_ratio': 100}" --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
-python main.py --model resnet18 --agent er --agent-config "{'rehearsal_ratio': 100}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
-python main.py --model resnet50 --agent er --dataset tinyimagenet --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
+python main.py --backbone mnistnet --dataset mnist --tasksets-config "{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"
+python main.py --backbone resnet18 --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
+python main.py --backbone resnet18 --model er --dataset cifar100 --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
+python main.py --backbone resnet18 --model er --model-config "{'rehearsal_ratio': 100}" --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
+python main.py --backbone resnet18 --model er --model-config "{'rehearsal_ratio': 100}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
+python main.py --backbone resnet50 --model er --dataset tinyimagenet --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
 ```
 
 #### Baselines

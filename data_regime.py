@@ -65,6 +65,7 @@ class DataRegime:
         self.continual_test_taskset = []
         self.sampler = None
         self.loader = None
+        self.sample_shape = None
         self.data_len = 0
         self.classes_mask = None
 
@@ -180,7 +181,9 @@ class DataRegime:
 
         if task_id in self.previous_loaders.keys():
             self.data_len = self.previous_loaders[task_id][1]
-            return self.previous_loaders[task_id][0]
+            loader = self.previous_loaders[task_id][0]
+            self.sample_shape = next(iter(loader))[0][0].size()
+            return loader
 
         logging.debug(
             f"DATA LOADER {self.config['data']['split']} - set task id: {task_id}"
@@ -237,6 +240,7 @@ class DataRegime:
         if self.config["data"].get("split") == "validate":
             self.previous_loaders[self.task_id] = (self.loader, self.data_len)
         
+        self.sample_shape = next(iter(self.loader))[0][0].size()
         return self.loader
 
 

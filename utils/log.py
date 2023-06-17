@@ -29,7 +29,11 @@ def setup_logging(log_file="log.txt", level="info", dummy=False):
     fileout.setLevel(logging.DEBUG)
     fileout.setFormatter(logging.Formatter(
         "%(asctime)s - %(levelname)s - %(message)s"))
-    logging.getLogger().addHandler(fileout)
+    logging.getLogger('root').addHandler(fileout)
+
+
+def get_logging_level():
+    return logging.getLevelName(logging.getLogger('root').getEffectiveLevel()).lower()
 
 
 def plot_figure(

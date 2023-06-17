@@ -19,26 +19,27 @@ from ast import literal_eval
 from datetime import datetime
 from os import path, makedirs
 
+import backbone
 import models
-import agents
 
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
+from train.train import train
 from utils.log import save_checkpoint, setup_logging, ResultsLog
 from utils.meters import AverageMeter
 from utils.yaml_params import YParams
 from utils.utils import move_cuda
 
+backbone_model_names = sorted(
+    name
+    for name in backbone.__dict__
+    if name.islower() and not name.startswith("__") and callable(backbone.__dict__[name])
+)
+
 model_names = sorted(
     name
     for name in models.__dict__
     if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
-)
-
-agent_names = sorted(
-    name
-    for name in agents.__dict__
-    if name.islower() and not name.startswith("__") and callable(agents.__dict__[name])
 )
 
 parser = argparse.ArgumentParser(
@@ -82,27 +83,27 @@ parser.add_argument(
     help="log replay buffers to tensorboard",
 )
 parser.add_argument(
-    "--agent",
-    metavar="AGENT",
+    "--backbone",
+    metavar="BACKBONE",
     default=None,
-    choices=agent_names,
-    help="model agent: " + " | ".join(agent_names),
+    choices=backbone_model_names,
+    help="available backbone models: " + " | ".join(backbone_model_names),
 )
 parser.add_argument(
-    "--agent-config",
+    "--backbone-config",
     default="{}",
-    help="additional agent configuration"
+    help="additional backbone configuration"
 )
 parser.add_argument(
     "--model",
     metavar="MODEL",
-    default="mnistnet",
+    default="er",
     choices=model_names,
-    help="model architecture: " + " | ".join(model_names),
+    help="available models: " + " | ".join(model_names),
 )
 parser.add_argument(
     "--model-config",
-    default="",
+    default="{}",
     help="additional model architecture configuration",
 )
 parser.add_argument(
@@ -300,8 +301,8 @@ def main():
     if hvd.rank() == 0:
         wandb.init(project="distributed-continual-learning")
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
-        if args.agent is not None:
-            run_name = f"{args.agent}-{run_name}"
+        if args.model is not None:
+            run_name = f"{args.model}-{run_name}"
         wandb.run.name = run_name
 
         if args.save_dir == "":
@@ -346,18 +347,17 @@ class Experiment:
             batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir,
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
-        self.create_agent(total_num_classes, batch_metrics)
+        self.create_model(total_num_classes, batch_metrics)
 
-    def create_agent(self, total_num_classes, batch_metrics=None):
+    def create_model(self, total_num_classes, batch_metrics=None):
         #-------------------------------------------------------------------------------------------------#
 
-        #-----------------#
-        #----- MODEL -----#
-        #-----------------#
+        #--------------------------#
+        #----- BACKBONE MODEL -----#
+        #--------------------------#
 
         # Creating the model
-        model_name = models.__dict__[self.args.model]
-        model_config = {
+        backbone_model_config = {
             "num_classes": total_num_classes,
             "lr": self.args.lr,
             "warmup_epochs": self.args.warmup_epochs,
@@ -365,24 +365,24 @@ class Experiment:
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
         }
         if self.args.model_config != "":
-            model_config = dict(
-                model_config, **literal_eval(self.args.model_config))
-        model = model_name(model_config)
+            backbone_model_config = dict(
+                backbone_model_config, **literal_eval(self.args.backbone_config))
+        backbone_model = getattr(backbone, self.args.backbone)(backbone_model_config)
         logging.info(
-            f"Created model {self.args.model} with configuration: {json.dumps(model_config, indent=2)}"
+            f"Created backbone model {self.args.backbone} with configuration: {json.dumps(backbone_model_config, indent=2)}"
         )
-        num_parameters = sum([l.nelement() for l in model.parameters()])
+        num_parameters = sum([l.nelement() for l in backbone_model.parameters()])
         logging.info(f"Number of parameters: {num_parameters}")
-        model = move_cuda(model, self.args.cuda)
+        backbone_model = move_cuda(backbone_model, self.args.cuda)
 
         # Building the optimizer regime
         if self.args.optimizer_regime != "":
             optimizer_regime_dict = literal_eval(self.args.optimizer_regime)
         else:
-            optimizer_regime_dict = getattr(model, "regime")
+            optimizer_regime_dict = getattr(backbone_model, "regime")
         logging.info(f"Optimizer regime: {optimizer_regime_dict}")
         optimizer_regime = OptimizerRegime(
-            model,
+            backbone_model,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
             hvd.Average,
             self.args.gradient_predivide_factor,
@@ -426,26 +426,22 @@ class Experiment:
         #-------------------------------------------------------------------------------------------------#
 
         #-----------------#
-        #----- AGENT -----#
+        #----- MODEL -----#
         #-----------------#
 
-        # Creating the agent
-        agent = (
-            agents.__dict__[self.args.agent]
-            if self.args.agent is not None
-            else agents.base
-        )
-        agent_config = literal_eval(self.args.agent_config)
-        if bool(agent_config):
-            rehearsal_ratio = literal_eval(self.args.agent_config).get("rehearsal_ratio", 30)
-            agent_config |= {
+        # Creating the continual learning model
+        model = getattr(models, self.args.model)
+        model_config = literal_eval(self.args.model_config)
+        if bool(model_config):
+            rehearsal_ratio = literal_eval(self.args.model_config).get("rehearsal_ratio", 30)
+            model_config |= {
                 "rehearsal_size": math.floor(self.train_data_regime.total_num_samples * rehearsal_ratio / 100 / total_num_classes / hvd.size())
             }
-        self.agent = agent(
-            model,
+        self.model = model(
+            backbone_model,
             self.args.use_mask,
             self.args.use_amp,
-            agent_config,
+            model_config,
             optimizer_regime,
             self.args.batch_size,
             self.args.cuda,
@@ -454,8 +450,7 @@ class Experiment:
             self.args.log_interval,
             batch_metrics
         )
-        self.agent.epochs = self.args.epochs
-        logging.info(f"Created agent with configuration: {json.dumps(agent_config, indent=2)}")
+        logging.info(f"Created model with configuration: {json.dumps(model_config, indent=2)}")
 
         # Saving an initial checkpoint
         """
@@ -465,8 +460,8 @@ class Experiment:
                 "epoch": 0,
                 "model": self.args.model,
                 "model_config": self.args.model_config,
-                "state_dict": self.agent.model.state_dict(),
-                "optimizer_state_dict": self.agent.optimizer_regime.state_dict(),
+                "state_dict": self.model.model.state_dict(),
+                "optimizer_state_dict": self.model.optimizer_regime.state_dict(),
             },
             self.save_path,
             is_initial=True,
@@ -546,7 +541,11 @@ class Experiment:
         evaluate_durations = []
 
         total_start = time.perf_counter()
-        train()
+        train(
+            self.model, self.train_data_regime, self.validate_data_regime,
+            self.args.epochs, resume_from_task=self.resume_from_task,
+            resume_from_epoch=self.resume_from_epoch
+        )
         total_end = time.perf_counter()
 
         if hvd.rank() == 0:
@@ -583,10 +582,10 @@ class Experiment:
             {
                 "task": len(self.train_data_regime.tasksets) - 1,
                 "epoch": self.args.epochs - 1,
-                "model": self.args.model,
-                "model_config": self.args.model_config,
-                "state_dict": self.agent.model.state_dict(),
-                "optimizer_state_dict": self.agent.optimizer_regime.state_dict()
+                "model": self.args.backbone,
+                "model_config": self.args.backbone_config,
+                "state_dict": self.model.backbone.state_dict(),
+                "optimizer_state_dict": self.model.optimizer_regime.state_dict()
             },
             self.save_path,
             is_final=True,

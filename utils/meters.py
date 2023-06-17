@@ -28,7 +28,7 @@ class AverageMeter:
 
 
 class MeasureTime:
-    def __init__(self, batch, name, perf_metrics: PerformanceResultsLog, cuda=True, dummy=False):
+    def __init__(self, name, batch, perf_metrics: PerformanceResultsLog = None, cuda=True, dummy=False):
         self.batch = batch
         self.name = name
         self.perf_metrics = perf_metrics
@@ -52,7 +52,14 @@ class MeasureTime:
             synchronize_cuda(self.cuda)
             time = self.start.elapsed_time(self.end)
 
-            self.perf_metrics.add(self.batch, time, key=self.name)
+            if self.perf_metrics is not None:
+                self.perf_metrics.add(self.batch, time, key=self.name)
+
+
+def get_timer(name, batch, perf_metrics=None, previous_iteration=False, cuda=True, dummy=False):
+    if previous_iteration:
+        batch -= 1
+    return MeasureTime(name, batch, perf_metrics=perf_metrics, cuda=cuda, dummy=dummy)
 
 
 def accuracy(output, target, topk=(1,)):
