@@ -1,6 +1,7 @@
 import horovod.torch as hvd
 import logging
 import time
+import wandb
 
 from tqdm import tqdm
 

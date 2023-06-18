@@ -3,8 +3,8 @@ base:
   dataset_dir:
   tasksets_config:
   shard:
-  agent:
-  agent_config:
+  backbone:
+  backbone_config:
   model:
   model_config:
   checkpoint:

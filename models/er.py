@@ -6,8 +6,8 @@ import torch.nn as nn
 
 from torch.cuda.amp import GradScaler, autocast
 from utils.meters import AverageMeter, MeasureTime, get_timer, accuracy
-from utils.log import PerformanceResultsLog
-from utils.utils import move_cuda, display
+from utils.log import PerformanceResultsLog, display
+from utils.utils import move_cuda
 
 from modules import ContinualLearner, Buffer
 
@@ -133,9 +133,9 @@ class Er(ContinualLearner):
                 repr_size = self.aug_size - self.batch_size
                 if repr_size > 0:
                     captions = []
-                    for label, weight in zip(new_y[-repr_size:], new_w[-repr_size:]):
+                    for label, weight in zip(y[-repr_size:], w[-repr_size:]):
                         captions.append(f"y={label.item()} w={weight.item()}")
-                    display(f"aug_batch_{self.task_id}_{self.epoch}_{self.batch}", new_x[-repr_size:], captions=captions)
+                    display(f"aug_batch_{self.task_id}_{self.epoch}_{self.batch}", x[-repr_size:], captions=captions)
 
             # In-advance preparation of next minibatch
             with get_timer('accumulate', self.batch):

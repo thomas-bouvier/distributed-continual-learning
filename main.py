@@ -25,8 +25,9 @@ import models
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
 from train.train import train
-from utils.log import save_checkpoint, setup_logging, ResultsLog
+from utils.log import setup_logging, ResultsLog
 from utils.meters import AverageMeter
+from utils.model import save_checkpoint
 from utils.yaml_params import YParams
 from utils.utils import move_cuda
 

@@ -230,35 +230,43 @@ class PerformanceResultsLog:
         return self.perf_metrics[batch]
 
 
-def save_checkpoint(
-    state,
-    save_path,
-    filename="checkpoint.pth.tar",
-    is_initial=False,
-    is_final=False,
-    is_best=False,
-    save_all=False,
-    dummy=False
-):
-    if dummy:
-        return
+def plot_representatives(rep_values, rep_labels, num_cols):
+    """
+    This function plots representative images.
 
-    filename = os.path.join(save_path, filename)
-    torch.save(state, filename)
-    if is_initial:
-        shutil.copyfile(filename, os.path.join(
-            save_path, "checkpoint_initial.pth.tar"))
-    if is_final:
-        shutil.copyfile(filename, os.path.join(
-            save_path, "checkpoint_final.pth.tar"))
-    if is_best:
-        shutil.copyfile(filename, os.path.join(
-            save_path, "checkpoint_best.pth.tar"))
-    if save_all:
-        shutil.copyfile(
-            filename,
-            os.path.join(
-                save_path,
-                f"checkpoint_task_{state['task']}_epoch_{state['epoch']}.pth.tar",
-            ),
-        )
+    Args:
+        rep_values (list): The representative images.
+        rep_labels (list): The labels for the representative images.
+        num_cols (int): The number of columns to display.
+
+    Returns:
+        matplotlib.figure.Figure: The figure object.
+    """
+    num_candidates = len(rep_values)
+    fig, ax = plt.subplots(num_candidates // num_cols, num_cols)
+    for j in range(num_candidates // num_cols):
+        for k in range(num_cols):
+            ax[j, k].imshow(rep_values[j * num_cols + k].T,
+                            interpolation='none')
+            ax[j, k].set_title(rep_labels[j * num_cols + k].item())
+            ax[j, k].axis('off')
+    return fig
+
+
+def display(filename, outputs, columns=2, captions=None):
+    rows = int(math.ceil(len(outputs) / columns))
+    fig = plt.figure()
+    fig.set_size_inches(16, 6 * rows)
+    gs = gridspec.GridSpec(rows, columns)
+    row = 0
+    col = 0
+    for i in range(len(outputs)):
+        plt.subplot(gs[i])
+        plt.axis("off")
+        if captions is not None:
+            plt.title(captions[i])
+        plt.imshow(np.array(outputs[i].permute(1, 2, 0).cpu()))
+    path = f"{filename}.jpg"
+    plt.savefig(path)
+    plt.close()
+    wandb.save(path)
