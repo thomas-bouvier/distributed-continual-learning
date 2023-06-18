@@ -1,10 +1,13 @@
+import copy
 import horovod.torch as hvd
 import logging
+import numpy as np
 import time
 import wandb
 
 from tqdm import tqdm
 
+from evaluate.evaluate import evaluate_one_epoch
 from utils.log import get_logging_level
 from utils.meters import AverageMeter, get_timer
 from utils.utils import move_cuda
@@ -134,23 +137,21 @@ def train_one_epoch(model, loader, task_id, epoch):
                         'local_rehearsal_size': meters['local_rehearsal_size'].val.item()})
             progress.update(1)
 
-            model.global_batch += 1
             batch += 1
 
             timer = get_timer('load', batch, previous_iteration=model.use_memory_buffer)
             timer.__enter__()
             start_batch_time = time.perf_counter()
 
-    if hvd.rank() == 0:
-        wandb.log({"epoch": model.global_epoch,
-                f"{prefix}_loss": meters["loss"].avg,
-                f"{prefix}_prec1": meters["prec1"].avg,
-                f"{prefix}_prec5": meters["prec5"].avg,
-                "lr": model.optimizer_regime.get_lr()[0],
-                "local_rehearsal_size": meters['local_rehearsal_size']})
-
-    model.global_epoch += 1
-    model.epoch += 1
+    meters["loss"] = meters["loss"].avg.item()
+    meters["prec1"] = meters["prec1"].avg.item()
+    meters["prec5"] = meters["prec5"].avg.item()
+    meters["num_samples"] = meters["num_samples"].val.item()
+    meters["local_rehearsal_size"] = meters["local_rehearsal_size"].val.item()
+    meters["error1"] = 100.0 - meters["prec1"]
+    meters["error5"] = 100.0 - meters["prec5"]
+    meters["time"] = epoch_time
+    meters["batch"] = batch
 
     logging.info(f"\nCUMULATED VALUES:")
     logging.info(
@@ -167,21 +168,20 @@ def train_one_epoch(model, loader, task_id, epoch):
         f"\tepoch assemble time {self.epoch_assemble_time} sec ({self.epoch_assemble_time*100/epoch_time}%)")
     """
 
-    num_samples = meters["num_samples"].sum.item()
-    meters = {name: meter.avg.item() for name, meter in meters.items()}
-    meters["num_samples"] = num_samples
-    meters["error1"] = 100.0 - meters["prec1"]
-    meters["error5"] = 100.0 - meters["prec5"]
-    meters["time"] = epoch_time
-    meters["batch"] = batch
-
     return meters
 
 
-def train(model, train_data_regime, validata_data_regime, epochs,
-          resume_from_task=0, resume_from_epoch=0, evaluate=True):
+def train(model, train_data_regime, validate_data_regime, epochs, 
+          resume_from_task=0, resume_from_epoch=0, evaluate=True,
+          dl_metrics=None, tasks_metrics=None, time_metrics=None):
     """Train a model on multiple tasks."""
 
+    global_epoch = 0
+    global_batch = 0
+    img_secs = []
+    evaluate_durations = []
+
+    total_start = time.perf_counter()
     model.before_all_tasks(train_data_regime)
 
     for task_id in range(resume_from_task, len(train_data_regime.tasksets)):
@@ -197,9 +197,16 @@ def train(model, train_data_regime, validata_data_regime, epochs,
 
             # Horovod: set epoch to sampler for shuffling
             train_data_regime.set_epoch(i_epoch)
-
-            # train for one epoch
             train_results = train_one_epoch(model, train_data_regime.get_loader(task_id), task_id, i_epoch)
+
+            if hvd.rank() == 0:
+                prefix = "train"
+                wandb.log({"epoch": global_epoch,
+                        f"{prefix}_loss": train_results["loss"],
+                        f"{prefix}_prec1": train_results["prec1"],
+                        f"{prefix}_prec5": train_results["prec5"],
+                        "lr": model.optimizer_regime.get_lr()[0],
+                        "local_rehearsal_size": train_results['local_rehearsal_size']})
 
             # evaluate on test set
             before_evaluate_time = time.perf_counter()
@@ -212,11 +219,18 @@ def train(model, train_data_regime, validata_data_regime, epochs,
                     })
 
                 for test_task_id in range(0, task_id + 1):
-                    validate_data_regime.set_epoch(i_epoch)
-
                     logging.info(f"EVALUATING on task {test_task_id + 1}..{task_id + 1}")
 
-                    validate_results = model.validate(validate_data_regime, test_task_id)
+                    validate_data_regime.set_epoch(i_epoch)
+                    validate_results = evaluate_one_epoch(model, validate_data_regime.get_loader(test_task_id), task_id, test_task_id, i_epoch)
+
+                    if hvd.rank() == 0 and test_task_id == task_id:
+                        prefix = "val"
+                        wandb.log({"epoch": global_epoch,
+                                f"{prefix}_loss": validate_results["loss"],
+                                f"{prefix}_prec1": validate_results["prec1"],
+                                f"{prefix}_prec5": validate_results["prec5"]})
+
                     meters[test_task_id]["loss"] = validate_results["loss"]
                     meters[test_task_id]["prec1"] = validate_results["prec1"]
                     meters[test_task_id]["prec5"] = validate_results["prec5"]
@@ -253,11 +267,11 @@ def train(model, train_data_regime, validata_data_regime, epochs,
                 )
 
                 if hvd.rank() == 0:
-                    wandb.log({"epoch": model.global_epoch,
+                    wandb.log({"epoch": global_epoch,
                             "continual_task1_val_loss": meters[0]["loss"],
                             "continual_task1_val_prec1": meters[0]["prec1"],
                             "continual_task1_val_prec5": meters[0]["prec5"]})
-                    wandb.log({"epoch": model.global_epoch,
+                    wandb.log({"epoch": global_epoch,
                             "continual_val_loss": averages["loss"],
                             "continual_val_prec1": averages["prec1"],
                             "continual_val_prec5": averages["prec5"]})
@@ -274,7 +288,8 @@ def train(model, train_data_regime, validata_data_regime, epochs,
 
             evaluate_durations.append(time.perf_counter() - before_evaluate_time)
 
-            model.after_every_epoch()
+            global_epoch += 1
+            global_batch += train_results["batch"]
 
             if hvd.rank() == 0:
                 img_sec = train_results["num_samples"] / train_results["time"]
@@ -297,8 +312,8 @@ def train(model, train_data_regime, validata_data_regime, epochs,
                 # DL metrics
                 dl_metrics_values = dict(
                     task_id=task_id,
-                    epoch=model.global_epoch,
-                    batch=model.global_batch,
+                    epoch=global_epoch,
+                    batch=global_batch,
                 )
                 dl_metrics_values.update({
                     "train_" + k: v for k, v in train_results.items()
@@ -308,37 +323,56 @@ def train(model, train_data_regime, validata_data_regime, epochs,
                     "train_total_img_sec": img_sec * hvd.size(),
                     "train_cumulated_time": time.perf_counter() - total_start - sum(evaluate_durations),
                 })
-                dl_metrics.add(**dl_metrics_values)
-                dl_metrics.save()
+                if dl_metrics is not None:
+                    dl_metrics.add(**dl_metrics_values)
+                    dl_metrics.save()
 
                 # Time metrics
-                wandb.log({"epoch": model.global_epoch,
+                wandb.log({"epoch": global_epoch,
                             "train_time": dl_metrics_values["train_time"],
                             "train_total_img_sec": dl_metrics_values["train_total_img_sec"],
                             "train_cumulated_time": dl_metrics_values["train_cumulated_time"],
                 })
 
-            if self.args.save_all_checkpoints:
-                save_checkpoint(
-                    {
-                        "task": task_id,
-                        "epoch": i_epoch,
-                        "model": self.args.model,
-                        "model_config": self.args.model_config,
-                        "state_dict": model.backbone_model.state_dict(),
-                        "optimizer_state_dict": model.backbone_model.optimizer_regime.state_dict()
-                    },
-                    self.save_path,
-                    filename=f"checkpoint_task_{task_id}_epoch_{i_epoch}.pth.tar",
-                    dummy=hvd.rank() > 0
-                )
-
         end = time.perf_counter()
+
         task_metrics.update({"time": end - start})
-        # logging.debug(f"\nTask metrics : {task_metrics}")
-        tasks_metrics.add(**task_metrics)
-        tasks_metrics.save()
+        if tasks_metrics is not None:
+            tasks_metrics.add(**task_metrics)
+            tasks_metrics.save()
 
         model.after_every_task()
 
     model.after_all_tasks()
+    total_end = time.perf_counter()
+
+    if hvd.rank() == 0:
+        img_sec_mean = np.mean(img_secs)
+        img_sec_conf = 1.96 * np.std(img_secs)
+        total_time = total_end - total_start
+        total_training_time = total_time - sum(evaluate_durations)
+
+        logging.info("\nFINAL RESULTS:")
+        logging.info(f"Total time: {total_time}")
+        logging.info(f"Total training time: {total_training_time}")
+        logging.info(
+            "Average: %.1f +-%.1f samples/sec per device"
+            % (img_sec_mean, img_sec_conf)
+        )
+        logging.info(
+            "Average on %d device(s): %.1f +-%.1f"
+            % (
+                hvd.size(),
+                hvd.size() * img_sec_mean,
+                hvd.size() * img_sec_conf,
+            )
+        )
+        values = {
+            "total_time": total_time,
+            "total_train_time": total_training_time,
+            "train_img_sec": img_sec_mean,
+            "train_total_img_sec": img_sec_mean * hvd.size(),
+        }
+        if time_metrics is not None:
+            time_metrics.add(**values)
+            time_metrics.save()

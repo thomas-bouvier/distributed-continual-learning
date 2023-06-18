@@ -4,7 +4,6 @@ import horovod.torch as hvd
 import json
 import logging
 import math
-import numpy as np
 import os
 import signal
 import sys
@@ -118,12 +117,6 @@ parser.add_argument(
     type=str,
     metavar="PATH",
     help="path to latest checkpoint (default: none)",
-)
-parser.add_argument(
-    "--save-all-checkpoints",
-    action="store_true",
-    default=False,
-    help="save a ceckpoint after every epoch",
 )
 parser.add_argument(
     "--batch-size",
@@ -445,8 +438,6 @@ class Experiment:
             model_config,
             optimizer_regime,
             self.args.batch_size,
-            self.args.cuda,
-            self.args.log_level,
             self.args.log_buffer,
             self.args.log_interval,
             batch_metrics
@@ -538,46 +529,12 @@ class Experiment:
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0
         )
 
-        img_secs = []
-        evaluate_durations = []
-
-        total_start = time.perf_counter()
         train(
             self.model, self.train_data_regime, self.validate_data_regime,
             self.args.epochs, resume_from_task=self.resume_from_task,
-            resume_from_epoch=self.resume_from_epoch
+            resume_from_epoch=self.resume_from_epoch, dl_metrics=dl_metrics,
+            tasks_metrics=tasks_metrics, time_metrics=time_metrics
         )
-        total_end = time.perf_counter()
-
-        if hvd.rank() == 0:
-            img_sec_mean = np.mean(img_secs)
-            img_sec_conf = 1.96 * np.std(img_secs)
-            total_time = total_end - total_start
-            total_training_time = total_time - sum(evaluate_durations)
-
-            logging.info("\nFINAL RESULTS:")
-            logging.info(f"Total time: {total_time}")
-            logging.info(f"Total training time: {total_training_time}")
-            logging.info(
-                "Average: %.1f +-%.1f samples/sec per device"
-                % (img_sec_mean, img_sec_conf)
-            )
-            logging.info(
-                "Average on %d device(s): %.1f +-%.1f"
-                % (
-                    hvd.size(),
-                    hvd.size() * img_sec_mean,
-                    hvd.size() * img_sec_conf,
-                )
-            )
-            values = {
-                "total_time": total_time,
-                "total_train_time": total_training_time,
-                "train_img_sec": img_sec_mean,
-                "train_total_img_sec": img_sec_mean * hvd.size(),
-            }
-            time_metrics.add(**values)
-            time_metrics.save()
 
         save_checkpoint(
             {
@@ -599,6 +556,7 @@ def on_exit(sig, frame):
     wandb.finish()
     os.system("kill $(ps aux | grep multiprocessing.spawn | grep -v grep | awk '{print $2}')")
     sys.exit(0)
+
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, on_exit)

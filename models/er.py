@@ -4,12 +4,12 @@ import logging
 import torch
 import torch.nn as nn
 
-from torch.cuda.amp import GradScaler, autocast
-from utils.meters import AverageMeter, MeasureTime, get_timer, accuracy
-from utils.log import PerformanceResultsLog, display
-from utils.utils import move_cuda
+from torch.cuda.amp import autocast
 
 from modules import ContinualLearner, Buffer
+from utils.meters import get_timer, accuracy
+from utils.log import PerformanceResultsLog
+
 
 class Er(ContinualLearner):
     '''Model for classifying images, "enriched" as ContinualLearner- and Buffer-object.'''
@@ -22,48 +22,30 @@ class Er(ContinualLearner):
         config,
         optimizer_regime,
         batch_size,
-        cuda,
-        log_level,
         log_buffer,
         log_interval,
         batch_metrics=None,
         state_dict=None,
     ):
-        super().__init__()
+        super(Er, self).__init__(
+            backbone_model,
+            use_amp,
+            optimizer_regime,
+            batch_size,
+            batch_metrics,
+            state_dict,
+        )
 
-        self.backbone_model = backbone_model
         self.use_mask = use_mask
-        self.use_amp = use_amp
         self.config = config
-        self.optimizer_regime = optimizer_regime
-        self.batch_size = batch_size
-        self.cuda = cuda
-        self.device = 'cuda' if self.cuda else 'cpu'
-        self.log_level = log_level
         self.log_buffer = log_buffer
         self.log_interval = log_interval
-        self.batch_metrics = batch_metrics
 
-        self.global_epoch = 0
         self.epoch = 0
-        self.global_batch = 0
         self.batch = 0
-        self.minimal_eval_loss = float("inf")
-        self.best_model = None
 
         self.use_memory_buffer = True
         self.current_rehearsal_size = 0
-
-        if self.use_amp:
-            self.scaler = GradScaler()
-
-        if state_dict is not None:
-            self.backbone_model.load_state_dict(state_dict)
-            self.initial_snapshot = copy.deepcopy(state_dict)
-        else:
-            self.initial_snapshot = copy.deepcopy(self.backbone_model.state_dict())
-
-        self.perf_metrics = PerformanceResultsLog()
 
 
     def before_all_tasks(self, train_data_regime):
@@ -72,7 +54,7 @@ class Er(ContinualLearner):
             self.config.get('num_representatives'), self.config.get('provider'),
             self.config.get('discover_endpoints'), self.config.get('cuda_rdma'))
 
-        self.mask = torch.ones(train_data_regime.total_num_classes, device=self.device).float()
+        self.mask = torch.ones(train_data_regime.total_num_classes, device=self._device()).float()
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
 
@@ -99,7 +81,7 @@ class Er(ContinualLearner):
 
         if self.use_mask:
             # Create mask so the loss is only used for classes learnt during this task
-            self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self.device).float()
+            self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self._device()).float()
             self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
         if self.use_memory_buffer and task_id > 0:
@@ -107,10 +89,14 @@ class Er(ContinualLearner):
 
 
     def train_one_step(self, x, y, meters):
-        '''Former nil_cpp implementation'''
+        '''Former nil_cpp implementation
+        
+        batch: batch number, for logging purposes only
+        '''
+
 
         aug_size = self.batch_size
-        w = torch.ones(self.batch_size, device=self.device)
+        w = torch.ones(self.batch_size, device=self._device())
 
         if self.use_memory_buffer and self.task_id > 0:
             # Get the representatives
@@ -201,7 +187,7 @@ class Er(ContinualLearner):
 
         # Assemble the minibatch
         with get_timer('assemble', self.batch):
-            w = torch.ones(self.batch_size, device=self.device)
+            w = torch.ones(self.batch_size, device=self._device())
             new_x = torch.cat((x, self.next_minibatch.x[:self.repr_size]))
             new_y = torch.cat((y, self.next_minibatch.y[:self.repr_size]))
             new_w = torch.cat((w, self.next_minibatch.w[:self.repr_size]))
