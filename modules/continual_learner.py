@@ -32,10 +32,7 @@ class ContinualLearner(nn.Module, metaclass=abc.ABCMeta):
 
         self.minimal_eval_loss = float("inf")
         self.best_model = None
-
-        self.scaler = None
-        if self.use_amp:
-            self.scaler = GradScaler()
+        self.scaler = GradScaler(enabled=use_amp)
 
         if state_dict is not None:
             self.backbone_model.load_state_dict(state_dict)
@@ -45,6 +42,26 @@ class ContinualLearner(nn.Module, metaclass=abc.ABCMeta):
 
         self.perf_metrics = PerformanceResultsLog()
 
+
+    def before_every_task(self, task_id, train_data_regime):
+        self.task_id = task_id
+
+        # Distribute the data
+        train_data_regime.get_loader(task_id)
+
+        if self.best_model is not None:
+            logging.debug(
+                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
+            )
+            self.backbone_model.load_state_dict(self.best_model)
+            self.minimal_eval_loss = float("inf")
+
+        if task_id > 0:
+            if self.config.get("reset_state_dict", False):
+                logging.debug("Resetting model internal state..")
+                self.backbone_model.load_state_dict(
+                    copy.deepcopy(self.initial_snapshot))
+            self.optimizer_regime.reset(self.backbone_model.parameters())
 
     def _device(self):
         return next(self.backbone_model.parameters()).device

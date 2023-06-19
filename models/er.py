@@ -12,7 +12,7 @@ from utils.log import PerformanceResultsLog
 
 
 class Er(ContinualLearner):
-    '''Model for classifying images, "enriched" as ContinualLearner- and Buffer-object.'''
+    '''Model for classifying images, "enriched" as ContinualLearner object.'''
 
     def __init__(
         self,
@@ -41,11 +41,7 @@ class Er(ContinualLearner):
         self.log_buffer = log_buffer
         self.log_interval = log_interval
 
-        self.epoch = 0
-        self.batch = 0
-
         self.use_memory_buffer = True
-        self.current_rehearsal_size = 0
 
 
     def before_all_tasks(self, train_data_regime):
@@ -59,25 +55,7 @@ class Er(ContinualLearner):
 
 
     def before_every_task(self, task_id, train_data_regime):
-        self.task_id = task_id
-        self.batch = 0
-
-        # Distribute the data
-        train_data_regime.get_loader(task_id)
-
-        if self.best_model is not None:
-            logging.debug(
-                f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
-            )
-            self.backbone_model.load_state_dict(self.best_model)
-            self.minimal_eval_loss = float("inf")
-
-        if task_id > 0:
-            if self.config.get("reset_state_dict", False):
-                logging.debug("Resetting model internal state..")
-                self.backbone_model.load_state_dict(
-                    copy.deepcopy(self.initial_snapshot))
-            self.optimizer_regime.reset(self.backbone_model.parameters())
+        super().before_every_task(task_id, train_data_regime)
 
         if self.use_mask:
             # Create mask so the loss is only used for classes learnt during this task
@@ -88,58 +66,55 @@ class Er(ContinualLearner):
             self.buffer.dsl.enable_augmentation(True)
 
 
-    def train_one_step(self, x, y, meters):
+    def train_one_step(self, x, y, meters, step, measure_performance=False):
         '''Former nil_cpp implementation
-        
+
         batch: batch number, for logging purposes only
         '''
-
-
         aug_size = self.batch_size
         w = torch.ones(self.batch_size, device=self._device())
 
-        if self.use_memory_buffer and self.task_id > 0:
+        if self.use_memory_buffer and step["task_id"] > 0:
             # Get the representatives
-            with get_timer('wait', self.batch, previous_iteration=True):
+            with get_timer('wait', step["batch"], previous_iteration=True):
                 aug_size = self.buffer.dsl.wait()
                 logging.debug(f"Received {n} samples from other nodes")
 
-                if self.measure_performance():
-                    cpp_metrics = self.buffer.dsl.get_metrics(self.batch)
-                    self.perf_metrics.add(self.batch-1, cpp_metrics)
+                if measure_performance:
+                    cpp_metrics = self.buffer.dsl.get_metrics(step["batch"])
+                    self.perf_metrics.add(step["batch"]-1, cpp_metrics)
 
             # Assemble the minibatch
-            with get_timer('assemble', self.batch):
+            with get_timer('assemble', step["batch"]):
                 current_minibatch = self.get_current_augmented_minibatch()
                 x = current_minibatch.x[:aug_size]
                 y = current_minibatch.y[:aug_size]
                 w = current_minibatch.w[:aug_size]
 
-            if self.log_buffer and self.batch % self.log_interval == 0 and hvd.rank() == 0:
+            """
+            if self.log_buffer and step["batch"] % self.log_interval == 0 and hvd.rank() == 0:
                 repr_size = self.aug_size - self.batch_size
                 if repr_size > 0:
                     captions = []
                     for label, weight in zip(y[-repr_size:], w[-repr_size:]):
                         captions.append(f"y={label.item()} w={weight.item()}")
-                    display(f"aug_batch_{self.task_id}_{self.epoch}_{self.batch}", x[-repr_size:], captions=captions)
+                    display(f"aug_batch_{step["task_id"]}_{step["epoch"]}_{step["batch"]}", x[-repr_size:], captions=captions)
+            """
 
             # In-advance preparation of next minibatch
-            with get_timer('accumulate', self.batch):
+            with get_timer('accumulate', step["batch"]):
                 next_minibatch = self.get_next_augmented_minibatch()
                 self.buffer.dsl.accumulate(
                     x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
                 )
 
         # Train
-        with get_timer('train', self.batch):
-            self.optimizer_regime.update(self.epoch, self.batch)
+        with get_timer('train', step["batch"]):
+            self.optimizer_regime.update(step["epoch"], step["batch"])
             self.optimizer_regime.zero_grad()
 
-            if self.use_amp:
-                with autocast():
-                    output = self.backbone_model(x)
-                    loss = self.criterion(output, y)
-            else:
+            # Forward pass
+            with autocast(enabled=self.use_amp):
                 output = self.backbone_model(x)
                 loss = self.criterion(output, y)
 
@@ -149,70 +124,61 @@ class Er(ContinualLearner):
             total_weight = hvd.allreduce(torch.sum(w), name='total_weight', op=hvd.Sum)
             dw = w / total_weight * self.batch_size * hvd.size() / self.batch_size
 
-            if self.use_amp:
-                self.scaler.scale(loss).backward(dw)
-                self.optimizer_regime.optimizer.synchronize()
-                with self.optimizer_regime.optimizer.skip_synchronize():
-                    self.scaler.step(self.optimizer_regime.optimizer)
-                    self.scaler.update()
-            else:
-                loss.backward(dw)
-                self.optimizer_regime.step()
+            # Backward pass
+            self.scaler.scale(loss).backward(dw)
+            self.optimizer_regime.optimizer.synchronize()
+            with self.optimizer_regime.optimizer.skip_synchronize():
+                self.scaler.step(self.optimizer_regime.optimizer)
+                self.scaler.update()
 
-            self.current_rehearsal_size = self.buffer.dsl.get_rehearsal_size()
-
-            # measure accuracy and record loss
+            # Measure accuracy and record metrics
             prec1, prec5 = accuracy(output, y, topk=(1, 5))
             meters["loss"].update(loss.sum() / self.mask[y].sum())
             meters["prec1"].update(prec1, x.size(0))
             meters["prec5"].update(prec5, x.size(0))
             meters["num_samples"].update(aug_size)
-            meters["local_rehearsal_size"].update(self.current_rehearsal_size)
+            meters["local_rehearsal_size"].update(self.buffer.dsl.get_rehearsal_size())
 
 
     """
-    def train_one_step(self, x, y, meters):
+    def train_one_step(self, x, y, meters, step, measure_performance=False):
         '''Former nil_cpp_cat implementation'''
 
         # Get the representatives
-        with get_timer('wait', self.batch, previous_iteration=True):
+        with get_timer('wait', step["batch"], previous_iteration=True):
             self.repr_size = self.buffer.dsl.wait()
             n = self.repr_size
             if n > 0:
                 logging.debug(f"Received {n} samples from other nodes")
 
-            if self.measure_performance():
-                cpp_metrics = self.buffer.dsl.get_metrics(self.batch)
-                self.perf_metrics.add(self.batch-1, cpp_metrics)
+            if measure_performance:
+                cpp_metrics = self.buffer.dsl.get_metrics(step["batch"])
+                self.perf_metrics.add(step["batch"]-1, cpp_metrics)
 
         # Assemble the minibatch
-        with get_timer('assemble', self.batch):
+        with get_timer('assemble', step["batch"]):
             w = torch.ones(self.batch_size, device=self._device())
             new_x = torch.cat((x, self.next_minibatch.x[:self.repr_size]))
             new_y = torch.cat((y, self.next_minibatch.y[:self.repr_size]))
             new_w = torch.cat((w, self.next_minibatch.w[:self.repr_size]))
 
-        if self.log_buffer and self.batch % self.log_interval == 0 and hvd.rank() == 0:
+        if self.log_buffer and step["batch"] % self.log_interval == 0 and hvd.rank() == 0:
             if self.repr_size > 0:
                 captions = []
                 for y, w in zip(self.next_minibatch.y[-self.repr_size:], self.next_minibatch.w[-self.repr_size:]):
                     captions.append(f"y={y.item()} w={w.item()}")
-                display(f"aug_batch_{self.task_id}_{self.epoch}_{self.batch}", self.next_minibatch.x[-self.repr_size:], captions=captions)
+                display(f"aug_batch_{step["task_id"]}_{step["epoch"]}_{step["batch"]}", self.next_minibatch.x[-self.repr_size:], captions=captions)
 
         # In-advance preparation of next minibatch
-        with get_timer('accumulate', self.batch):
+        with get_timer('accumulate', step["batch"]):
             self.buffer.dsl.accumulate(x, y)
 
         # Train
-        with get_timer('train', self.batch):
-            self.optimizer_regime.update(self.epoch, self.batch)
+        with get_timer('train', step["batch"]):
+            self.optimizer_regime.update(step["epoch"], step["batch"])
             self.optimizer_regime.zero_grad()
 
-            if self.use_amp:
-                with autocast():
-                    output = self.backbone_model(new_x)
-                    loss = self.criterion(output, new_y)
-            else:
+            with autocast(enabled=self.use_amp):
                 output = self.backbone_model(new_x)
                 loss = self.criterion(output, new_y)
 
@@ -222,17 +188,11 @@ class Er(ContinualLearner):
             total_weight = hvd.allreduce(torch.sum(new_w), name='total_weight', op=hvd.Sum)
             dw = new_w / total_weight * self.batch_size * hvd.size() / self.batch_size
 
-            if self.use_amp:
-                self.scaler.scale(loss).backward(dw)
-                self.optimizer_regime.optimizer.synchronize()
-                with self.optimizer_regime.optimizer.skip_synchronize():
-                    self.scaler.step(self.optimizer_regime.optimizer)
-                    self.scaler.update()
-            else:
-                loss.backward(dw)
-                self.optimizer_regime.step()
-
-            self.current_rehearsal_size = self.buffer.dsl.get_rehearsal_size()
+            self.scaler.scale(loss).backward(dw)
+            self.optimizer_regime.optimizer.synchronize()
+            with self.optimizer_regime.optimizer.skip_synchronize():
+                self.scaler.step(self.optimizer_regime.optimizer)
+                self.scaler.update()
 
             # measure accuracy and record loss
             prec1, prec5 = accuracy(output, new_y, topk=(1, 5))
@@ -241,10 +201,5 @@ class Er(ContinualLearner):
             meters["prec1"].update(prec1, new_x.size(0))
             meters["prec5"].update(prec5, new_x.size(0))
             meters["num_samples"].update(self.batch_size + self.repr_size)
-            meters["local_rehearsal_size"].update(self.current_rehearsal_size)
+            meters["local_rehearsal_size"].update(self.buffer.dsl.get_rehearsal_size())
     """
-
-
-    def measure_performance(self):
-        #assert self.current_rehearsal_size > 0
-        return self.task_id == 1 and self.epoch == 10

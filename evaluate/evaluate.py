@@ -46,12 +46,8 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
                         captions.append(f"y={label.item()}")
                     display(f"val_batch_{task_id}_{epoch}_{batch}", x, captions=captions)
 
-                if model.use_amp:
-                    with autocast():
-                        output = model.backbone_model(x)
-                        loss = criterion(output, y)
-                else:
-                    output = model(x)
+                with autocast(enabled=model.use_amp):
+                    output = model.backbone_model(x)
                     loss = criterion(output, y)
 
                 prec1, prec5 = accuracy(output, y, topk=(1, 5))

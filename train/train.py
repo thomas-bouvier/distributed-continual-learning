@@ -13,6 +13,10 @@ from utils.meters import AverageMeter, get_timer
 from utils.utils import move_cuda
 
 
+def measure_performance(step):
+    return step["task_id"] == 1 and step["epoch"] == 10
+
+
 """Forward pass for the current epoch"""
 def train_one_epoch(model, loader, task_id, epoch):
     device = model._device()
@@ -40,7 +44,10 @@ def train_one_epoch(model, loader, task_id, epoch):
             x, y = x.to(device), y.long().to(device)
             timer.__exit__(None, None, None)
 
-            model.train_one_step(x, y, meters)
+            step = dict(task_id=task_id, epoch=epoch, batch=batch)
+
+            model.train_one_step(x, y, meters, step,
+                                 measure_performance=measure_performance(step))
 
             if hvd.rank() == 0 and False:
                 captions = []
@@ -57,7 +64,7 @@ def train_one_epoch(model, loader, task_id, epoch):
 
             if hvd.rank() == 0:
                 # Performance metrics
-                if model.measure_performance() and model.batch_metrics is not None:
+                if measure_performance(step) and model.batch_metrics is not None:
                     metrics = model.perf_metrics.get(iteration)
 
                     batch_metrics_values = dict(
@@ -99,7 +106,7 @@ def train_one_epoch(model, loader, task_id, epoch):
                     )
                 )
 
-                if model.measure_performance():
+                if measure_performance(step):
                     metrics = model.perf_metrics.get(iteration)
                     logging.debug(f"batch {batch} time {last_batch_time} sec")
                     logging.debug(
@@ -191,13 +198,12 @@ def train(model, train_data_regime, validate_data_regime, epochs,
 
         model.before_every_task(task_id, train_data_regime)
 
-        for i_epoch in range(resume_from_epoch, epochs):
-            logging.info(f"TRAINING on task {task_id + 1}/{len(train_data_regime.tasksets)}, epoch: {i_epoch + 1}/{epochs}, {hvd.size()} device(s)")
-            model.epoch = i_epoch
+        for epoch in range(resume_from_epoch, epochs):
+            logging.info(f"TRAINING on task {task_id + 1}/{len(train_data_regime.tasksets)}, epoch: {epoch + 1}/{epochs}, {hvd.size()} device(s)")
 
             # Horovod: set epoch to sampler for shuffling
-            train_data_regime.set_epoch(i_epoch)
-            train_results = train_one_epoch(model, train_data_regime.get_loader(task_id), task_id, i_epoch)
+            train_data_regime.set_epoch(epoch)
+            train_results = train_one_epoch(model, train_data_regime.get_loader(task_id), task_id, epoch)
 
             if hvd.rank() == 0:
                 prefix = "train"
@@ -211,7 +217,7 @@ def train(model, train_data_regime, validate_data_regime, epochs,
             # evaluate on test set
             before_evaluate_time = time.perf_counter()
             meters = []
-            if evaluate or i_epoch + 1 == epochs:
+            if evaluate or epoch + 1 == epochs:
                 for test_task_id in range(0, task_id + 1):
                     meters.append({
                         metric: AverageMeter(f"task_{metric}")
@@ -221,8 +227,8 @@ def train(model, train_data_regime, validate_data_regime, epochs,
                 for test_task_id in range(0, task_id + 1):
                     logging.info(f"EVALUATING on task {test_task_id + 1}..{task_id + 1}")
 
-                    validate_data_regime.set_epoch(i_epoch)
-                    validate_results = evaluate_one_epoch(model, validate_data_regime.get_loader(test_task_id), task_id, test_task_id, i_epoch)
+                    validate_data_regime.set_epoch(epoch)
+                    validate_results = evaluate_one_epoch(model, validate_data_regime.get_loader(test_task_id), task_id, test_task_id, epoch)
 
                     if hvd.rank() == 0 and test_task_id == task_id:
                         prefix = "val"
@@ -243,7 +249,7 @@ def train(model, train_data_regime, validate_data_regime, epochs,
                         )
 
                     task_metrics_values = dict(
-                        test_task_id=test_task_id, epoch=i_epoch
+                        test_task_id=test_task_id, epoch=epoch
                     )
                     task_metrics_values.update(
                         {k: v for k, v in validate_results.items()}
@@ -257,7 +263,7 @@ def train(model, train_data_regime, validate_data_regime, epochs,
                         for metric in ["loss", "prec1", "prec5"]}
 
                 task_metrics_averages = dict(
-                    epoch=i_epoch
+                    epoch=epoch
                 )
                 task_metrics_averages.update(
                     {k: v for k, v in averages.items()}
@@ -299,7 +305,7 @@ def train(model, train_data_regime, validate_data_regime, epochs,
                     "Average: {} samples/sec per device\n"
                     "Average on {} device(s): {} samples/sec\n"
                     "Training loss: {train[loss]:.4f}\n".format(
-                        i_epoch + 1,
+                        epoch + 1,
                         hvd.size(),
                         train_results["time"],
                         img_sec,
