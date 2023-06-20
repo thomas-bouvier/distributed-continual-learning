@@ -36,7 +36,7 @@ def train_one_epoch(model, loader, task_id, epoch):
             desc=f"Task #{task_id + 1} {prefix} epoch #{epoch + 1}",
             disable=not enable_tqdm
     ) as progress:
-        timer = get_timer('load', batch, previous_iteration=model.use_memory_buffer)
+        timer = get_timer('load', batch, previous_iteration=True)
         timer.__enter__()
         start_batch_time = time.perf_counter()
 
@@ -58,14 +58,10 @@ def train_one_epoch(model, loader, task_id, epoch):
             last_batch_time = time.perf_counter() - start_batch_time
             epoch_time += last_batch_time
 
-            iteration = batch
-            if model.use_memory_buffer:
-                iteration -= 1
-
             if hvd.rank() == 0:
                 # Performance metrics
                 if measure_performance(step) and model.batch_metrics is not None:
-                    metrics = model.perf_metrics.get(iteration)
+                    metrics = model.perf_metrics.get(batch - 1)
 
                     batch_metrics_values = dict(
                         epoch=epoch,
@@ -107,7 +103,7 @@ def train_one_epoch(model, loader, task_id, epoch):
                 )
 
                 if measure_performance(step):
-                    metrics = model.perf_metrics.get(iteration)
+                    metrics = model.perf_metrics.get(batch - 1)
                     logging.debug(f"batch {batch} time {last_batch_time} sec")
                     logging.debug(
                         f"\t[Python] batch load time {metrics.get('load', 0)} sec ({metrics.get('load', 0)*100/last_batch_time}%)")
@@ -146,7 +142,7 @@ def train_one_epoch(model, loader, task_id, epoch):
 
             batch += 1
 
-            timer = get_timer('load', batch, previous_iteration=model.use_memory_buffer)
+            timer = get_timer('load', batch, previous_iteration=True)
             timer.__enter__()
             start_batch_time = time.perf_counter()
 
@@ -178,7 +174,7 @@ def train_one_epoch(model, loader, task_id, epoch):
     return meters
 
 
-def train(model, train_data_regime, validate_data_regime, epochs, 
+def train(model, train_data_regime, validate_data_regime, epochs,
           resume_from_task=0, resume_from_epoch=0, evaluate=True,
           dl_metrics=None, tasks_metrics=None, time_metrics=None):
     """Train a model on multiple tasks."""

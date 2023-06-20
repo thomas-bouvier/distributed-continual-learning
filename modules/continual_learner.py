@@ -44,8 +44,6 @@ class ContinualLearner(nn.Module, metaclass=abc.ABCMeta):
 
 
     def before_every_task(self, task_id, train_data_regime):
-        self.task_id = task_id
-
         # Distribute the data
         train_data_regime.get_loader(task_id)
 
@@ -63,5 +61,10 @@ class ContinualLearner(nn.Module, metaclass=abc.ABCMeta):
                     copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.backbone_model.parameters())
 
+
     def _device(self):
         return next(self.backbone_model.parameters()).device
+
+
+    def _is_on_cuda(self):
+        return next(self.parameters()).is_cuda
