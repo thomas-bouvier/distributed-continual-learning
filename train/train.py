@@ -18,7 +18,7 @@ def measure_performance(step):
 
 
 """Forward pass for the current epoch"""
-def train_one_epoch(model, loader, task_id, epoch):
+def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
     device = model._device()
     model.train()
 
@@ -88,7 +88,7 @@ def train_one_epoch(model, loader, task_id, epoch):
                     model.batch_metrics.save()
 
             # Logging
-            if batch % model.log_interval == 0 or batch == len(loader):
+            if batch % log_interval == 0 or batch == len(loader):
                 logging.debug(
                     "{0}: epoch: {1} [{2}/{3}]\t"
                     "Loss {meters[loss].avg:.4f}\t"
@@ -176,7 +176,8 @@ def train_one_epoch(model, loader, task_id, epoch):
 
 def train(model, train_data_regime, validate_data_regime, epochs,
           resume_from_task=0, resume_from_epoch=0, evaluate=True,
-          dl_metrics=None, tasks_metrics=None, time_metrics=None):
+          log_interval=10, dl_metrics=None, tasks_metrics=None,
+          time_metrics=None):
     """Train a model on multiple tasks."""
 
     global_epoch = 0
@@ -199,7 +200,7 @@ def train(model, train_data_regime, validate_data_regime, epochs,
 
             # Horovod: set epoch to sampler for shuffling
             train_data_regime.set_epoch(epoch)
-            train_results = train_one_epoch(model, train_data_regime.get_loader(task_id), task_id, epoch)
+            train_results = train_one_epoch(model, train_data_regime.get_loader(task_id), task_id, epoch, log_interval=log_interval)
 
             if hvd.rank() == 0:
                 prefix = "train"

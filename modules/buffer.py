@@ -29,10 +29,11 @@ class Buffer:
     def __init__(self, total_num_classes, sample_shape, batch_size,
         budget_per_class=16, num_candidates=8, num_representatives=8,
         provider='na+sm', discover_endpoints=True, cuda=True, cuda_rdma=False,
-        mode='flyweight'):
+        mode='standard'):
         assert mode in ('standard', 'flyweight')
 
         self.sample_shape = sample_shape
+        self.batch_size = batch_size
         self.budget_per_class = budget_per_class
         self.num_candidates = num_candidates
         self.num_representatives = num_representatives
@@ -124,7 +125,7 @@ class Buffer:
         return self.next_minibatches[step["batch"] % self.minibatches_ahead]
 
 
-    def __get_next_augmented_minibatch(self):
+    def __get_next_augmented_minibatch(self, step):
         return self.next_minibatches[(step["batch"] + 1) % self.minibatches_ahead]
 
 

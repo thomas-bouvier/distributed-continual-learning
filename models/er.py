@@ -22,8 +22,6 @@ class Er(ContinualLearner):
         config,
         optimizer_regime,
         batch_size,
-        log_buffer,
-        log_interval,
         batch_metrics=None,
         state_dict=None,
     ):
@@ -35,21 +33,20 @@ class Er(ContinualLearner):
             batch_metrics,
             state_dict,
         )
-
         self.use_mask = use_mask
         self.config = config
-        self.log_buffer = log_buffer
-        self.log_interval = log_interval
 
 
     def before_all_tasks(self, train_data_regime):
-        self.buffer = Buffer(train_data_regime.total_num_classes, train_data_regime.sample_shape, self.batch_size,
+        self.buffer = Buffer(train_data_regime.total_num_classes,
+            train_data_regime.sample_shape, self.batch_size,
             budget_per_class=self.config.get('rehearsal_size'),
             num_candidates=self.config.get('num_candidates'),
             num_representatives=self.config.get('num_representatives'),
             provider=self.config.get('provider'),
             discover_endpoints=self.config.get('discover_endpoints'),
-            cuda=self._is_on_cuda(), cuda_rdma=self.config.get('cuda_rdma'))
+            cuda=self._is_on_cuda(), cuda_rdma=self.config.get('cuda_rdma'),
+            mode=self.config.get('implementation'))
 
         self.mask = torch.ones(train_data_regime.total_num_classes, device=self._device()).float()
         self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')

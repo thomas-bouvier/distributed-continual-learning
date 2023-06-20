@@ -438,8 +438,6 @@ class Experiment:
             model_config,
             optimizer_regime,
             self.args.batch_size,
-            self.args.log_buffer,
-            self.args.log_interval,
             batch_metrics
         )
         logging.info(f"Created model with configuration: {json.dumps(model_config, indent=2)}")
@@ -532,7 +530,8 @@ class Experiment:
         train(
             self.model, self.train_data_regime, self.validate_data_regime,
             self.args.epochs, resume_from_task=self.resume_from_task,
-            resume_from_epoch=self.resume_from_epoch, dl_metrics=dl_metrics,
+            resume_from_epoch=self.resume_from_epoch,
+            log_interval=self.args.log_interval, dl_metrics=dl_metrics,
             tasks_metrics=tasks_metrics, time_metrics=time_metrics
         )
 

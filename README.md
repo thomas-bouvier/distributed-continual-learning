@@ -15,7 +15,7 @@ Some Python code comes from the [convNet.pytorch repository](https://github.com/
 The current version of the code has been tested with Python 3.10.0 with the following package versions:
 
 * `pytorch 1.13.1`
-* `timm`
+* `timm 0.9.2`
 * `horovod 0.26.1`
 * `continuum 1.2.7`
 
@@ -37,12 +37,34 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|
-| `--backbone` | Yes | DL model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
+| `--backbone` | Yes | DL backbone model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
 | `--backbone-config` |   | Model-specific parameters  | ConvNext requires `"{'lr_min': 1e-6}"` |
-| `--model` | Default: `base` | Continual Learning strategy | `base`, `er` |
+| `--model` | Default: `base` | Continual Learning strategy | `Er` |
 | `--model-config` |   | Agent-specific parameters  | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"` allows to reset the model internal state between tasks<br>Instance-incremental scenario (domain) with 2 tasks: `"{'scenario': 'domain', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
 | `--dataset` |   | Dataset  | `mnist`, `cifar10`, `cifar100`, `tinyimagenet`, `imagenet`, `imagenet_blurred`, `ptycho` |
+
+## Continual Learning Strategies
+
+Specific implementations have to be selected using `--model-config "{'implementation': <implementation>}"`. ER with implementation `standard` was used in the paper.
+
+| Approach | Name | Available Implementations |
+|---|---|---|
+| Experience Replay (ER) | `Er` | `standard`, `flyweight` |
+
+### Baselines
+
+#### From Scratch
+
+```
+python main.py --backbone <backbone_model> --dataset <dataset> --model-config "{'reset_state_dict': True}" --tasksets-config "{<..tasksets-config, 'concatenate_tasksets': True>}"
+```
+
+#### Incremental
+
+```
+python main.py --backbone <backbone_model> --dataset <dataset> --tasksets-config "{<tasksets-config>}"
+```
 
 ## Examples
 
@@ -67,27 +89,3 @@ python main.py --backbone resnet18 --model er --model-config "{'rehearsal_ratio'
 python main.py --backbone resnet18 --model er --model-config "{'rehearsal_ratio': 100}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
 python main.py --backbone resnet50 --model er --dataset tinyimagenet --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
 ```
-
-#### Baselines
-
-##### From Scratch
-
-```
-python main.py --model <model> --dataset <dataset> --agent-config "{'reset_state_dict': True}" --tasksets-config "{<..tasksets-config, 'concatenate_tasksets': True>}"
-```
-
-##### Incremental
-
-```
-python main.py --model <model> --dataset <dataset> --tasksets-config "{<tasksets-config>}"
-```
-
-#### Experience Replay (ER) implementations
-
-**er_local**: local sampling in Python, very inefficient, not correct as representatives are not shared between processes
-
-**er**: global sampling in Python, very inefficient
-
-**er_cpp**: global sampling with Neomem
-
-**er_cpp_flyweight**: global sampling with Neomem, buffers declared once in Python and populated from C++
