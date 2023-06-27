@@ -6,7 +6,7 @@ base:
   backbone:
   backbone_config:
   model:
-  model_config:
+  buffer_config:
   checkpoint:
   batch_size:
   eval_batch_size:

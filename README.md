@@ -19,7 +19,7 @@ The current version of the code has been tested with Python 3.10.0 with the foll
 * `horovod 0.26.1`
 * `continuum 1.2.7`
 
-Make sure to install [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/distributed-rehearsal-buffer) if using a `cpp` implementation for rehearsal. Simlink it using `ln -s ../distributed-rehearsal-buffer cpp_loader`.
+Make sure to install [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/neomem). Simlink it using `ln -s ../neomem cpp_loader`.
 
 Further Python-packages used are listed in requirements.txt. Assuming Python and pip are set up, these packages can be installed using:
 
@@ -31,7 +31,7 @@ In an HPC environment, we strongly advise to use Spack to manage dependencies.
 
 ## Usage
 
-Parameters defined in the `config.yaml` override CLI parameters. However, values for `agent_config`, `model_config`, `tasksets_config` will be concatenated with those defined by CLI, instead of override them ;
+Parameters defined in the `config.yaml` override CLI parameters. However, values for `backbone_config`, `buffer_config`, `tasksets_config` will be concatenated with those defined by CLI, instead of override them ;
 
 Values for `optimizer_regime` will override regimes defined by `models/` in Python.
 
@@ -39,8 +39,8 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 |---|---|---|---|
 | `--backbone` | Yes | DL backbone model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
 | `--backbone-config` |   | Model-specific parameters  | ConvNext requires `"{'lr_min': 1e-6}"` |
-| `--model` | Default: `base` | Continual Learning strategy | `Er` |
-| `--model-config` |   | Agent-specific parameters  | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
+| `--model` | Default: `er` | Continual Learning strategy | `Er` |
+| `--buffer-config` |   | Rehearsal buffer parameters  | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"` allows to reset the model internal state between tasks<br>Instance-incremental scenario (domain) with 2 tasks: `"{'scenario': 'domain', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
 | `--dataset` |   | Dataset  | `mnist`, `cifar10`, `cifar100`, `tinyimagenet`, `imagenet`, `imagenet_blurred`, `ptycho` |
 

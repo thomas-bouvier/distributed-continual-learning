@@ -16,49 +16,37 @@ class Er(ContinualLearner):
 
     def __init__(
         self,
-        backbone_model,
-        use_mask,
-        use_amp,
-        config,
+        backbone: nn.Module,
         optimizer_regime,
+        use_amp,
         batch_size,
+        buffer_config,
         batch_metrics=None,
-        state_dict=None,
     ):
         super(Er, self).__init__(
-            backbone_model,
-            use_amp,
+            backbone,
             optimizer_regime,
+            use_amp,
             batch_size,
+            buffer_config,
             batch_metrics,
-            state_dict,
         )
-        self.use_mask = use_mask
-        self.config = config
 
 
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(train_data_regime.total_num_classes,
             train_data_regime.sample_shape, self.batch_size,
-            budget_per_class=self.config.get('rehearsal_size'),
-            num_candidates=self.config.get('num_candidates'),
-            num_representatives=self.config.get('num_representatives'),
-            provider=self.config.get('provider'),
-            discover_endpoints=self.config.get('discover_endpoints'),
-            cuda=self._is_on_cuda(), cuda_rdma=self.config.get('cuda_rdma'),
-            mode=self.config.get('implementation'))
-
-        self.mask = torch.ones(train_data_regime.total_num_classes, device=self._device()).float()
-        self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
+            budget_per_class=self.buffer_config.get('rehearsal_size'),
+            num_candidates=self.buffer_config.get('num_candidates'),
+            num_representatives=self.buffer_config.get('num_representatives'),
+            provider=self.buffer_config.get('provider'),
+            discover_endpoints=self.buffer_config.get('discover_endpoints'),
+            cuda=self._is_on_cuda(), cuda_rdma=self.buffer_config.get('cuda_rdma'),
+            mode=self.buffer_config.get('implementation'))
 
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
-
-        if self.use_mask:
-            # Create mask so the loss is only used for classes learnt during this task
-            self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self._device()).float()
-            self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
 
         if task_id > 0:
             self.buffer.enable_augmentation()
@@ -81,7 +69,7 @@ class Er(ContinualLearner):
 
             # Forward pass
             with autocast(enabled=self.use_amp):
-                output = self.backbone_model(aug_x)
+                output = self.backbone(aug_x)
                 loss = self.criterion(output, aug_y)
 
             assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"

@@ -77,12 +77,6 @@ parser.add_argument(
     help="sample data from a same subset of the dataset at each epoch",
 )
 parser.add_argument(
-    "--log-buffer",
-    action="store_true",
-    default=False,
-    help="log replay buffers to tensorboard",
-)
-parser.add_argument(
     "--backbone",
     metavar="BACKBONE",
     default=None,
@@ -102,14 +96,9 @@ parser.add_argument(
     help="available models: " + " | ".join(model_names),
 )
 parser.add_argument(
-    "--model-config",
+    "--buffer-config",
     default="{}",
-    help="additional model architecture configuration",
-)
-parser.add_argument(
-    "--use-mask",
-    action="store_true",
-    help="use a continual mask on classes seen so far"
+    help="rehearsal buffer configuration",
 )
 parser.add_argument(
     "--load-checkpoint",
@@ -250,18 +239,10 @@ parser.add_argument("--save-dir",
     default="",
     help="saved folder"
 )
-parser.add_argument(
-    "--tensorboard",
-    action="store_true",
-    default=False,
-    help="set tensorboard logging",
-)
-
 
 def main():
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-    args.buffer_tensorboard = args.log_buffer and args.tensorboard
     args.evaluate = not args.training_only
 
     mp.set_start_method("spawn")
@@ -273,7 +254,7 @@ def main():
             yparam = yparams[k]
             if yparam:
                 params[k] = yparam
-                if k == 'model_config' or k == 'agent_config' or k == 'tasksets_config' or k == 'optimizer_regime':
+                if k == 'buffer_config' or k == 'backbone_config' or k == 'tasksets_config' or k == 'optimizer_regime':
                     if v:
                         params[k] = str(literal_eval(v) | literal_eval(yparam))
     args = Namespace(**params)
@@ -323,7 +304,7 @@ def main():
     xp.run()
     wandb.finish()
 
-    logging.info("Done!")
+    logging.info("Done 🎉🎉🎉")
     sys.exit(0)
 
 
@@ -351,19 +332,19 @@ class Experiment:
         #--------------------------#
 
         # Creating the model
-        backbone_model_config = {
+        backbone_config = {
             "num_classes": total_num_classes,
             "lr": self.args.lr,
             "warmup_epochs": self.args.warmup_epochs,
             "num_epochs": self.args.epochs,
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
         }
-        if self.args.model_config != "":
-            backbone_model_config = dict(
-                backbone_model_config, **literal_eval(self.args.backbone_config))
-        backbone_model = getattr(backbone, self.args.backbone)(backbone_model_config)
+        if self.args.backbone_config != "":
+            backbone_config = dict(
+                backbone_config, **literal_eval(self.args.backbone_config))
+        backbone_model = getattr(backbone, self.args.backbone)(backbone_config)
         logging.info(
-            f"Created backbone model {self.args.backbone} with configuration: {json.dumps(backbone_model_config, indent=2)}"
+            f"Created backbone model {self.args.backbone} with configuration: {json.dumps(backbone_config, indent=2)}"
         )
         num_parameters = sum([l.nelement() for l in backbone_model.parameters()])
         logging.info(f"Number of parameters: {num_parameters}")
@@ -386,6 +367,19 @@ class Experiment:
 
         #-------------------------------------------------------------------------------------------------#
 
+        #------------------#
+        #----- BUFFER -----#
+        #------------------#
+
+        buffer_config = literal_eval(self.args.buffer_config)
+        if bool(buffer_config):
+            rehearsal_ratio = literal_eval(self.args.buffer_config).get("rehearsal_ratio", 30)
+            buffer_config |= {
+                "rehearsal_size": math.floor(self.train_data_regime.total_num_samples * rehearsal_ratio / 100 / total_num_classes / hvd.size())
+            }
+
+        #-------------------------------------------------------------------------------------------------#
+
         #----------------------#
         #----- CHECKPOINT -----#
         #----------------------#
@@ -400,7 +394,6 @@ class Experiment:
 
             # Override configuration with checkpoint info
             model_name = checkpoint.get("model", model_name)
-            model_config = checkpoint.get("config", model_config)
 
             # Load checkpoint
             logging.info(f"Loading model {self.args.load_checkpoint}..")
@@ -425,22 +418,15 @@ class Experiment:
 
         # Creating the continual learning model
         model = getattr(models, self.args.model)
-        model_config = literal_eval(self.args.model_config)
-        if bool(model_config):
-            rehearsal_ratio = literal_eval(self.args.model_config).get("rehearsal_ratio", 30)
-            model_config |= {
-                "rehearsal_size": math.floor(self.train_data_regime.total_num_samples * rehearsal_ratio / 100 / total_num_classes / hvd.size())
-            }
         self.model = model(
             backbone_model,
-            self.args.use_mask,
-            self.args.use_amp,
-            model_config,
             optimizer_regime,
+            self.args.use_amp,
             self.args.batch_size,
+            buffer_config,
             batch_metrics
         )
-        logging.info(f"Created model with configuration: {json.dumps(model_config, indent=2)}")
+        logging.info(f"Created model with buffer configuration: {json.dumps(buffer_config, indent=2)}")
 
         # Saving an initial checkpoint
         """
@@ -449,7 +435,6 @@ class Experiment:
                 "task": 0,
                 "epoch": 0,
                 "model": self.args.model,
-                "model_config": self.args.model_config,
                 "state_dict": self.model.model.state_dict(),
                 "optimizer_state_dict": self.model.optimizer_regime.state_dict(),
             },
@@ -540,7 +525,6 @@ class Experiment:
                 "task": len(self.train_data_regime.tasksets) - 1,
                 "epoch": self.args.epochs - 1,
                 "model": self.args.backbone,
-                "model_config": self.args.backbone_config,
                 "state_dict": self.model.backbone.state_dict(),
                 "optimizer_state_dict": self.model.optimizer_regime.state_dict()
             },
