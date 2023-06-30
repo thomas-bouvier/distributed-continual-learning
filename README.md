@@ -46,7 +46,7 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 
 ## Continual Learning Strategies
 
-Specific implementations have to be selected using `--model-config "{'implementation': <implementation>}"`. ER with implementation `standard` was used in the paper.
+Specific implementations have to be selected using `--buffer-config "{'implementation': <implementation>}"`. ER with implementation `standard` was used in the paper.
 
 | Approach | Name | Available Implementations |
 |---|---|---|
@@ -85,7 +85,7 @@ python main.py --backbone efficientnetv2 --dataset imagenet_blurred
 python main.py --backbone mnistnet --dataset mnist --tasksets-config "{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"
 python main.py --backbone resnet18 --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
 python main.py --backbone resnet18 --model er --dataset cifar100 --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
-python main.py --backbone resnet18 --model er --model-config "{'rehearsal_ratio': 100}" --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
-python main.py --backbone resnet18 --model er --model-config "{'rehearsal_ratio': 100}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
+python main.py --backbone resnet18 --model er --buffer-config "{'rehearsal_ratio': 100}" --dataset cifar10 --tasksets-config "{'scenario': 'class', 'initial_increment': 4, 'increment': 3}"
+python main.py --backbone resnet18 --model er --buffer-config "{'rehearsal_ratio': 100}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
 python main.py --backbone resnet50 --model er --dataset tinyimagenet --tasksets-config "{'scenario': 'domain', 'num_tasks': 5}"
 ```

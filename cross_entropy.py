@@ -9,6 +9,8 @@ def cross_entropy(weight=None, reduction='none'):
     # use_mask
     self.mask = torch.tensor(train_data_regime.previous_classes_mask, device=self._device()).float()
     self.criterion = nn.CrossEntropyLoss(weight=self.mask, reduction='none')
+
+    # meters["loss"].update(loss.sum() / self.mask[aug_y].sum())
 """
 
 class CrossEntropyLoss(nn.CrossEntropyLoss):

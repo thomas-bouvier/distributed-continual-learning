@@ -317,6 +317,7 @@ class Experiment:
         self.save_path = save_path
 
         total_num_classes = self.prepare_dataset()
+
         batch_metrics_path = path.join(self.save_path, "batch_metrics")
         batch_metrics = ResultsLog(
             batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir,

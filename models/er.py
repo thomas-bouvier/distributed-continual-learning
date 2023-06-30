@@ -49,12 +49,11 @@ class Er(ContinualLearner):
         super().before_every_task(task_id, train_data_regime)
 
         if task_id > 0:
-            self.buffer.enable_augmentation()
+            self.buffer.enable_augmentations()
 
 
     def train_one_step(self, x, y, meters, step, measure_performance=False):
-        '''Former nil_cpp implementation
-
+        '''
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         '''
         w = torch.ones(self.batch_size, device=self._device())
@@ -87,7 +86,7 @@ class Er(ContinualLearner):
 
             # Measure accuracy and record metrics
             prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
-            meters["loss"].update(loss.sum() / self.mask[aug_y].sum())
+            meters["loss"].update(loss.sum() / aug_y.size(0))
             meters["prec1"].update(prec1, aug_x.size(0))
             meters["prec5"].update(prec5, aug_x.size(0))
             meters["num_samples"].update(aug_x.size(0))

@@ -3,6 +3,7 @@ import copy
 import ctypes
 import horovod.torch as hvd
 import numpy as np
+import logging
 import torch
 
 from torch import nn
@@ -10,8 +11,6 @@ from torch.nn import functional as F
 
 from utils.meters import get_timer
 from utils.log import get_logging_level
-
-import neomem
 
 
 class AugmentedMinibatch:
@@ -40,6 +39,18 @@ class Buffer:
         self.next_minibatches = []
         self.mode = mode
         self.init = False
+        self.high_performance = True
+
+        try:
+            global neomem
+            import neomem
+        except ImportError:
+            raise ImportError(
+                f"Neomem is not installed (high-performance distributed"
+                " rehearsal buffer), fallback to a low-performance, local"
+                " rehearsal buffer."
+            )
+            self.high_performance = False
 
         engine = neomem.EngineLoader(provider,
             ctypes.c_uint16(hvd.rank()).value, cuda_rdma
@@ -117,8 +128,8 @@ class Buffer:
                 )
 
 
-    def enable_augmentations(enabled=True):
-        self.dsl.enable_augmentations(enabled)
+    def enable_augmentations(self, enabled=True):
+        self.dsl.enable_augmentation(enabled)
 
 
     def __get_current_augmented_minibatch(self, step):

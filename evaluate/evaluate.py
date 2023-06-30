@@ -47,7 +47,7 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
                     display(f"val_batch_{task_id}_{epoch}_{batch}", x, captions=captions)
 
                 with autocast(enabled=model.use_amp):
-                    output = model.backbone_model(x)
+                    output = model.backbone(x)
                     loss = criterion(output, y)
 
                 prec1, prec5 = accuracy(output, y, topk=(1, 5))
