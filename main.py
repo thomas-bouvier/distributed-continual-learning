@@ -33,7 +33,9 @@ from utils.utils import move_cuda
 backbone_model_names = sorted(
     name
     for name in backbone.__dict__
-    if name.islower() and not name.startswith("__") and callable(backbone.__dict__[name])
+    if name.islower()
+    and not name.startswith("__")
+    and callable(backbone.__dict__[name])
 )
 
 model_names = sorted(
@@ -84,9 +86,7 @@ parser.add_argument(
     help="available backbone models: " + " | ".join(backbone_model_names),
 )
 parser.add_argument(
-    "--backbone-config",
-    default="{}",
-    help="additional backbone configuration"
+    "--backbone-config", default="{}", help="additional backbone configuration"
 )
 parser.add_argument(
     "--model",
@@ -178,11 +178,7 @@ parser.add_argument(
     metavar="S",
     help="random seed (default: 42)",
 )
-parser.add_argument(
-    "--log-level",
-    default='info',
-    help="logging level"
-)
+parser.add_argument("--log-level", default="info", help="logging level")
 parser.add_argument(
     "--log-interval",
     type=int,
@@ -234,11 +230,8 @@ parser.add_argument(
     default="./results",
     help="results dir",
 )
-parser.add_argument("--save-dir",
-    metavar="SAVE_DIR",
-    default="",
-    help="saved folder"
-)
+parser.add_argument("--save-dir", metavar="SAVE_DIR", default="", help="saved folder")
+
 
 def main():
     args = parser.parse_args()
@@ -254,7 +247,12 @@ def main():
             yparam = yparams[k]
             if yparam:
                 params[k] = yparam
-                if k == 'buffer_config' or k == 'backbone_config' or k == 'tasksets_config' or k == 'optimizer_regime':
+                if (
+                    k == "buffer_config"
+                    or k == "backbone_config"
+                    or k == "tasksets_config"
+                    or k == "optimizer_regime"
+                ):
                     if v:
                         params[k] = str(literal_eval(v) | literal_eval(yparam))
     args = Namespace(**params)
@@ -291,9 +289,11 @@ def main():
             wandb.save(path.join(save_path, "args.json"))
         wandb.config.update(args)
 
-        setup_logging(path.join(save_path, "log.txt"),
-                      level=args.log_level,
-                      dummy=hvd.local_rank() > 0)
+        setup_logging(
+            path.join(save_path, "log.txt"),
+            level=args.log_level,
+            dummy=hvd.local_rank() > 0,
+        )
         logging.info(f"Saving to {save_path}")
 
     device = "GPU" if args.cuda else "CPU"
@@ -320,17 +320,18 @@ class Experiment:
 
         batch_metrics_path = path.join(self.save_path, "batch_metrics")
         batch_metrics = ResultsLog(
-            batch_metrics_path, title="Batch metrics - %s" % self.args.save_dir,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
+            batch_metrics_path,
+            title="Batch metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
         self.create_model(total_num_classes, batch_metrics)
 
     def create_model(self, total_num_classes, batch_metrics=None):
-        #-------------------------------------------------------------------------------------------------#
+        # -------------------------------------------------------------------------------------------------#
 
-        #--------------------------#
-        #----- BACKBONE MODEL -----#
-        #--------------------------#
+        # --------------------------#
+        # ----- BACKBONE MODEL -----#
+        # --------------------------#
 
         # Creating the model
         backbone_config = {
@@ -342,7 +343,8 @@ class Experiment:
         }
         if self.args.backbone_config != "":
             backbone_config = dict(
-                backbone_config, **literal_eval(self.args.backbone_config))
+                backbone_config, **literal_eval(self.args.backbone_config)
+            )
         backbone_model = getattr(backbone, self.args.backbone)(backbone_config)
         logging.info(
             f"Created backbone model {self.args.backbone} with configuration: {json.dumps(backbone_config, indent=2)}"
@@ -363,59 +365,35 @@ class Experiment:
             hvd.Average,
             self.args.gradient_predivide_factor,
             optimizer_regime_dict,
-            self.args.use_amp
+            self.args.use_amp,
         )
 
-        #-------------------------------------------------------------------------------------------------#
+        # -------------------------------------------------------------------------------------------------#
 
-        #------------------#
-        #----- BUFFER -----#
-        #------------------#
+        # ------------------#
+        # ----- BUFFER -----#
+        # ------------------#
 
         buffer_config = literal_eval(self.args.buffer_config)
         if bool(buffer_config):
-            rehearsal_ratio = literal_eval(self.args.buffer_config).get("rehearsal_ratio", 30)
+            rehearsal_ratio = literal_eval(self.args.buffer_config).get(
+                "rehearsal_ratio", 30
+            )
             buffer_config |= {
-                "rehearsal_size": math.floor(self.train_data_regime.total_num_samples * rehearsal_ratio / 100 / total_num_classes / hvd.size())
+                "rehearsal_size": math.floor(
+                    self.train_data_regime.total_num_samples
+                    * rehearsal_ratio
+                    / 100
+                    / total_num_classes
+                    / hvd.size()
+                )
             }
 
-        #-------------------------------------------------------------------------------------------------#
+        # -------------------------------------------------------------------------------------------------#
 
-        #----------------------#
-        #----- CHECKPOINT -----#
-        #----------------------#
-
-        # Loading the checkpoint if given
-        resume_from_task = 0
-        resume_from_epoch = 0
-        if hvd.rank() == 0 and self.args.load_checkpoint:
-            if not path.isfile(self.args.load_checkpoint):
-                parser.error(f"Invalid checkpoint: {self.args.load_checkpoint}")
-            checkpoint = torch.load(self.args.load_checkpoint, map_location="cpu")
-
-            # Override configuration with checkpoint info
-            model_name = checkpoint.get("model", model_name)
-
-            # Load checkpoint
-            logging.info(f"Loading model {self.args.load_checkpoint}..")
-            model.load_state_dict(checkpoint["state_dict"])
-            #optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
-
-            # Broadcast resume information
-            resume_from_task = checkpoint["task"]
-            resume_from_epoch = checkpoint["epoch"]
-            logging.info(f"Resuming from task {resume_from_task} epoch {resume_from_epoch}")
-
-        self.resume_from_task = hvd.broadcast(torch.tensor(resume_from_task), root_rank=0,
-                    name='resume_from_task').item()
-        self.resume_from_epoch = hvd.broadcast(torch.tensor(resume_from_epoch), root_rank=0,
-                    name='resume_from_epoch').item()
-
-        #-------------------------------------------------------------------------------------------------#
-
-        #-----------------#
-        #----- MODEL -----#
-        #-----------------#
+        # -----------------#
+        # ----- MODEL -----#
+        # -----------------#
 
         # Creating the continual learning model
         model = getattr(models, self.args.model)
@@ -425,9 +403,44 @@ class Experiment:
             self.args.use_amp,
             self.args.batch_size,
             buffer_config,
-            batch_metrics
+            batch_metrics,
         )
-        logging.info(f"Created model with buffer configuration: {json.dumps(buffer_config, indent=2)}")
+        logging.info(
+            f"Created model with buffer configuration: {json.dumps(buffer_config, indent=2)}"
+        )
+
+        # -------------------------------------------------------------------------------------------------#
+
+        # ----------------------#
+        # ----- CHECKPOINT -----#
+        # ----------------------#
+
+        # Loading the checkpoint if given
+        resume_from_task = 0
+        resume_from_epoch = 0
+        if hvd.rank() == 0 and self.args.load_checkpoint:
+            if not path.isfile(self.args.load_checkpoint):
+                parser.error(f"Invalid checkpoint: {self.args.load_checkpoint}")
+            checkpoint = torch.load(self.args.load_checkpoint, map_location="cpu")
+
+            # Load checkpoint
+            logging.info(f"Loading model {self.args.load_checkpoint}...")
+            self.model.backbone.load_state_dict(checkpoint["state_dict"])
+            # optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
+
+            # Broadcast resume information
+            resume_from_task = checkpoint["task"]
+            resume_from_epoch = checkpoint["epoch"]
+            logging.info(
+                f"Resuming from task {resume_from_task} epoch {resume_from_epoch}"
+            )
+
+        self.resume_from_task = hvd.broadcast(
+            torch.tensor(resume_from_task), root_rank=0, name="resume_from_task"
+        ).item()
+        self.resume_from_epoch = hvd.broadcast(
+            torch.tensor(resume_from_epoch), root_rank=0, name="resume_from_epoch"
+        ).item()
 
         # Saving an initial checkpoint
         """
@@ -444,7 +457,6 @@ class Experiment:
             dummy=hvd.rank() > 0,
         )
         """
-
 
     def prepare_dataset(self):
         tasksets_config = {"continual": bool(self.args.tasksets_config)}
@@ -492,33 +504,43 @@ class Experiment:
                 else self.args.batch_size,
             },
         )
-        logging.info(f"Created test data regime: {str(self.validate_data_regime.config)}")
+        logging.info(
+            f"Created test data regime: {str(self.validate_data_regime.config)}"
+        )
 
         return self.train_data_regime.total_num_classes
 
     def run(self):
         dl_metrics_path = path.join(self.save_path, "dl_metrics")
         dl_metrics = ResultsLog(
-            dl_metrics_path, title="DL metrics - %s" % self.args.save_dir,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
+            dl_metrics_path,
+            title="DL metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
         tasks_metrics_path = path.join(self.save_path, "tasks_metrics")
         tasks_metrics = ResultsLog(
-            tasks_metrics_path, title="Tasks metrics - %s" % self.args.save_dir,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
+            tasks_metrics_path,
+            title="Tasks metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
         time_metrics_path = path.join(self.save_path, "time_metrics")
         time_metrics = ResultsLog(
-            time_metrics_path, title="Time metrics - %s" % self.args.save_dir,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0
+            time_metrics_path,
+            title="Time metrics - %s" % self.args.save_dir,
+            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
 
         train(
-            self.model, self.train_data_regime, self.validate_data_regime,
-            self.args.epochs, resume_from_task=self.resume_from_task,
+            self.model,
+            self.train_data_regime,
+            self.validate_data_regime,
+            self.args.epochs,
+            resume_from_task=self.resume_from_task,
             resume_from_epoch=self.resume_from_epoch,
-            log_interval=self.args.log_interval, dl_metrics=dl_metrics,
-            tasks_metrics=tasks_metrics, time_metrics=time_metrics
+            log_interval=self.args.log_interval,
+            dl_metrics=dl_metrics,
+            tasks_metrics=tasks_metrics,
+            time_metrics=time_metrics,
         )
 
         save_checkpoint(
@@ -527,18 +549,20 @@ class Experiment:
                 "epoch": self.args.epochs - 1,
                 "model": self.args.backbone,
                 "state_dict": self.model.backbone.state_dict(),
-                "optimizer_state_dict": self.model.optimizer_regime.state_dict()
+                "optimizer_state_dict": self.model.optimizer_regime.state_dict(),
             },
             self.save_path,
             is_final=True,
-            dummy=hvd.rank() > 0
+            dummy=hvd.rank() > 0,
         )
 
 
 def on_exit(sig, frame):
     logging.info("Interrupted")
     wandb.finish()
-    os.system("kill $(ps aux | grep multiprocessing.spawn | grep -v grep | awk '{print $2}')")
+    os.system(
+        "kill $(ps aux | grep multiprocessing.spawn | grep -v grep | awk '{print $2}')"
+    )
     sys.exit(0)
 
 
