@@ -21,6 +21,7 @@ class ContinualLearner(nn.Module):
         optimizer_regime,
         use_amp,
         batch_size,
+        config,
         buffer_config,
         batch_metrics=None,
     ):
@@ -30,6 +31,7 @@ class ContinualLearner(nn.Module):
         self.optimizer_regime = optimizer_regime
         self.use_amp = use_amp
         self.batch_size = batch_size
+        self.config = config
         self.buffer_config = buffer_config
         self.batch_metrics = batch_metrics
 
@@ -43,12 +45,14 @@ class ContinualLearner(nn.Module):
         # Distribute the data
         train_data_regime.get_loader(task_id)
 
+        """
         if self.best_model is not None:
             logging.debug(
                 f"Loading best model with minimal eval loss ({self.minimal_eval_loss}).."
             )
             self.backbone.load_state_dict(self.best_model)
             self.minimal_eval_loss = float("inf")
+        """
 
         if task_id > 0:
             if self.config.get("reset_state_dict", False):

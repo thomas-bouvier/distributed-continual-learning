@@ -96,6 +96,11 @@ parser.add_argument(
     help="available models: " + " | ".join(model_names),
 )
 parser.add_argument(
+    "--model-config",
+    default="{}",
+    help="model configuration",
+)
+parser.add_argument(
     "--buffer-config",
     default="{}",
     help="rehearsal buffer configuration",
@@ -379,21 +384,25 @@ class Experiment:
             rehearsal_ratio = literal_eval(self.args.buffer_config).get(
                 "rehearsal_ratio", 30
             )
-            buffer_config |= {
-                "rehearsal_size": math.floor(
-                    self.train_data_regime.total_num_samples
-                    * rehearsal_ratio
-                    / 100
-                    / total_num_classes
-                    / hvd.size()
-                )
-            }
+            rehearsal_size = math.floor(
+                self.train_data_regime.total_num_samples
+                * rehearsal_ratio
+                / 100
+                / total_num_classes
+                / hvd.size()
+            )
+            assert (
+                rehearsal_size > 0
+            ), "Choose rehearsal_ratio so as to to store at least some samples per class on all processes"
+            buffer_config |= {"rehearsal_size": rehearsal_size}
 
         # -------------------------------------------------------------------------------------------------#
 
         # -----------------#
         # ----- MODEL -----#
         # -----------------#
+
+        model_config = literal_eval(self.args.model_config)
 
         # Creating the continual learning model
         model = getattr(models, self.args.model)
@@ -402,6 +411,7 @@ class Experiment:
             optimizer_regime,
             self.args.use_amp,
             self.args.batch_size,
+            model_config,
             buffer_config,
             batch_metrics,
         )

@@ -12,7 +12,7 @@ from utils.log import PerformanceResultsLog
 
 
 class Er(ContinualLearner):
-    '''Model for classifying images, "enriched" as ContinualLearner object.'''
+    """Model for classifying images, "enriched" as ContinualLearner object."""
 
     def __init__(
         self,
@@ -20,6 +20,7 @@ class Er(ContinualLearner):
         optimizer_regime,
         use_amp,
         batch_size,
+        config,
         buffer_config,
         batch_metrics=None,
     ):
@@ -28,22 +29,25 @@ class Er(ContinualLearner):
             optimizer_regime,
             use_amp,
             batch_size,
+            config,
             buffer_config,
             batch_metrics,
         )
 
-
     def before_all_tasks(self, train_data_regime):
-        self.buffer = Buffer(train_data_regime.total_num_classes,
-            train_data_regime.sample_shape, self.batch_size,
-            budget_per_class=self.buffer_config.get('rehearsal_size'),
-            num_candidates=self.buffer_config.get('num_candidates'),
-            num_representatives=self.buffer_config.get('num_representatives'),
-            provider=self.buffer_config.get('provider'),
-            discover_endpoints=self.buffer_config.get('discover_endpoints'),
-            cuda=self._is_on_cuda(), cuda_rdma=self.buffer_config.get('cuda_rdma'),
-            mode=self.buffer_config.get('implementation'))
-
+        self.buffer = Buffer(
+            train_data_regime.total_num_classes,
+            train_data_regime.sample_shape,
+            self.batch_size,
+            budget_per_class=self.buffer_config.get("rehearsal_size"),
+            num_candidates=self.buffer_config.get("num_candidates"),
+            num_representatives=self.buffer_config.get("num_representatives"),
+            provider=self.buffer_config.get("provider"),
+            discover_endpoints=self.buffer_config.get("discover_endpoints"),
+            cuda=self._is_on_cuda(),
+            cuda_rdma=self.buffer_config.get("cuda_rdma"),
+            implementation=self.buffer_config.get("implementation"),
+        )
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
@@ -51,18 +55,18 @@ class Er(ContinualLearner):
         if task_id > 0:
             self.buffer.enable_augmentations()
 
-
     def train_one_step(self, x, y, meters, step, measure_performance=False):
-        '''
+        """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
-        '''
+        """
         w = torch.ones(self.batch_size, device=self._device())
 
         # Get data from the last iteration (blocking)
-        aug_x, aug_y, aug_w = self.buffer.update(x, y, w, step,
-                                        measure_performance=measure_performance)
+        aug_x, aug_y, aug_w = self.buffer.update(
+            x, y, w, step, measure_performance=measure_performance
+        )
 
-        with get_timer('train', step["batch"]):
+        with get_timer("train", step["batch"]):
             self.optimizer_regime.update(step["epoch"], step["batch"])
             self.optimizer_regime.zero_grad()
 
@@ -71,10 +75,13 @@ class Er(ContinualLearner):
                 output = self.backbone(aug_x)
                 loss = self.criterion(output, aug_y)
 
-            assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
+            # TODO: if true for multiple iterations, trigger this
+            # assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
 
             # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
-            total_weight = hvd.allreduce(torch.sum(aug_w), name='total_weight', op=hvd.Sum)
+            total_weight = hvd.allreduce(
+                torch.sum(aug_w), name="total_weight", op=hvd.Sum
+            )
             dw = aug_w / total_weight * self.batch_size * hvd.size() / self.batch_size
 
             # Backward pass
