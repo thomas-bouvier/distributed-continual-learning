@@ -52,6 +52,9 @@ class Er(ContinualLearner):
             implementation=self.buffer_config.get("implementation"),
         )
 
+        x, y, _ = next(iter(train_data_regime.get_loader(0)))
+        self.buffer.add_data(x, y, dict(batch=-1))
+
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 

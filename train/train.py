@@ -14,6 +14,8 @@ from utils.utils import move_cuda
 
 
 def measure_performance(step):
+    if -1 in step.values():
+        return False
     return (
         step["task_id"] == 1
         and step["epoch"] == 10

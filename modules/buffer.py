@@ -152,7 +152,7 @@ class Buffer:
             if n > 0:
                 logging.debug(f"Received {n} samples from other nodes")
 
-            if measure_performance:
+            if measure_performance and perf_metrics is not None:
                 cpp_metrics = self.dsl.get_metrics(step["batch"])
                 perf_metrics.add(step["batch"] - 1, cpp_metrics)
 
