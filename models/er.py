@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch.cuda.amp import autocast
 
 from modules import ContinualLearner, Buffer
+from train.train import measure_performance
 from utils.meters import get_timer, accuracy
 from utils.log import PerformanceResultsLog
 
@@ -34,6 +35,8 @@ class Er(ContinualLearner):
             batch_metrics,
         )
 
+        self.use_memory_buffer = True
+
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(
             train_data_regime.total_num_classes,
@@ -55,7 +58,7 @@ class Er(ContinualLearner):
         if task_id > 0:
             self.buffer.enable_augmentations()
 
-    def train_one_step(self, x, y, meters, step, measure_performance=False):
+    def train_one_step(self, x, y, meters, step):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
@@ -63,10 +66,15 @@ class Er(ContinualLearner):
 
         # Get data from the last iteration (blocking)
         aug_x, aug_y, aug_w = self.buffer.update(
-            x, y, w, step, measure_performance=measure_performance
+            x, y, w, step, perf_metrics=self.perf_metrics
         )
 
-        with get_timer("train", step["batch"]):
+        with get_timer(
+            "train",
+            step["batch"],
+            perf_metrics=self.perf_metrics,
+            dummy=not measure_performance(step),
+        ):
             self.optimizer_regime.update(step["epoch"], step["batch"])
             self.optimizer_regime.zero_grad()
 

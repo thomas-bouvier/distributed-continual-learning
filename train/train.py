@@ -14,7 +14,12 @@ from utils.utils import move_cuda
 
 
 def measure_performance(step):
-    return step["task_id"] == 1 and step["epoch"] == 10
+    return (
+        step["task_id"] == 1
+        and step["epoch"] == 10
+        and step["batch"] >= 200
+        and step["batch"] < 300
+    )
 
 
 def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
@@ -27,7 +32,10 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
         metric: AverageMeter(f"{prefix}_{metric}")
         for metric in ["loss", "prec1", "prec5", "num_samples", "local_rehearsal_size"]
     }
+
     batch = 0
+    step = dict(task_id=task_id, epoch=epoch, batch=-1)
+
     epoch_time = 0
     last_batch_time = 0
 
@@ -37,7 +45,13 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
         desc=f"Task #{task_id + 1} {prefix} epoch #{epoch + 1}",
         disable=not enable_tqdm,
     ) as progress:
-        timer = get_timer("load", batch, previous_iteration=True)
+        timer = get_timer(
+            "load",
+            batch,
+            perf_metrics=model.perf_metrics,
+            previous_iteration=True,
+            dummy=not measure_performance(step),
+        )
         timer.__enter__()
         start_batch_time = time.perf_counter()
 
@@ -46,10 +60,7 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
             timer.__exit__(None, None, None)
 
             step = dict(task_id=task_id, epoch=epoch, batch=batch)
-
-            model.train_one_step(
-                x, y, meters, step, measure_performance=measure_performance(step)
-            )
+            model.train_one_step(x, y, meters, step)
 
             if hvd.rank() == 0 and False:
                 captions = []
@@ -82,8 +93,10 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
                             rpcs_resolve_time=metrics[3],
                             representatives_copy_time=metrics[4],
                             buffer_update_time=metrics[5],
-                            aug_size=meters["num_samples"],
-                            local_rehearsal_size=meters["local_rehearsal_size"],
+                            aug_size=meters["num_samples"].val.item(),
+                            local_rehearsal_size=meters[
+                                "local_rehearsal_size"
+                            ].val.item(),
                         )
 
                     model.batch_metrics.add(**batch_metrics_values)
@@ -149,7 +162,13 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
 
             batch += 1
 
-            timer = get_timer("load", batch, previous_iteration=True)
+            timer = get_timer(
+                "load",
+                batch,
+                perf_metrics=model.perf_metrics,
+                previous_iteration=True,
+                dummy=not measure_performance(step),
+            )
             timer.__enter__()
             start_batch_time = time.perf_counter()
 
@@ -325,7 +344,7 @@ def train(
                         }
                     )
 
-                # TODO: maybe we should compared the averaged loss on all previous tasks?
+                # TODO: maybe we should compare the averaged loss on all previous tasks?
                 if meters[task_id]["loss"] < model.minimal_eval_loss:
                     logging.debug(
                         f"Saving best model with minimal eval loss ({meters[task_id]['loss']}).."

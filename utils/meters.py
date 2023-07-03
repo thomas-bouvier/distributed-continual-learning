@@ -28,7 +28,14 @@ class AverageMeter:
 
 
 class MeasureTime:
-    def __init__(self, name, batch, perf_metrics: PerformanceResultsLog = None, cuda=True, dummy=False):
+    def __init__(
+        self,
+        name,
+        batch,
+        perf_metrics: PerformanceResultsLog,
+        cuda=True,
+        dummy=False,
+    ):
         self.batch = batch
         self.name = name
         self.perf_metrics = perf_metrics
@@ -42,12 +49,14 @@ class MeasureTime:
             self.end = torch.cuda.Event(enable_timing=True)
             synchronize_cuda(self.cuda)
             self.start.record()
-            self.rng = nvtx.start_range(message=self.name)
+
+        self.rng = nvtx.start_range(message=self.name)
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
+        nvtx.end_range(self.rng)
+
         if not self.dummy:
-            nvtx.end_range(self.rng)
             self.end.record()
             synchronize_cuda(self.cuda)
             time = self.start.elapsed_time(self.end)
@@ -56,7 +65,9 @@ class MeasureTime:
                 self.perf_metrics.add(self.batch, time, key=self.name)
 
 
-def get_timer(name, batch, perf_metrics=None, previous_iteration=False, cuda=True, dummy=False):
+def get_timer(
+    name, batch, perf_metrics=None, previous_iteration=False, cuda=True, dummy=False
+):
     if previous_iteration:
         batch -= 1
     return MeasureTime(name, batch, perf_metrics=perf_metrics, cuda=cuda, dummy=dummy)

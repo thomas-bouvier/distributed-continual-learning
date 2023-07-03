@@ -27,13 +27,12 @@ def setup_logging(log_file="log.txt", level="info", dummy=False):
     )
     fileout = logging.FileHandler(log_file, mode=file_mode)
     fileout.setLevel(logging.DEBUG)
-    fileout.setFormatter(logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s"))
-    logging.getLogger('root').addHandler(fileout)
+    fileout.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logging.getLogger("root").addHandler(fileout)
 
 
 def get_logging_level():
-    return logging.getLevelName(logging.getLogger('root').getEffectiveLevel()).lower()
+    return logging.getLevelName(logging.getLogger("root").getEffectiveLevel()).lower()
 
 
 def plot_figure(
@@ -91,7 +90,6 @@ def plot_figure(
 
 
 class ResultsLog:
-
     supported_data_formats = ["csv", "json"]
 
     def __init__(
@@ -123,8 +121,7 @@ class ResultsLog:
         if data_format not in self.supported_data_formats:
             raise ValueError(
                 "data_format must of the following: "
-                + "|".join(["{}".format(k)
-                           for k in ResultsLog.supported_data_formats])
+                + "|".join(["{}".format(k) for k in ResultsLog.supported_data_formats])
             )
 
         if self.dummy:
@@ -138,8 +135,7 @@ class ResultsLog:
         if params is not None:
             filename = f"{save_path}.json"
             with open(filename, "w") as fp:
-                json.dump(dict(self.args._get_kwargs()),
-                          fp, sort_keys=True, indent=4)
+                json.dump(dict(self.args._get_kwargs()), fp, sort_keys=True, indent=4)
         self.plot_path = f"{save_path}.html"
 
         if os.path.isfile(self.data_path):
@@ -186,8 +182,7 @@ class ResultsLog:
                 os.remove(self.plot_path)
             if self.first_save:
                 self.first_save = False
-                print("Plot file saved at: {}".format(
-                    os.path.abspath(self.plot_path)))
+                print("Plot file saved at: {}".format(os.path.abspath(self.plot_path)))
 
             output_file(self.plot_path, title=title)
             plot = column(
@@ -246,10 +241,9 @@ def plot_representatives(rep_values, rep_labels, num_cols):
     fig, ax = plt.subplots(num_candidates // num_cols, num_cols)
     for j in range(num_candidates // num_cols):
         for k in range(num_cols):
-            ax[j, k].imshow(rep_values[j * num_cols + k].T,
-                            interpolation='none')
+            ax[j, k].imshow(rep_values[j * num_cols + k].T, interpolation="none")
             ax[j, k].set_title(rep_labels[j * num_cols + k].item())
-            ax[j, k].axis('off')
+            ax[j, k].axis("off")
     return fig
 
 
