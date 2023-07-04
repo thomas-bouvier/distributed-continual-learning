@@ -130,7 +130,7 @@ class Buffer:
                 self.next_minibatches[0].w,
             )
 
-    def update(self, x, y, w, step, perf_metrics=None):
+    def update(self, x, y, step, perf_metrics=None):
         """
         Updates the buffer with incoming data. Get some data from (x, y) pairs.
         """
@@ -165,6 +165,7 @@ class Buffer:
         ):
             minibatch = self.__get_current_augmented_minibatch(step)
             if flyweight:
+                w = torch.ones(self.batch_size, device=x.device)
                 concat_x = torch.cat((x, minibatch.x[:aug_size]))
                 concat_y = torch.cat((y, minibatch.y[:aug_size]))
                 concat_w = torch.cat((w, minibatch.w[:aug_size]))
@@ -174,7 +175,6 @@ class Buffer:
                 concat_w = minibatch.w[:aug_size]
 
         self.add_data(x, y, step, perf_metrics=perf_metrics)
-
         return concat_x, concat_y, concat_w
 
     def add_data(self, x, y, step, perf_metrics=None):

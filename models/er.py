@@ -65,11 +65,9 @@ class Er(ContinualLearner):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
-        w = torch.ones(self.batch_size, device=self._device())
-
         # Get data from the last iteration (blocking)
         aug_x, aug_y, aug_w = self.buffer.update(
-            x, y, w, step, perf_metrics=self.perf_metrics
+            x, y, step, perf_metrics=self.perf_metrics
         )
 
         with get_timer(

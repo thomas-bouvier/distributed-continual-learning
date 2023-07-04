@@ -41,6 +41,9 @@ class ContinualLearner(nn.Module):
         self.scaler = GradScaler(enabled=use_amp)
         self.perf_metrics = PerformanceResultsLog()
 
+    def before_all_tasks(self):
+        pass
+
     def before_every_task(self, task_id, train_data_regime):
         # Distribute the data
         train_data_regime.get_loader(task_id)
@@ -63,7 +66,7 @@ class ContinualLearner(nn.Module):
     def after_every_task(self):
         pass
 
-    def after_all_task(self):
+    def after_all_tasks(self):
         pass
 
     def _device(self):
