@@ -12,6 +12,7 @@ from torch.utils.data.distributed import DistributedSampler
 from data.datasets import get_dataset
 from data.preprocess import get_transform
 from data.sample import MyDistributedSampler
+from data.scenarios import ReconstructionInstanceIncremental
 
 
 _DATA_ARGS = {
@@ -48,10 +49,12 @@ _OTHER_ARGS = {
     "use_dali_cuda",
     "fp16_dali",
     "distributed",
-    "shard"
+    "shard",
 }
 
-#TODO: plug this class onto augmented mini-batches in Neomem
+# TODO: plug this class onto augmented mini-batches in Neomem
+
+
 class DataRegime:
     def __init__(self, hvd, config={}):
         self.hvd = hvd
@@ -78,19 +81,24 @@ class DataRegime:
                 global DaliDataLoader
                 from data.load import DaliDataLoader
             except ImportError:
-                raise ImportError(
-                    "Please install NVIDIA DALI to run this app.")
+                raise ImportError("Please install NVIDIA DALI to run this app.")
 
         self.prepare_tasksets()
         self.get_data()
 
     def prepare_tasksets(self):
-        dataset = get_dataset(**self.config["data"])
+        dataset, compatibility = get_dataset(**self.config["data"])
         self.total_num_samples = len(dataset.get_data()[0])
 
         if self.config["data"].get("continual", False):
             continual_config = self.config["continual"]
-            if continual_config.get("scenario") == "class":
+            scenario = continual_config.get("scenario")
+
+            assert (
+                scenario in compatibility
+            ), f"{self.config['data']['dataset']} is only compatible with {compatibility} scenarios"
+
+            if scenario == "class":
                 ii = continual_config.get("initial_increment")
                 i = continual_config.get("increment")
 
@@ -98,29 +106,28 @@ class DataRegime:
                     dataset,
                     initial_increment=ii,
                     increment=i,
-                    transformations=[self.config["transform"]],
+                    transformations=[self.config["transform"]["compose"]],
                 )
             else:
                 self.tasksets = InstanceIncremental(
                     dataset,
                     nb_tasks=continual_config.get("num_tasks"),
-                    transformations=[self.config["transform"]],
+                    transformations=[self.config["transform"]["compose"]],
                 )
         else:
             self.tasksets = [
-                dataset.to_taskset(
-                    trsf=[self.config["transform"]]
-                )
+                dataset.to_taskset(trsf=[self.config["transform"]["compose"]])
             ]
-        logging.info(f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets")
+        logging.info(
+            f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets"
+        )
         self.total_num_classes = len(dataset.list_classes)
 
-
-    """
-    Get the taskset refered to by self.task_id, with all previous data
-    accumulated if enabled by parameter `concatenate_tasksets`.
-    """
     def get_taskset(self):
+        """
+        Get the taskset refered to by self.task_id, with all previous data
+        accumulated if enabled by parameter `concatenate_tasksets`.
+        """
         current_taskset = self.tasksets[self.task_id]
 
         if self.config["data"].get("split") == "train":
@@ -159,12 +166,8 @@ class DataRegime:
 
         return current_taskset
 
-
-    """Get the current taskset"""
     def get_data(self):
-        self._transform = get_transform(training=self.config["data"].get(
-            "split", True) == "train", **self.config["transform"])
-        self.config["data"].setdefault("transform", self._transform)
+        """Get the current taskset"""
         data = self.get_taskset()
         logging.debug(
             f"DATA LOADER {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(data)}"
@@ -172,10 +175,11 @@ class DataRegime:
 
         return data
 
-    """
-    Get the loader refered to by self.task_id
-    """
     def get_loader(self, task_id):
+        """
+        Get the loader refered to by self.task_id
+        """
+
         if task_id == self.task_id:
             return self.loader
 
@@ -209,17 +213,21 @@ class DataRegime:
             if self.config["data"].get("split") == "train" and self.loader is not None:
                 self.loader.release()
 
-            precision = 16 if self.config["others"].get(
-                "fp16_dali", False) else 32
+            precision = 16 if self.config["others"].get("fp16_dali", False) else 32
             self.loader = DaliDataLoader(
-                data, self.task_id,
+                data,
+                self.task_id,
                 self.config["others"].get("use_dali_cuda", False),
-                device_id=hvd.local_rank(), shard_id=hvd.rank(),
-                num_shards=hvd.size(), precision=precision,
+                device_id=hvd.local_rank(),
+                shard_id=hvd.rank(),
+                num_shards=hvd.size(),
+                precision=precision,
                 training=self.config["data"].get("split", True) == "train",
-                **self.config["loader"])
+                **self.config["loader"],
+            )
             logging.debug(
-                f"DATA LOADER {self.config['data']['split']} - data distributed using DALI")
+                f"DATA LOADER {self.config['data']['split']} - data distributed using DALI"
+            )
 
         else:
             if self.config["others"].get("distributed", False):
@@ -235,14 +243,14 @@ class DataRegime:
             self.config["loader"]["shuffle"] = self.sampler is None
             self.loader = DataLoader(data, **self.config["loader"])
             logging.debug(
-                f"DATA LOADER {self.config['data']['split']} - data distributed using sampler")
+                f"DATA LOADER {self.config['data']['split']} - data distributed using sampler"
+            )
 
         if self.config["data"].get("split") == "validate":
             self.previous_loaders[self.task_id] = (self.loader, self.data_len)
-        
+
         self.sample_shape = next(iter(self.loader))[0][0].size()
         return self.loader
-
 
     def set_epoch(self, epoch):
         logging.debug(
@@ -252,18 +260,19 @@ class DataRegime:
         if self.sampler is not None and hasattr(self.sampler, "set_epoch"):
             self.sampler.set_epoch(epoch)
 
-
     def get_config(self, config):
-        loader_config = {k: v for k,
-                         v in config.items() if k in _DATALOADER_ARGS}
+        loader_config = {k: v for k, v in config.items() if k in _DATALOADER_ARGS}
         data_config = {k: v for k, v in config.items() if k in _DATA_ARGS}
-        continual_config = {k: v for k,
-                            v in config.items() if k in _CONTINUAL_ARGS}
-        transform_config = {k: v for k,
-                            v in config.items() if k in _TRANSFORM_ARGS}
+        continual_config = {k: v for k, v in config.items() if k in _CONTINUAL_ARGS}
+        transform_config = {k: v for k, v in config.items() if k in _TRANSFORM_ARGS}
         other_config = {k: v for k, v in config.items() if k in _OTHER_ARGS}
 
         transform_config.setdefault("transform_name", data_config["dataset"])
+        compose = get_transform(
+            training=data_config.get("split", True) == "train",
+            **transform_config,
+        )
+        transform_config.setdefault("compose", compose)
 
         return {
             "data": data_config,

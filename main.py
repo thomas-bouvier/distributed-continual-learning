@@ -81,7 +81,7 @@ parser.add_argument(
 parser.add_argument(
     "--backbone",
     metavar="BACKBONE",
-    default=None,
+    default="resnet50",
     choices=backbone_model_names,
     help="available backbone models: " + " | ".join(backbone_model_names),
 )
