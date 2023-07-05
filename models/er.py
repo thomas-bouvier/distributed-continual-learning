@@ -1,4 +1,3 @@
-import copy
 import horovod.torch as hvd
 import logging
 import torch
@@ -10,6 +9,9 @@ from modules import ContinualLearner, Buffer
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
 from utils.log import PerformanceResultsLog
+
+
+__all__ = ["Er"]
 
 
 class Er(ContinualLearner):

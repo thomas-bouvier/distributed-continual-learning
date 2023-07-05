@@ -33,15 +33,13 @@ from utils.utils import move_cuda
 backbone_model_names = sorted(
     name
     for name in backbone.__dict__
-    if name.islower()
-    and not name.startswith("__")
-    and callable(backbone.__dict__[name])
+    if not name.startswith("__") and callable(backbone.__dict__[name])
 )
 
 model_names = sorted(
     name
     for name in models.__dict__
-    if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
+    if not name.startswith("__") and callable(models.__dict__[name])
 )
 
 parser = argparse.ArgumentParser(
@@ -91,7 +89,7 @@ parser.add_argument(
 parser.add_argument(
     "--model",
     metavar="MODEL",
-    default="er",
+    default="Er",
     choices=model_names,
     help="available models: " + " | ".join(model_names),
 )
