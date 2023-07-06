@@ -1,9 +1,17 @@
+import glob
+import logging
+import numpy as np
 import os
 import torch
 
 from continuum import datasets
+from continuum.datasets import InMemoryDataset
 from continuum.tasks import TaskType
 from filelock import FileLock
+from scipy.stats import circmean
+
+
+COMPATIBILITY = ["class", "instance"]
 
 
 def get_dataset(
@@ -18,57 +26,78 @@ def get_dataset(
 
     if dataset == "mnist":
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.MNIST(data_path=root, train=train, download=False)
+            return (
+                datasets.MNIST(data_path=root, train=train, download=False),
+                COMPATIBILITY,
+            )
 
     elif dataset == "cifar10":
         root = os.path.join(root, "CIFAR10")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.CIFAR10(data_path=root, train=train, download=False)
+            return (
+                datasets.CIFAR10(data_path=root, train=train, download=False),
+                COMPATIBILITY,
+            )
 
     elif dataset == "cifar100":
         root = os.path.join(root, "CIFAR100")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.CIFAR100(data_path=root, train=train, download=False)
+            return (
+                datasets.CIFAR100(data_path=root, train=train, download=False),
+                COMPATIBILITY,
+            )
 
     elif dataset == "tinyimagenet":
         root = os.path.join(root, "TinyImageNet")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.TinyImageNet200(data_path=root, train=train, download=False)
+            return (
+                datasets.TinyImageNet200(data_path=root, train=train, download=False),
+                COMPATIBILITY,
+            )
 
     elif dataset == "imagenet100small":
         root = os.path.join(root, "ImageNet100-small")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             data_subset = "train_100_small.txt" if train else "val_100_small.txt"
-            return datasets.ImageNet100(
-                data_path=root,
-                train=train,
-                data_subset=os.path.join(root, data_subset),
+            return (
+                datasets.ImageNet100(
+                    data_path=root,
+                    train=train,
+                    data_subset=os.path.join(root, data_subset),
+                ),
+                COMPATIBILITY,
             )
 
     elif dataset == "imagenet100":
         root = os.path.join(root, "ImageNet100")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             data_subset = "train_100.txt" if train else "val_100.txt"
-            return datasets.ImageNet100(
-                data_path=root,
-                train=train,
-                data_subset=os.path.join(root, data_subset),
+            return (
+                datasets.ImageNet100(
+                    data_path=root,
+                    train=train,
+                    data_subset=os.path.join(root, data_subset),
+                ),
+                COMPATIBILITY,
             )
 
     elif dataset == "imagenet":
         root = os.path.join(root, "ImageNet")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.ImageNet1000(data_path=root, train=train)
+            return datasets.ImageNet1000(data_path=root, train=train), COMPATIBILITY
 
     elif dataset == "imagenet_blurred":
         root = os.path.join(root, "ImageNet_blurred")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.ImageNet1000(data_path=root, train=train)
+            return datasets.ImageNet1000(data_path=root, train=train), COMPATIBILITY
 
     elif dataset == "core50":
         root = os.path.join(root, "CORe50")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
-            return datasets.Core50(data_path=root, train=train, download=False)
+            return (
+                datasets.Core50(data_path=root, train=train, download=False),
+                COMPATIBILITY,
+            )
 
     else:
         raise ValueError("Unknown dataset")

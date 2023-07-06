@@ -67,14 +67,8 @@ parser.add_argument(
 )
 parser.add_argument(
     "--tasksets-config",
-    default="",
+    default="{}",
     help="additional taskset configuration (useful for continual learning)",
-)
-parser.add_argument(
-    "--shard",
-    action="store_true",
-    default=False,
-    help="sample data from a same subset of the dataset at each epoch",
 )
 parser.add_argument(
     "--backbone",
@@ -188,12 +182,6 @@ parser.add_argument(
     default=10,
     metavar="N",
     help="how many batches to wait before logging training status",
-)
-parser.add_argument(
-    "--use-dali",
-    action="store_true",
-    default=False,
-    help="use DALI to load data",
 )
 parser.add_argument(
     "--use-amp",
@@ -379,10 +367,8 @@ class Experiment:
 
         buffer_config = literal_eval(self.args.buffer_config)
         if bool(buffer_config):
-            rehearsal_ratio = literal_eval(self.args.buffer_config).get(
-                "rehearsal_ratio", 30
-            )
-            rehearsal_size = math.floor(
+            rehearsal_ratio = buffer_config.pop("rehearsal_ratio", 30)
+            budget_per_class = math.floor(
                 self.train_data_regime.total_num_samples
                 * rehearsal_ratio
                 / 100
@@ -390,9 +376,9 @@ class Experiment:
                 / hvd.size()
             )
             assert (
-                rehearsal_size > 0
+                budget_per_class > 0
             ), "Choose rehearsal_ratio so as to to store at least some samples per class on all processes"
-            buffer_config |= {"rehearsal_size": rehearsal_size}
+            buffer_config |= {"budget_per_class": budget_per_class}
 
         # -------------------------------------------------------------------------------------------------#
 
@@ -467,29 +453,13 @@ class Experiment:
         """
 
     def prepare_dataset(self):
-        tasksets_config = {"continual": bool(self.args.tasksets_config)}
-        if self.args.tasksets_config != "":
-            tasksets_config = dict(
-                tasksets_config, **literal_eval(self.args.tasksets_config)
-            )
-
         defaults = {
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
-            "distributed": hvd.size() > 1,
-            "use_dali": self.args.use_dali,
-            "use_dali_cuda": self.args.use_dali and self.args.cuda,
-            "fp16_dali": self.args.fp16_dali,
             "pin_memory": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
-            "shard": self.args.shard,
-            "continual": tasksets_config.get("continual"),
-            "scenario": tasksets_config.get("scenario", "class"),
-            "initial_increment": tasksets_config.get("initial_increment", -1),
-            "increment": tasksets_config.get("increment", -1),
-            "num_tasks": tasksets_config.get("num_tasks", None),
-            "concatenate_tasksets": tasksets_config.get("concatenate_tasksets", False),
+            **literal_eval(self.args.tasksets_config),
         }
 
         self.train_data_regime = DataRegime(

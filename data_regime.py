@@ -11,7 +11,6 @@ from torch.utils.data.distributed import DistributedSampler
 
 from data.datasets import get_dataset
 from data.preprocess import get_transform
-from data.sample import MyDistributedSampler
 from data.scenarios import ReconstructionInstanceIncremental
 
 
@@ -35,7 +34,7 @@ _DATALOADER_ARGS = {
     "timeout",
     "worker_init_fn",
 }
-_CONTINUAL_ARGS = {
+_TASKS_ARGS = {
     "scenario",
     "increment",
     "initial_increment",
@@ -43,14 +42,6 @@ _CONTINUAL_ARGS = {
     "concatenate_tasksets",
 }
 _TRANSFORM_ARGS = {"transform_name"}
-_OTHER_ARGS = {
-    "use_amp",
-    "use_dali",
-    "use_dali_cuda",
-    "fp16_dali",
-    "distributed",
-    "shard",
-}
 
 # TODO: plug this class onto augmented mini-batches in Neomem
 
@@ -74,14 +65,18 @@ class DataRegime:
 
         self.previous_classes_mask = None
         self.previous_loaders = {}
-
         self.config = self.get_config(config)
-        if self.config["others"].get("use_dali", False):
-            try:
-                global DaliDataLoader
-                from data.load import DaliDataLoader
-            except ImportError:
-                raise ImportError("Please install NVIDIA DALI to run this app.")
+
+        self.use_dali = True
+        try:
+            global DaliDataLoader
+            from data.load import DaliDataLoader
+        except ImportError:
+            logging.info(
+                f"NVIDIA DALI is not installed, fallback to the native PyTorch"
+                " native dataloader."
+            )
+            self.use_dali = False
 
         self.prepare_tasksets()
         self.get_data()
@@ -89,31 +84,28 @@ class DataRegime:
     def prepare_tasksets(self):
         dataset, compatibility = get_dataset(**self.config["data"])
         self.total_num_samples = len(dataset.get_data()[0])
-
-        if self.config["data"].get("continual", False):
-            continual_config = self.config["continual"]
-            scenario = continual_config.get("scenario")
-
+        scenario = self.config["tasks"].get("scenario", None)
+        if scenario:
             assert (
                 scenario in compatibility
             ), f"{self.config['data']['dataset']} is only compatible with {compatibility} scenarios"
 
-            if scenario == "class":
-                ii = continual_config.get("initial_increment")
-                i = continual_config.get("increment")
+        if scenario == "class":
+            ii = self.config["tasks"].get("initial_increment", 0)
+            i = self.config["tasks"].get("increment", 1)
 
-                self.tasksets = ClassIncremental(
-                    dataset,
-                    initial_increment=ii,
-                    increment=i,
-                    transformations=[self.config["transform"]["compose"]],
-                )
-            else:
-                self.tasksets = InstanceIncremental(
-                    dataset,
-                    nb_tasks=continual_config.get("num_tasks"),
-                    transformations=[self.config["transform"]["compose"]],
-                )
+            self.tasksets = ClassIncremental(
+                dataset,
+                initial_increment=ii,
+                increment=i,
+                transformations=[self.config["transform"]["compose"]],
+            )
+        elif scenario == "instance":
+            self.tasksets = InstanceIncremental(
+                dataset,
+                nb_tasks=self.config["tasks"].get("num_tasks", 5),
+                transformations=[self.config["transform"]["compose"]],
+            )
         else:
             self.tasksets = [
                 dataset.to_taskset(trsf=[self.config["transform"]["compose"]])
@@ -131,7 +123,7 @@ class DataRegime:
         current_taskset = self.tasksets[self.task_id]
 
         if self.config["data"].get("split") == "train":
-            if self.config["continual"].get("concatenate_tasksets", False):
+            if self.config["tasks"].get("concatenate_tasksets", False):
                 if self.concat_taskset is None:
                     self.concat_taskset = current_taskset
                 else:
@@ -207,17 +199,16 @@ class DataRegime:
         ):
             self.config["loader"]["multiprocessing_context"] = "forkserver"
 
-        if self.config["others"].get("use_dali", False):
+        if self.use_dali:
             # If the current data regime is used for training, we can deallocate
             # the current data loader
             if self.config["data"].get("split") == "train" and self.loader is not None:
                 self.loader.release()
 
-            precision = 16 if self.config["others"].get("fp16_dali", False) else 32
+            precision = 16 if False else 32
             self.loader = DaliDataLoader(
                 data,
                 self.task_id,
-                self.config["others"].get("use_dali_cuda", False),
                 device_id=hvd.local_rank(),
                 shard_id=hvd.rank(),
                 num_shards=hvd.size(),
@@ -230,15 +221,10 @@ class DataRegime:
             )
 
         else:
-            if self.config["others"].get("distributed", False):
-                if self.config["others"].get("shard", False):
-                    self.config["loader"]["sampler"] = MyDistributedSampler(
-                        data, num_replicas=hvd.size(), rank=hvd.rank()
-                    )
-                else:
-                    self.config["loader"]["sampler"] = DistributedSampler(
-                        data, num_replicas=hvd.size(), rank=hvd.rank()
-                    )
+            if hvd.size() > 1:
+                self.config["loader"]["sampler"] = DistributedSampler(
+                    data, num_replicas=hvd.size(), rank=hvd.rank()
+                )
                 self.sampler = self.config["loader"]["sampler"]
             self.config["loader"]["shuffle"] = self.sampler is None
             self.loader = DataLoader(data, **self.config["loader"])
@@ -263,9 +249,8 @@ class DataRegime:
     def get_config(self, config):
         loader_config = {k: v for k, v in config.items() if k in _DATALOADER_ARGS}
         data_config = {k: v for k, v in config.items() if k in _DATA_ARGS}
-        continual_config = {k: v for k, v in config.items() if k in _CONTINUAL_ARGS}
+        tasks_config = {k: v for k, v in config.items() if k in _TASKS_ARGS}
         transform_config = {k: v for k, v in config.items() if k in _TRANSFORM_ARGS}
-        other_config = {k: v for k, v in config.items() if k in _OTHER_ARGS}
 
         transform_config.setdefault("transform_name", data_config["dataset"])
         compose = get_transform(
@@ -277,9 +262,8 @@ class DataRegime:
         return {
             "data": data_config,
             "loader": loader_config,
-            "continual": continual_config,
+            "tasks": tasks_config,
             "transform": transform_config,
-            "others": other_config,
         }
 
     def get(self, key, default=None):
