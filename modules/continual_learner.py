@@ -1,12 +1,10 @@
 import copy
 import logging
-import numpy as np
 import torch
 
 from torch import nn
 from torch.cuda.amp import GradScaler
 from torch.distributions import Categorical
-from torch.nn import functional as F
 
 from cross_entropy import CrossEntropyLoss
 from utils.log import PerformanceResultsLog
@@ -41,7 +39,7 @@ class ContinualLearner(nn.Module):
         self.scaler = GradScaler(enabled=use_amp)
         self.perf_metrics = PerformanceResultsLog()
 
-    def before_all_tasks(self):
+    def before_all_tasks(self, train_data_regime):
         pass
 
     def before_every_task(self, task_id, train_data_regime):

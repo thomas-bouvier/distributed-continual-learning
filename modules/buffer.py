@@ -161,7 +161,7 @@ class Buffer:
         ):
             minibatch = self.__get_current_augmented_minibatch(step)
             if self.implementation == "flyweight":
-                w = torch.ones(self.batch_size, device=x.device)
+                w = torch.ones(x.size(0), device=x.device)
                 concat_x = torch.cat((x, minibatch.x[:aug_size]))
                 concat_y = torch.cat((y, minibatch.y[:aug_size]))
                 concat_w = torch.cat((w, minibatch.w[:aug_size]))
@@ -275,7 +275,7 @@ class Buffer:
                         x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
                     )
         else:
-            for i in range(self.batch_size):
+            for i in range(len(y)):
                 label = y[i].item()
                 self.rehearsal_metadata[0]
                 index = -1

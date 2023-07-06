@@ -2,7 +2,6 @@ base:
   dataset:
   dataset_dir:
   tasksets_config:
-  shard:
   backbone:
   backbone_config:
   model:

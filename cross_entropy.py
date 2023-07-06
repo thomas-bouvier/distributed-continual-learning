@@ -13,7 +13,7 @@ def cross_entropy(weight=None, reduction='none'):
     # meters["loss"].update(loss.sum() / self.mask[aug_y].sum())
 """
 
-class CrossEntropyLoss(nn.CrossEntropyLoss):
 
-    def __init__(self, reduction='none'):
+class CrossEntropyLoss(nn.CrossEntropyLoss):
+    def __init__(self, reduction="none"):
         super(CrossEntropyLoss, self).__init__(reduction=reduction)

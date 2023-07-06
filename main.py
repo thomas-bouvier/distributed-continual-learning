@@ -83,7 +83,7 @@ parser.add_argument(
 parser.add_argument(
     "--model",
     metavar="MODEL",
-    default="Er",
+    default="Vanilla",
     choices=model_names,
     help="available models: " + " | ".join(model_names),
 )

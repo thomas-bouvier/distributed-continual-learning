@@ -39,7 +39,7 @@ Values for `optimizer_regime` will override regimes defined by `models/` in Pyth
 |---|---|---|---|
 | `--backbone` | Yes | DL backbone model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
 | `--backbone-config` |   | Model-specific parameters  | ConvNext requires `"{'lr_min': 1e-6}"` |
-| `--model` | Default: `er` | Continual Learning strategy | `Er` |
+| `--model` | Default: `Vanilla` | Continual Learning strategy | `Vanilla`, `Er` |
 | `--model-config` |   | Reset strategies | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
 | `--buffer-config` |   | Rehearsal buffer parameters  |  `"{'rehearsal_ratio': 100}"` |
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"` allows to reset the model internal state between tasks<br>Instance-incremental scenario (domain) with 2 tasks: `"{'scenario': 'domain', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
