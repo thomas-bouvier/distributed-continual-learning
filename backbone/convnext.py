@@ -15,13 +15,15 @@ __all__ = ["convnext"]
 
 
 def convnext(config):
-    lr = config.pop("lr") * hvd.size() # 4e-3 * world_size
-    lr_min = config.pop("lr_min") * hvd.size() # 1e-6 * world_size
+    lr = config.pop("lr") * hvd.size()  # 4e-3 * world_size
+    lr_min = config.pop("lr_min") * hvd.size()  # 1e-6 * world_size
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    model = timm.create_model('convnext_base', pretrained=False, drop_rate=0.5, **config)
+    model = timm.create_model(
+        "convnext_base", pretrained=False, drop_rate=0.5, **config
+    )
 
     def rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs):
         return lr * step / (num_steps_per_epoch * warmup_epochs)
@@ -37,9 +39,16 @@ def convnext(config):
         warmup_steps = warmup_epochs * num_steps_per_epoch
 
         if step < warmup_steps:
-            return {'lr': rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs)}
+            return {"lr": rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs)}
         else:
-            return {'lr': cosine_anneal_lr(lr, step, num_epochs * num_steps_per_epoch - warmup_steps, eta_min=lr_min)}
+            return {
+                "lr": cosine_anneal_lr(
+                    lr,
+                    step,
+                    num_epochs * num_steps_per_epoch - warmup_steps,
+                    eta_min=lr_min,
+                )
+            }
 
     model.regime = [
         {

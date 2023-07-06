@@ -33,9 +33,7 @@ class OptimizerRegime(Regime):
         optim_method = _OPTIMIZERS[config.get("optimizer", "SGD")]
         if not isinstance(self.optimizer, optim_method):
             self.create_distributed_optimizer(optim_method(self.parameters, lr=0))
-            logging.debug(
-                f"OPTIMIZER REGIME - setting method = {config['optimizer']}"
-            )
+            logging.debug(f"OPTIMIZER REGIME - setting method = {config['optimizer']}")
 
     def create_distributed_optimizer(self, optimizer):
         # Horovod: broadcast optimizer state and parameters
@@ -67,9 +65,7 @@ class OptimizerRegime(Regime):
 
         updated = False
         if super(OptimizerRegime, self).update(epoch, steps):
-            logging.debug(
-                f"OPTIMIZER REGIME - update (epoch: {epoch}, steps: {steps})"
-            )
+            logging.debug(f"OPTIMIZER REGIME - update (epoch: {epoch}, steps: {steps})")
             self.adjust_from_config(self.config)
             updated = True
 
@@ -84,8 +80,7 @@ class OptimizerRegime(Regime):
                 if key in config:
                     new_val = config[key]
                     if new_val != param_group[key]:
-                        logging.debug(
-                            f"OPTIMIZER REGIME - updating {key} = {new_val}")
+                        logging.debug(f"OPTIMIZER REGIME - updating {key} = {new_val}")
                         param_group[key] = config[key]
 
     def zero_grad(self):
@@ -122,7 +117,9 @@ class OptimizerRegime(Regime):
     def reset(self, parameters):
         logging.debug("OPTIMIZER REGIME - resetting state..")
         self.optimizer.load_state_dict(
-            _OPTIMIZERS[self.config.get("optimizer", "SGD")](parameters, lr=0).state_dict()
+            _OPTIMIZERS[self.config.get("optimizer", "SGD")](
+                parameters, lr=0
+            ).state_dict()
         )
         # Horovod: broadcast optimizer state.
         hvd.broadcast_optimizer_state(self.optimizer, root_rank=0)

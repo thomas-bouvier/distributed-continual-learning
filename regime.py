@@ -23,7 +23,7 @@ class Regime:
     def update(self, epoch, steps):
         """
         Adjusts config according to current epoch or steps and regime.
-        
+
         Args:
             epoch (int): Current local epoch (within the current task).
             steps (int): Current local step number (within the current task).
@@ -67,8 +67,8 @@ class Regime:
         elif "epoch_lambda" in config:
             config.update(eval_func(config.pop("epoch_lambda"), epoch))
 
-        if 'execute' in config:
-            config.pop('execute')()
+        if "execute" in config:
+            config.pop("execute")()
 
         if config == self.config:
             return False

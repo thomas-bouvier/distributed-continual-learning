@@ -30,10 +30,11 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
 
         criterion = torch.nn.CrossEntropyLoss()
 
-        enable_tqdm = get_logging_level() in ('info') and hvd.rank() == 0
-        with tqdm(total=len(loader),
-              desc=f"Task #{task_id + 1} {prefix} epoch #{epoch}",
-              disable=not enable_tqdm
+        enable_tqdm = get_logging_level() in ("info") and hvd.rank() == 0
+        with tqdm(
+            total=len(loader),
+            desc=f"Task #{task_id + 1} {prefix} epoch #{epoch}",
+            disable=not enable_tqdm,
         ) as progress:
             start_batch_time = time.perf_counter()
 
@@ -44,7 +45,9 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
                     captions = []
                     for label in y:
                         captions.append(f"y={label.item()}")
-                    display(f"val_batch_{task_id}_{epoch}_{batch}", x, captions=captions)
+                    display(
+                        f"val_batch_{task_id}_{epoch}_{batch}", x, captions=captions
+                    )
 
                 with autocast(enabled=model.use_amp):
                     output = model.backbone(x)
@@ -58,8 +61,12 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
                 last_batch_time = time.perf_counter() - start_batch_time
                 epoch_time += last_batch_time
 
-                progress.set_postfix({'loss': meters["loss"].avg.item(),
-                           'accuracy': meters["prec1"].avg.item()})
+                progress.set_postfix(
+                    {
+                        "loss": meters["loss"].avg.item(),
+                        "accuracy": meters["prec1"].avg.item(),
+                    }
+                )
                 progress.update(1)
 
                 batch += 1

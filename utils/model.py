@@ -11,7 +11,7 @@ def save_checkpoint(
     is_final=False,
     is_best=False,
     save_all=False,
-    dummy=False
+    dummy=False,
 ):
     if dummy:
         return
@@ -19,14 +19,11 @@ def save_checkpoint(
     filename = os.path.join(save_path, filename)
     torch.save(state, filename)
     if is_initial:
-        shutil.copyfile(filename, os.path.join(
-            save_path, "checkpoint_initial.pth.tar"))
+        shutil.copyfile(filename, os.path.join(save_path, "checkpoint_initial.pth.tar"))
     if is_final:
-        shutil.copyfile(filename, os.path.join(
-            save_path, "checkpoint_final.pth.tar"))
+        shutil.copyfile(filename, os.path.join(save_path, "checkpoint_final.pth.tar"))
     if is_best:
-        shutil.copyfile(filename, os.path.join(
-            save_path, "checkpoint_best.pth.tar"))
+        shutil.copyfile(filename, os.path.join(save_path, "checkpoint_best.pth.tar"))
     if save_all:
         shutil.copyfile(
             filename,

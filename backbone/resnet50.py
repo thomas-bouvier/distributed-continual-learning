@@ -1,7 +1,6 @@
 import horovod.torch as hvd
 import math
 import torch.nn as nn
-import logging
 import timm
 
 __all__ = ["resnet50"]
@@ -14,7 +13,7 @@ def resnet50(config):
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
-    model = timm.create_model('resnet50', **config)
+    model = timm.create_model("resnet50", **config)
 
     def rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs):
         # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
@@ -28,7 +27,7 @@ def resnet50(config):
         warmup_steps = warmup_epochs * num_steps_per_epoch
 
         if step < warmup_steps:
-            return {'lr': rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs)}
+            return {"lr": rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs)}
         return {}
 
     model.regime = [
@@ -39,22 +38,10 @@ def resnet50(config):
             "weight_decay": 0.00005,
             "step_lambda": config_by_step,
         },
-        {
-            "epoch": warmup_epochs,
-            "lr": lr
-        },
-        {
-            "epoch": 18,
-            "lr": lr * 1e-1
-        },
-        {
-            "epoch": 23,
-            "lr": lr * 1e-2
-        },
-        {
-            "epoch": 30,
-            "lr": lr * 1e-3
-        },
+        {"epoch": warmup_epochs, "lr": lr},
+        {"epoch": 18, "lr": lr * 1e-1},
+        {"epoch": 23, "lr": lr * 1e-2},
+        {"epoch": 30, "lr": lr * 1e-3},
     ]
 
     return model
