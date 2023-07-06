@@ -1,6 +1,10 @@
 import json
 import os
 import logging
+import math
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import numpy as np
 import pandas as pd
 import shutil
 import torch
@@ -248,6 +252,8 @@ def plot_representatives(rep_values, rep_labels, num_cols):
 
 
 def display(filename, outputs, columns=2, captions=None):
+    if outputs.numel() == 0:
+        return
     rows = int(math.ceil(len(outputs) / columns))
     fig = plt.figure()
     fig.set_size_inches(16, 6 * rows)

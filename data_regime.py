@@ -107,13 +107,15 @@ class DataRegime:
                 transformations=[self.config["transform"]["compose"]],
             )
         else:
-            self.tasksets = [
-                dataset.to_taskset(trsf=[self.config["transform"]["compose"]])
-            ]
+            self.tasksets = InstanceIncremental(
+                dataset,
+                nb_tasks=1,
+                transformations=[self.config["transform"]["compose"]],
+            )
         logging.info(
             f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets"
         )
-        self.total_num_classes = len(dataset.list_classes)
+        self.total_num_classes = self.tasksets.nb_classes
 
     def get_taskset(self):
         """

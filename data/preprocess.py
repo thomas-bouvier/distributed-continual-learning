@@ -19,9 +19,8 @@ def get_transform(
         if training:
             return transforms.Compose(
                 [
-                    transforms.RandomCrop(input_size or 32, padding=4),
+                    transforms.RandomCrop(input_size or 32),
                     transforms.RandomHorizontalFlip(),
-                    CIFAR10Policy(fillcolor=(128, 128, 128)),
                     transforms.ToTensor(),
                     transforms.Normalize(**normalize),
                 ]
@@ -29,7 +28,7 @@ def get_transform(
         else:
             return transforms.Compose(
                 [
-                    transforms.RandomCrop(scale_size, padding=4),
+                    transforms.RandomCrop(input_size or 32),
                     transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
                     transforms.Normalize(**normalize),

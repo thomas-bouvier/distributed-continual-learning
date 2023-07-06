@@ -1,17 +1,13 @@
-import abc
-import copy
 import ctypes
 import horovod.torch as hvd
-import numpy as np
 import logging
+import math
+import random
 import torch
-
-from torch import nn
-from torch.nn import functional as F
 
 from train.train import measure_performance
 from utils.meters import get_timer
-from utils.log import get_logging_level
+from utils.log import get_logging_level, display
 
 
 class AugmentedMinibatch:
@@ -54,18 +50,26 @@ class Buffer:
         self.mode = mode
         self.implementation = implementation
 
-        self.init = False
-        self.high_performance = True
+        self.num_samples_per_representative = 1
+        self.augmentations_enabled = False
+        self.rehearsal_size = 0
+        self.rehearsal_tensor = None
+        self.rehearsal_metadata = None
+        self.rehearsal_counts = None
 
+        self.high_performance = True
         try:
             global neomem
             import neomem
         except ImportError:
-            raise ImportError(
+            logging.info(
                 f"Neomem is not installed (high-performance distributed"
                 " rehearsal buffer), fallback to a low-performance, local"
-                " rehearsal buffer."
+                " rehearsal buffer"
             )
+            if implementation != "flyweight":
+                self.implementation = "flyweight"
+                logging.info("Using flyweight buffer implementation")
             self.high_performance = False
 
         self.init_buffer(
@@ -82,8 +86,10 @@ class Buffer:
         Initializes the memory required to store representatives and their
         labels. If `high_performance` is enabled, this instanciates Neomem.
         """
+        logging.info(
+            f"Initializing the buffer with storage for {self.budget_per_class} representatives per class"
+        )
         device = "cuda" if cuda else "cpu"
-        num_samples_per_representative = 1
 
         if self.high_performance:
             engine = neomem.EngineLoader(
@@ -97,7 +103,7 @@ class Buffer:
                 self.num_representatives,
                 self.num_candidates,
                 ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
-                num_samples_per_representative,
+                self.num_samples_per_representative,
                 list(self.sample_shape),
                 neomem.CPUBuffer,
                 discover_endpoints,
@@ -107,8 +113,18 @@ class Buffer:
             self.init_augmented_minibatch(device=device)
             self.dsl.start()
         else:
-            size = total_num_classes * budget_per_class * num_samples_per_representative
-            storage = tensor.empty([size] + sample_shape, device=device)
+            size = (
+                self.total_num_classes
+                * self.budget_per_class
+                * self.num_samples_per_representative
+            )
+            self.rehearsal_tensor = torch.empty(
+                [size] + list(self.sample_shape), device=device
+            )
+            self.rehearsal_metadata = [[0, 1.0] for _ in range(self.total_num_classes)]
+            self.rehearsal_counts = [0] * self.total_num_classes
+
+            self.init_augmented_minibatch(device=device)
 
     def init_augmented_minibatch(self, device="gpu"):
         self.minibatches_ahead = 1 if self.implementation == "flyweight" else 2
@@ -123,7 +139,7 @@ class Buffer:
                 AugmentedMinibatch(num_samples, self.sample_shape, device)
             )
 
-        if self.implementation == "flyweight":
+        if self.high_performance and self.implementation == "flyweight":
             self.dsl.use_these_allocated_variables(
                 self.next_minibatches[0].x,
                 self.next_minibatches[0].y,
@@ -134,27 +150,7 @@ class Buffer:
         """
         Updates the buffer with incoming data. Get some data from (x, y) pairs.
         """
-        flyweight = self.implementation == "flyweight"
-        if not self.init:
-            self.add_data(x, y, step)
-            self.init = True
-
-        # Get the representatives
-        with get_timer(
-            "wait",
-            step["batch"],
-            perf_metrics=perf_metrics,
-            previous_iteration=True,
-            dummy=not measure_performance(step),
-        ):
-            aug_size = self.dsl.wait()
-            n = aug_size if flyweight else aug_size - self.batch_size
-            if n > 0:
-                logging.debug(f"Received {n} samples from other nodes")
-
-            if measure_performance and perf_metrics is not None:
-                cpp_metrics = self.dsl.get_metrics(step["batch"])
-                perf_metrics.add(step["batch"] - 1, cpp_metrics)
+        aug_size = self.__get_data(step, perf_metrics=perf_metrics)
 
         # Assemble the minibatch
         with get_timer(
@@ -164,7 +160,7 @@ class Buffer:
             dummy=not measure_performance(step),
         ):
             minibatch = self.__get_current_augmented_minibatch(step)
-            if flyweight:
+            if self.implementation == "flyweight":
                 w = torch.ones(self.batch_size, device=x.device)
                 concat_x = torch.cat((x, minibatch.x[:aug_size]))
                 concat_y = torch.cat((y, minibatch.y[:aug_size]))
@@ -175,11 +171,90 @@ class Buffer:
                 concat_w = minibatch.w[:aug_size]
 
         self.add_data(x, y, step, perf_metrics=perf_metrics)
+
         return concat_x, concat_y, concat_w
+
+    def __get_data(self, step, perf_metrics=None):
+        aug_size = 0
+
+        if self.high_performance:
+            # Get the representatives
+            with get_timer(
+                "wait",
+                step["batch"],
+                perf_metrics=perf_metrics,
+                previous_iteration=True,
+                dummy=not measure_performance(step),
+            ):
+                aug_size = self.dsl.wait()
+                n = (
+                    aug_size
+                    if self.implementation == "flyweight"
+                    else aug_size - self.batch_size
+                )
+                if n > 0:
+                    logging.debug(f"Received {n} samples from other nodes")
+
+                if measure_performance and perf_metrics is not None:
+                    cpp_metrics = self.dsl.get_metrics(step["batch"])
+                    perf_metrics.add(step["batch"] - 1, cpp_metrics)
+        else:
+            if not self.augmentations_enabled:
+                return 0
+
+            minibatch = self.__get_current_augmented_minibatch(step)
+
+            choices = random.sample(
+                range(self.total_num_classes * self.budget_per_class),
+                self.num_representatives,
+            )
+
+            classes_to_sample = {}
+            for index in choices:
+                rehearsal_class_index = math.floor(index / self.budget_per_class)
+                num_zeros = sum(
+                    1 for metadata in self.rehearsal_metadata if metadata[0] == 0
+                )
+                rehearsal_class_index %= len(self.rehearsal_metadata) - num_zeros
+
+                # calculate the right value for i
+                j = -1
+                index_no_empty = 0
+                for index_no_empty in range(len(self.rehearsal_metadata)):
+                    if self.rehearsal_metadata[index_no_empty][0] == 0:
+                        continue
+                    j += 1
+                    if j == rehearsal_class_index:
+                        break
+                rehearsal_repr_of_class_index = (
+                    index % self.budget_per_class
+                ) % self.rehearsal_metadata[index_no_empty][0]
+
+                if index_no_empty not in classes_to_sample.keys():
+                    classes_to_sample[index_no_empty] = {
+                        "weight": self.rehearsal_metadata[index_no_empty][1],
+                        "indices": [],
+                    }
+                classes_to_sample[index_no_empty]["indices"].append(
+                    index_no_empty * self.budget_per_class
+                    + rehearsal_repr_of_class_index
+                )
+
+            for k, v in classes_to_sample.items():
+                for index in v["indices"]:
+                    ti = (torch.tensor([aug_size]),)
+                    minibatch.x.index_put_(ti, self.rehearsal_tensor[index])
+                    minibatch.y.index_put_(ti, torch.tensor(k))
+                    minibatch.w.index_put_(ti, torch.tensor(v["weight"]))
+                    aug_size += 1
+
+        return aug_size
 
     def add_data(self, x, y, step, perf_metrics=None):
         """
-        Fills the rehearsal buffer with (x, y) pairs.
+        Fills the rehearsal buffer with (x, y) pairs, sampled randomly from the
+        incoming batch of data. Only `num_candidates` will be added to the
+        buffer.
 
         :param x: tensor containing input images
         :param y: tensor containing targets
@@ -200,34 +275,31 @@ class Buffer:
                         x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
                     )
         else:
-            pass
-            """
             for i in range(self.batch_size):
-                label = 0
-                if (task_type == neomem.Classification)
-                    label = y[i].item()
-
+                label = y[i].item()
+                self.rehearsal_metadata[0]
                 index = -1
-                if rehearsal_metadata[label].first < N:
-                    index = rehearsal_metadata[label].first
+                if self.rehearsal_metadata[label][0] < self.budget_per_class:
+                    index = self.rehearsal_metadata[label][0]
                 else:
-                    if (dice_candidate(rand_gen) >= C):
+                    if random.randint(0, self.batch_size - 1) >= self.num_candidates:
                         continue
-                    index = dice_buffer(rand_gen)
+                    index = random.randint(0, self.budget_per_class - 1)
 
-                for (size_t r = 0; r < num_samples_per_representative; r++):
-                    size_t j = N * label + index + r
-                    rehearsal_tensor->index_put_({static_cast<int>(j)}, batch.samples.index({i}))
+                for r in range(0, self.num_samples_per_representative):
+                    j = self.budget_per_class * label + index + r
+                    self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i])
 
-                if index >= rehearsal_metadata[label].first:
-                    rehearsal_size++
-                    rehearsal_metadata[label].first++
+                if index >= self.rehearsal_metadata[label][0]:
+                    self.rehearsal_size += 1
+                    self.rehearsal_metadata[label][0] += 1
 
-                rehearsal_counts[label]++
-            """
+                self.rehearsal_counts[label] += 1
 
     def enable_augmentations(self, enabled=True):
-        self.dsl.enable_augmentation(enabled)
+        self.augmentations_enabled = enabled
+        if self.high_performance:
+            self.dsl.enable_augmentation(enabled)
 
     def __get_current_augmented_minibatch(self, step):
         return self.next_minibatches[step["batch"] % self.minibatches_ahead]
@@ -239,4 +311,6 @@ class Buffer:
         return self.get_size()
 
     def get_size(self):
-        return self.dsl.get_rehearsal_size()
+        if self.high_performance:
+            return self.dsl.get_rehearsal_size()
+        return self.rehearsal_size

@@ -44,14 +44,8 @@ class Er(ContinualLearner):
             train_data_regime.total_num_classes,
             train_data_regime.sample_shape,
             self.batch_size,
-            budget_per_class=self.buffer_config.get("rehearsal_size"),
-            num_candidates=self.buffer_config.get("num_candidates"),
-            num_representatives=self.buffer_config.get("num_representatives"),
-            provider=self.buffer_config.get("provider"),
-            discover_endpoints=self.buffer_config.get("discover_endpoints"),
             cuda=self._is_on_cuda(),
-            cuda_rdma=self.buffer_config.get("cuda_rdma"),
-            implementation=self.buffer_config.get("implementation"),
+            **self.buffer_config,
         )
 
         x, y, _ = next(iter(train_data_regime.get_loader(0)))
