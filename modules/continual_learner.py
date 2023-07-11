@@ -10,9 +10,7 @@ from cross_entropy import CrossEntropyLoss
 from utils.log import PerformanceResultsLog
 
 
-class ContinualLearner(nn.Module):
-    """Abstract module to add continual learning capabilities to a classifier (e.g., param regularization, replay)."""
-
+class ContinualLearner:
     def __init__(
         self,
         backbone: nn.Module,
@@ -25,7 +23,7 @@ class ContinualLearner(nn.Module):
     ):
         super().__init__()
         self.backbone = backbone
-        self.criterion = getattr(backbone, "criterion", CrossEntropyLoss)()
+        self.criterion = getattr(backbone, "criterion", CrossEntropyLoss())
         self.optimizer_regime = optimizer_regime
         self.use_amp = use_amp
         self.batch_size = batch_size
@@ -37,7 +35,6 @@ class ContinualLearner(nn.Module):
         self.minimal_eval_loss = float("inf")
         self.best_model = None
         self.scaler = GradScaler(enabled=use_amp)
-        self.perf_metrics = PerformanceResultsLog()
 
     def before_all_tasks(self, train_data_regime):
         pass
@@ -71,4 +68,4 @@ class ContinualLearner(nn.Module):
         return next(self.backbone.parameters()).device
 
     def _is_on_cuda(self):
-        return next(self.parameters()).is_cuda
+        return next(self.backbone.parameters()).is_cuda

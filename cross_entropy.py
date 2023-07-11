@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn.modules.loss import _Loss
 
 """
 def cross_entropy(weight=None, reduction='none'):
@@ -16,4 +17,13 @@ def cross_entropy(weight=None, reduction='none'):
 
 class CrossEntropyLoss(nn.CrossEntropyLoss):
     def __init__(self, reduction="none"):
-        super(CrossEntropyLoss, self).__init__(reduction=reduction)
+        super().__init__(reduction=reduction)
+
+
+class ScaledMeanAbsoluteErrorLoss(_Loss):
+    def __init__(self, reduction="none", scaling=1):
+        super().__init__(reduction=reduction)
+        self.scaling = scaling
+
+    def forward(self, t1, t2):
+        return torch.mean(torch.abs(t1 - t2), axis=(-1, -2)) / self.scaling

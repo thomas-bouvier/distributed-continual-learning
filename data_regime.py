@@ -11,7 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from data.datasets import get_dataset
 from data.preprocess import get_transform
-from data.scenarios import ReconstructionInstanceIncremental
+from data.scenarios import ReconstructionIncremental
 
 
 _DATA_ARGS = {
@@ -105,6 +105,11 @@ class DataRegime:
                 dataset,
                 nb_tasks=self.config["tasks"].get("num_tasks", 5),
                 transformations=[self.config["transform"]["compose"]],
+            )
+        elif scenario == "reconstruction":
+            self.tasksets = ReconstructionIncremental(
+                dataset,
+                nb_tasks=self.config["tasks"].get("num_tasks", 5),
             )
         else:
             self.tasksets = InstanceIncremental(

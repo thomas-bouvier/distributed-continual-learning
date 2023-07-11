@@ -9,11 +9,10 @@ __all__ = ["resnet18"]
 def resnet18(config):
     lr = config.pop("lr") * hvd.size()
     warmup_epochs = config.pop("warmup_epochs")
-    config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
-    model = timm.create_model("resnet18", **config)
+    model = timm.create_model("resnet18", num_classes=config.get("num_classes"))
 
     def rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs):
         # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final

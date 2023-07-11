@@ -32,7 +32,10 @@ def efficientnetv2(config):
 
     # passing num_classes
     model = timm.create_model(
-        "efficientnetv2_m", pretrained=False, drop_rate=0.225, **config
+        "efficientnetv2_m",
+        pretrained=False,
+        drop_rate=0.225,
+        num_classes=config.get("num_classes"),
     )
 
     def rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs):

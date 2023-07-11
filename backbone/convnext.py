@@ -1,10 +1,4 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
+import horovod.torch as hvd
 import math
 import torch
 import torch.nn as nn
@@ -22,7 +16,10 @@ def convnext(config):
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     model = timm.create_model(
-        "convnext_base", pretrained=False, drop_rate=0.5, **config
+        "convnext_base",
+        pretrained=False,
+        drop_rate=0.5,
+        num_classes=config.get("num_classes"),
     )
 
     def rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs):
@@ -30,8 +27,7 @@ def convnext(config):
 
     def cosine_anneal_lr(lr, step, T_max, eta_min=1e-6):
         """
-        Args:
-            eta_min (float): lower lr bound for cyclic schedulers that hit 0 (1e-6)
+        eta_min (float): lower lr bound for cyclic schedulers that hit 0 (1e-6)
         """
         return eta_min + (lr - eta_min) * (1 + math.cos(math.pi * step / T_max)) / 2
 
@@ -40,15 +36,14 @@ def convnext(config):
 
         if step < warmup_steps:
             return {"lr": rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs)}
-        else:
-            return {
-                "lr": cosine_anneal_lr(
-                    lr,
-                    step,
-                    num_epochs * num_steps_per_epoch - warmup_steps,
-                    eta_min=lr_min,
-                )
-            }
+        return {
+            "lr": cosine_anneal_lr(
+                lr,
+                step,
+                num_epochs * num_steps_per_epoch - warmup_steps,
+                eta_min=lr_min,
+            )
+        }
 
     model.regime = [
         {

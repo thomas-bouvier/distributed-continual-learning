@@ -103,3 +103,13 @@ class Er(ContinualLearner):
             meters["prec5"].update(prec5, aug_x.size(0))
             meters["num_samples"].update(aug_x.size(0))
             meters["local_rehearsal_size"].update(self.buffer.get_size())
+
+    def evaluate_one_step(self, x, y, meters, step):
+        with autocast(enabled=self.use_amp):
+            output = self.backbone(x)
+            loss = self.criterion(output, y)
+
+        prec1, prec5 = accuracy(output, y, topk=(1, 5))
+        meters["loss"].update(loss.sum() / loss.size(0))
+        meters["prec1"].update(prec1, x.size(0))
+        meters["prec5"].update(prec5, x.size(0))

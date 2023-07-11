@@ -27,7 +27,7 @@ def measure_performance(step):
 def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
     """Forward pass for the current epoch"""
     device = model._device()
-    model.train()
+    model.backbone.train()
 
     prefix = "train"
     meters = {

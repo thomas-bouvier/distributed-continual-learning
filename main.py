@@ -331,6 +331,7 @@ class Experiment:
             "warmup_epochs": self.args.warmup_epochs,
             "num_epochs": self.args.epochs,
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
+            "total_num_samples": self.train_data_regime.total_num_samples,
         }
         if self.args.backbone_config != "":
             backbone_config = dict(
