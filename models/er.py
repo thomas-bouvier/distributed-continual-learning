@@ -8,7 +8,6 @@ from torch.cuda.amp import autocast
 from modules import ContinualLearner, Buffer
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
-from utils.log import PerformanceResultsLog
 
 
 __all__ = ["Er"]
@@ -63,16 +62,16 @@ class Er(ContinualLearner):
         """
         # Get data from the last iteration (blocking)
         aug_x, aug_y, aug_w = self.buffer.update(
-            x, y, step, perf_metrics=self.perf_metrics
+            x, y, step, batch_metrics=self.batch_metrics
         )
 
         with get_timer(
             "train",
-            step["batch"],
-            perf_metrics=self.perf_metrics,
+            step,
+            batch_metrics=self.batch_metrics,
             dummy=not measure_performance(step),
         ):
-            self.optimizer_regime.update(step["epoch"], step["batch"])
+            self.optimizer_regime.update(step)
             self.optimizer_regime.zero_grad()
 
             # Forward pass

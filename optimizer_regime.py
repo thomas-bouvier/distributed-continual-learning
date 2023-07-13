@@ -49,7 +49,7 @@ class OptimizerRegime(Regime):
             gradient_predivide_factor=self.gradient_predivide_factor,
         )
 
-    def update(self, epoch, steps):
+    def update(self, step):
         """
         Adjusts config according to current epoch or steps and regime.
 
@@ -64,8 +64,10 @@ class OptimizerRegime(Regime):
             return False
 
         updated = False
-        if super(OptimizerRegime, self).update(epoch, steps):
-            logging.debug(f"OPTIMIZER REGIME - update (epoch: {epoch}, steps: {steps})")
+        if super(OptimizerRegime, self).update(step):
+            logging.debug(
+                f"OPTIMIZER REGIME - update (epoch: {step['epoch']}, batch: {step['batch']})"
+            )
             self.adjust_from_config(self.config)
             updated = True
 

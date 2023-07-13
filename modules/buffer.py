@@ -146,17 +146,20 @@ class Buffer:
                 self.next_minibatches[0].w,
             )
 
-    def update(self, x, y, step, perf_metrics=None):
+    def update(self, x, y, step, batch_metrics=None):
         """
         Updates the buffer with incoming data. Get some data from (x, y) pairs.
         """
-        aug_size = self.__get_data(step, perf_metrics=perf_metrics)
+        if self.high_performance:
+            self.dsl.measure_performance(measure_performance(step))
+
+        aug_size = self.__get_data(step, batch_metrics=batch_metrics)
 
         # Assemble the minibatch
         with get_timer(
             "assemble",
-            step["batch"],
-            perf_metrics=perf_metrics,
+            step,
+            batch_metrics=batch_metrics,
             dummy=not measure_performance(step),
         ):
             minibatch = self.__get_current_augmented_minibatch(step)
@@ -170,19 +173,19 @@ class Buffer:
                 concat_y = minibatch.y[:aug_size]
                 concat_w = minibatch.w[:aug_size]
 
-        self.add_data(x, y, step, perf_metrics=perf_metrics)
+        self.add_data(x, y, step, batch_metrics=batch_metrics)
 
         return concat_x, concat_y, concat_w
 
-    def __get_data(self, step, perf_metrics=None):
+    def __get_data(self, step, batch_metrics=None):
         aug_size = 0
 
         if self.high_performance:
             # Get the representatives
             with get_timer(
                 "wait",
-                step["batch"],
-                perf_metrics=perf_metrics,
+                step,
+                batch_metrics=batch_metrics,
                 previous_iteration=True,
                 dummy=not measure_performance(step),
             ):
@@ -195,9 +198,18 @@ class Buffer:
                 if n > 0:
                     logging.debug(f"Received {n} samples from other nodes")
 
-                if measure_performance and perf_metrics is not None:
-                    cpp_metrics = self.dsl.get_metrics(step["batch"])
-                    perf_metrics.add(step["batch"] - 1, cpp_metrics)
+                if measure_performance(step) and batch_metrics is not None:
+                    names = [
+                        "batch_copy_time",
+                        "bulk_prepare_time",
+                        "rpcs_resolve_time",
+                        "representatives_copy_time",
+                        "buffer_update_time",
+                    ]
+                    batch_metrics.add(
+                        step,
+                        **dict(zip(names, self.dsl.get_metrics(step["batch"]))),
+                    )
         else:
             if not self.augmentations_enabled:
                 return 0
@@ -250,7 +262,7 @@ class Buffer:
 
         return aug_size
 
-    def add_data(self, x, y, step, perf_metrics=None):
+    def add_data(self, x, y, step, batch_metrics=None):
         """
         Fills the rehearsal buffer with (x, y) pairs, sampled randomly from the
         incoming batch of data. Only `num_candidates` will be added to the
@@ -263,8 +275,8 @@ class Buffer:
         if self.high_performance:
             with get_timer(
                 "accumulate",
-                step["batch"],
-                perf_metrics=perf_metrics,
+                step,
+                batch_metrics=batch_metrics,
                 dummy=not measure_performance(step),
             ):
                 if self.implementation == "flyweight":

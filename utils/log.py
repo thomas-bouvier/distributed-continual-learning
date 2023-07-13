@@ -100,8 +100,6 @@ class ResultsLog:
         self, save_path, title="", params=None, data_format="json", dummy=False
     ):
         """
-        Parameters
-        ----------
         path: string
             path to directory to save data files
         plot_path: string
@@ -213,20 +211,26 @@ class ResultsLog:
 
 
 class PerformanceResultsLog:
-    perf_metrics = {}
+    batch_metrics = {}
 
-    def add(self, batch, value, key=None):
-        if batch not in self.perf_metrics:
-            self.perf_metrics[batch] = {}
+    def __init__(self, save_path):
+        self.data_path = f"{save_path}.json"
 
-        if key is not None:
-            self.perf_metrics[batch] |= {key: value}
-        elif isinstance(value, list):
-            for i in range(len(value)):
-                self.perf_metrics[batch] |= {i: value[i]}
+    def add(self, step, **kwargs):
+        self.batch_metrics.setdefault(step["epoch"], {}).setdefault(
+            step["batch"], {}
+        ).update(kwargs)
 
-    def get(self, batch):
-        return self.perf_metrics[batch]
+    def get(self, step):
+        try:
+            return self.batch_metrics[step["epoch"]][step["batch"]]
+        except:
+            return {}
+
+    def save(self):
+        with open(self.data_path, "w") as outfile:
+            json.dump(self.batch_metrics, outfile)
+            wandb.save(self.data_path)
 
 
 def plot_representatives(rep_values, rep_labels, num_cols):

@@ -49,8 +49,8 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
     ) as progress:
         timer = get_timer(
             "load",
-            batch,
-            perf_metrics=model.perf_metrics,
+            step,
+            batch_metrics=model.batch_metrics,
             previous_iteration=True,
             dummy=not measure_performance(step),
         )
@@ -64,44 +64,29 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
             step = dict(task_id=task_id, epoch=epoch, batch=batch)
             model.train_one_step(x, y, meters, step)
 
-            if hvd.rank() == 0 and False:
-                captions = []
-                for label in y:
-                    captions.append(f"y={label.item()}")
-                display(f"train_batch_{task_id}_{epoch}_{batch}", x, captions=captions)
-
             last_batch_time = time.perf_counter() - start_batch_time
             epoch_time += last_batch_time
 
             if hvd.rank() == 0:
                 # Performance metrics
-                if measure_performance(step) and model.batch_metrics is not None:
-                    metrics = model.perf_metrics.get(batch - 1)
+                if (
+                    measure_performance(dict(task_id=task_id, epoch=epoch, batch=batch))
+                    and model.batch_metrics is not None
+                ):
+                    metrics = model.batch_metrics.get(
+                        dict(task_id=task_id, epoch=epoch, batch=batch - 1)
+                    )
 
                     batch_metrics_values = dict(
                         epoch=epoch,
                         batch=batch,
-                        time=last_batch_time,
-                        load_time=metrics.get("load", 0),
-                        train_time=metrics.get("train", 0),
+                        batch_time=last_batch_time,
+                        **metrics,
+                        aug_size=meters["num_samples"].val.item(),
+                        local_rehearsal_size=meters["local_rehearsal_size"].val.item(),
                     )
-                    if model.use_memory_buffer:
-                        batch_metrics_values |= dict(
-                            wait_time=metrics.get("wait", 0),
-                            assemble_time=metrics.get("assemble", 0),
-                            accumulate_time=metrics[0],
-                            copy_time=metrics[1],
-                            bulk_prepare_time=metrics[2],
-                            rpcs_resolve_time=metrics[3],
-                            representatives_copy_time=metrics[4],
-                            buffer_update_time=metrics[5],
-                            aug_size=meters["num_samples"].val.item(),
-                            local_rehearsal_size=meters[
-                                "local_rehearsal_size"
-                            ].val.item(),
-                        )
 
-                    model.batch_metrics.add(**batch_metrics_values)
+                    model.batch_metrics.add(step, **batch_metrics_values)
                     model.batch_metrics.save()
 
             # Logging
@@ -119,31 +104,43 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
                     )
                 )
 
-                if measure_performance(step):
-                    metrics = model.perf_metrics.get(batch - 1)
+                if measure_performance(dict(task_id=task_id, epoch=epoch, batch=batch)):
+                    metrics = model.batch_metrics.get(
+                        dict(task_id=task_id, epoch=epoch, batch=batch)
+                    )
                     logging.debug(f"batch {batch} time {last_batch_time} sec")
                     logging.debug(
-                        f"\t[Python] batch load time {metrics.get('load', 0)} sec ({metrics.get('load', 0)*100/last_batch_time}%)"
+                        f"\t[Python] batch load time {metrics.get('load_time', -1)} sec ({metrics.get('load_time', -1)*100/last_batch_time}%)"
                     )
                     logging.debug(
-                        f"\t[Python] batch train time {metrics.get('train', 0)} sec ({metrics.get('train', 0)*100/last_batch_time}%)"
+                        f"\t[Python] batch train time {metrics.get('train_time', -1)} sec ({metrics.get('train_time', -1)*100/last_batch_time}%)"
+                    )
+                    logging.debug(
+                        f"\t[Python] batch accumulate time {metrics.get('accumulate_time', -1)} sec ({metrics.get('accumulate_time', -1)*100/last_batch_time}%)"
                     )
 
                     if model.use_memory_buffer:
                         logging.debug(
-                            f"\t[Python] batch wait time {metrics.get('wait', 0)} sec ({metrics.get('wait', 0)*100/last_batch_time}%)"
+                            f"\t[Python] batch wait time {metrics.get('wait_time', -1)} sec ({metrics.get('wait_time', -1)*100/last_batch_time}%)"
                         )
                         logging.debug(
-                            f"\t[Python] batch assemble time {metrics.get('assemble', 0)} sec ({metrics.get('assemble', 0)*100/last_batch_time}%)"
+                            f"\t[Python] batch assemble time {metrics.get('assemble_time', -1)} sec ({metrics.get('assemble_time', -1)*100/last_batch_time}%)"
                         )
-                        logging.debug(f"\t[C++] batch accumulate time {metrics[0]} sec")
-                        logging.debug(f"\t[C++] batch copy time {metrics[1]} sec")
-                        logging.debug(f"\t[C++] bulk prepare time {metrics[2]} sec")
-                        logging.debug(f"\t[C++] rpcs resolve time {metrics[3]} sec")
                         logging.debug(
-                            f"\t[C++] representatives copy time {metrics[4]} sec"
+                            f"\t[C++] batch copy time {metrics.get('batch_copy_time', -1)} sec"
                         )
-                        logging.debug(f"\t[C++] buffer update time {metrics[5]} sec")
+                        logging.debug(
+                            f"\t[C++] bulk prepare time {metrics.get('bulk_prepare_time', -1)} sec"
+                        )
+                        logging.debug(
+                            f"\t[C++] rpcs resolve time {metrics.get('rpcs_resolve_time', -1)} sec"
+                        )
+                        logging.debug(
+                            f"\t[C++] representatives copy time {metrics.get('representatives_copy_time', -1)} sec"
+                        )
+                        logging.debug(
+                            f"\t[C++] buffer update time {metrics.get('buffer_update_time', -1)} sec"
+                        )
                         logging.debug(
                             f"\t[C++] local_rehearsal_size {meters['local_rehearsal_size'].val.item()}"
                         )
@@ -166,8 +163,8 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
 
             timer = get_timer(
                 "load",
-                batch,
-                perf_metrics=model.perf_metrics,
+                step,
+                batch_metrics=model.batch_metrics,
                 previous_iteration=True,
                 dummy=not measure_performance(step),
             )

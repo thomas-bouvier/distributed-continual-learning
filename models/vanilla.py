@@ -9,7 +9,6 @@ from torch.cuda.amp import autocast
 from modules import ContinualLearner
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
-from utils.log import PerformanceResultsLog
 
 __all__ = ["Vanilla"]
 
@@ -45,11 +44,11 @@ class Vanilla(ContinualLearner):
         """
         with get_timer(
             "train",
-            step["batch"],
-            perf_metrics=self.perf_metrics,
+            step,
+            batch_metrics=self.batch_metrics,
             dummy=not measure_performance(step),
         ):
-            self.optimizer_regime.update(step["epoch"], step["batch"])
+            self.optimizer_regime.update(step)
             self.optimizer_regime.zero_grad()
 
             # Forward pass

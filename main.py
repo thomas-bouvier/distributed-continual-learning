@@ -24,7 +24,8 @@ import models
 from data_regime import DataRegime
 from optimizer_regime import OptimizerRegime
 from train.train import train
-from utils.log import setup_logging, ResultsLog
+from utils.log import setup_logging, ResultsLog, PerformanceResultsLog
+
 from utils.meters import AverageMeter
 from utils.model import save_checkpoint
 from utils.yaml_params import YParams
@@ -310,11 +311,7 @@ class Experiment:
         total_num_classes = self.prepare_dataset()
 
         batch_metrics_path = path.join(self.save_path, "batch_metrics")
-        batch_metrics = ResultsLog(
-            batch_metrics_path,
-            title="Batch metrics - %s" % self.args.save_dir,
-            dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
-        )
+        batch_metrics = PerformanceResultsLog(batch_metrics_path)
         self.create_model(total_num_classes, batch_metrics)
 
     def create_model(self, total_num_classes, batch_metrics=None):

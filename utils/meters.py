@@ -31,14 +31,14 @@ class MeasureTime:
     def __init__(
         self,
         name,
-        batch,
-        perf_metrics: PerformanceResultsLog,
+        step,
+        batch_metrics: PerformanceResultsLog,
         cuda=True,
         dummy=False,
     ):
-        self.batch = batch
         self.name = name
-        self.perf_metrics = perf_metrics
+        self.step = step
+        self.batch_metrics = batch_metrics
         self.cuda = cuda
         self.dummy = dummy
         self.rng = None
@@ -61,16 +61,18 @@ class MeasureTime:
             synchronize_cuda(self.cuda)
             time = self.start.elapsed_time(self.end)
 
-            if self.perf_metrics is not None:
-                self.perf_metrics.add(self.batch, time, key=self.name)
+            if self.batch_metrics is not None:
+                self.batch_metrics.add(self.step, **dict({self.name: time}))
 
 
 def get_timer(
-    name, batch, perf_metrics=None, previous_iteration=False, cuda=True, dummy=False
+    name, step, batch_metrics=None, previous_iteration=False, cuda=True, dummy=False
 ):
     if previous_iteration:
-        batch -= 1
-    return MeasureTime(name, batch, perf_metrics=perf_metrics, cuda=cuda, dummy=dummy)
+        step["batch"] = step["batch"] - 1
+    return MeasureTime(
+        f"{name}_time", step, batch_metrics=batch_metrics, cuda=cuda, dummy=dummy
+    )
 
 
 def accuracy(output, target, topk=(1,)):
