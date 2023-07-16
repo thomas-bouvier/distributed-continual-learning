@@ -510,7 +510,7 @@ class Experiment:
             self.model,
             self.train_data_regime,
             self.validate_data_regime,
-            self.args.epochs,
+            literal_eval(self.args.tasksets_config).get("epochs", self.args.epochs),
             resume_from_task=self.resume_from_task,
             resume_from_epoch=self.resume_from_epoch,
             log_interval=self.args.log_interval,

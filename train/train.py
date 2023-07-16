@@ -211,7 +211,19 @@ def train(
     tasks_metrics=None,
     time_metrics=None,
 ):
-    """Train a model on multiple tasks."""
+    """
+    Train a model on multiple tasks.
+
+    epochs: a number of epochs, or a list of number of epochs if you want to be
+    task-specific
+    """
+    num_tasks = len(train_data_regime.tasksets)
+    if not isinstance(epochs, list):
+        epochs = [epochs] * num_tasks
+    if len(epochs) < num_tasks:
+        epochs += (
+            [epochs[-1]] * (num_tasks - len(epochs)) if len(epochs) < num_tasks else []
+        )
 
     global_epoch = 0
     global_batch = 0
@@ -221,7 +233,7 @@ def train(
     total_start = time.perf_counter()
     model.before_all_tasks(train_data_regime)
 
-    for task_id in range(resume_from_task, len(train_data_regime.tasksets)):
+    for task_id in range(resume_from_task, num_tasks):
         start = time.perf_counter()
         training_time = time.perf_counter()
         task_metrics = {
@@ -232,9 +244,9 @@ def train(
 
         model.before_every_task(task_id, train_data_regime)
 
-        for epoch in range(resume_from_epoch, epochs):
+        for epoch in range(resume_from_epoch, epochs[task_id]):
             logging.info(
-                f"TRAINING on task {task_id + 1}/{len(train_data_regime.tasksets)}, epoch: {epoch + 1}/{epochs}, {hvd.size()} device(s)"
+                f"TRAINING on task {task_id + 1}/{num_tasks}, epoch: {epoch + 1}/{epochs[task_id]}, {hvd.size()} device(s)"
             )
 
             # Horovod: set epoch to sampler for shuffling
@@ -263,7 +275,7 @@ def train(
             # evaluate on test set
             before_evaluate_time = time.perf_counter()
             meters = []
-            if evaluate or epoch + 1 == epochs:
+            if evaluate or epoch + 1 == epochs[task_id]:
                 for test_task_id in range(0, task_id + 1):
                     meters.append(
                         {

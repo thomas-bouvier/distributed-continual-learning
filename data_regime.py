@@ -112,6 +112,9 @@ class DataRegime:
                 nb_tasks=self.config["tasks"].get("num_tasks", 5),
             )
         else:
+            assert not self.config[
+                "tasks"
+            ], "You forgot to pass a scenario type (class, instance, reconstruction)"
             self.tasksets = InstanceIncremental(
                 dataset,
                 nb_tasks=1,
