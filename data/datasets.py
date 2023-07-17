@@ -37,7 +37,7 @@ def get_dataset(
         root = os.path.join(root, "CIFAR10")
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return (
-                datasets.CIFAR10(data_path=root, train=train, download=False),
+                datasets.CIFAR10(data_path=root, train=train, download=True),
                 COMPATIBILITY,
             )
 

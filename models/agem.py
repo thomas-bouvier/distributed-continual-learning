@@ -1,4 +1,19 @@
-__all__['Agem']
+import horovod.torch as hvd
+import logging
+import torch
+import torch.nn as nn
+import numpy as np
+
+from torch.cuda.amp import autocast
+
+from modules import ContinualLearner, Buffer
+from train.train import measure_performance
+from utils.meters import get_timer, accuracy
+from utils.log import PerformanceResultsLog
+
+
+__all__ = ["Agem"]
+
 
 class Agem(ContinualLearner):
 
@@ -22,14 +37,18 @@ class Agem(ContinualLearner):
             batch_metrics,
         )
 
+        print('[+] DEBUG AGEM : INIT')
+
         self.use_memory_buffer = True
 
         # Implémentation via mammoth à voir pour grad_xy et grad_er
         self.grad_dims = []
-        for param in self.parameters():
+        for param in self.backbone.parameters():
             self.grad_dims.append(param.data.numel())
-        self.grad_xy = torch.Tensor(np.sum(self.grad_dims)).to(self.device)
-        self.grad_er = torch.Tensor(np.sum(self.grad_dims)).to(self.device)
+        print("[+] DEBUG : ",str(np.sum(self.grad_dims)))
+        self.grad_xy = torch.Tensor(np.sum(self.grad_dims)) # TODO add device
+        self.grad_er = torch.Tensor(np.sum(self.grad_dims)) # TODO add device
+        print("[+] DEBUG : ",str((self.grad_xy)))
 
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(
@@ -49,31 +68,17 @@ class Agem(ContinualLearner):
         if task_id > 0:
             self.buffer.enable_augmentations()
 
-    def store_grad(params, grads, grad_dims):
-    """
-        This stores parameter gradients of past tasks.
-        pp: parameters
-        grads: gradients
-        grad_dims: list with number of parameters per layers
-    """
-    # store the gradients
-    grads.fill_(0.0)
-    count = 0
-    for param in params():
-        if param.grad is not None:
-            begin = 0 if count == 0 else sum(grad_dims[:count])
-            end = np.sum(grad_dims[:count + 1])
-            grads[begin: end].copy_(param.grad.data.view(-1))
-        count += 1
+    def store_grad(self, params, grads, grad_dims):
+        grads.fill_(0.0)
+        count = 0
+        for param in params():
+            if param.grad is not None:
+                begin = 0 if count == 0 else sum(grad_dims[:count])
+                end = np.sum(grad_dims[:count + 1])
+                grads[begin: end].copy_(param.grad.data.view(-1))
+            count += 1
 
-    def overwrite_grad(params, newgrad, grad_dims):
-        """
-            This is used to overwrite the gradients with a new gradient
-            vector, whenever violations occur.
-            pp: parameters
-            newgrad: corrected gradient
-            grad_dims: list storing number of parameters at each layer
-        """
+    def overwrite_grad(self, params, newgrad, grad_dims):
         count = 0
         for param in params():
             if param.grad is not None:
@@ -84,7 +89,7 @@ class Agem(ContinualLearner):
                 param.grad.data.copy_(this_grad)
             count += 1
 
-    def project(gxy: torch.Tensor, ger: torch.Tensor) -> torch.Tensor:
+    def project(self, gxy: torch.Tensor, ger: torch.Tensor) -> torch.Tensor:
         corr = torch.dot(gxy, ger) / torch.dot(ger, ger)
         return gxy - corr * ger
 
@@ -107,25 +112,30 @@ class Agem(ContinualLearner):
             # Loss Backwards
             self.scaler.scale(loss.sum() / loss.size(0)).backward()
 
-            if not self.buffer.is_empty():
-                store_grad(self.parameters,self.grad_xy,self.grad_dims)  # A voir pour le self.parameters()
+            self.buffer.update(x,y,step)
 
-                buf_x, buf_y = self.buffer.__get_data(step) # step ou step-1 ?
+            if step["task_id"] != 0:
+
+                self.store_grad(self.backbone.parameters,self.grad_xy,self.grad_dims)  # A voir pour le self.backbone.parameters()
+
+                buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
+                buf_x,buf_y, = buf.x,buf.y # step ou step-1 ?
                 self.optimizer_regime.zero_grad() # self.net.zero_grad()
 
                 buf_outputs = self.backbone(buf_x)
+                
                 buf_loss = self.criterion(buf_outputs,buf_y)
                 self.scaler.scale(buf_loss.sum() / buf_loss.size(0)).backward()
 
-                store_grad(self.parameters,self.grad_er,self.grad_dims) # A voir pour le self.parameters()
+                self.store_grad(self.backbone.parameters,self.grad_er,self.grad_dims) # A voir pour le self.backbone.parameters()
 
                 dot_prod = torch.dot(self.grad_xy,self.grad_er)
                 
                 if dot_prod.item() < 0:
-                    g_tilde = project(gxy=self.grad_xy, ger=self.grad_er)
-                    overwrite_grad(self.parameters, g_tilde, self.grad_dims)
+                    g_tilde = self.project(gxy=self.grad_xy, ger=self.grad_er)
+                    self.overwrite_grad(self.backbone.parameters, g_tilde, self.grad_dims)
                 else:
-                    overwrite_grad(self.parameters, self.grad_xy, self.grad_dims)
+                    self.overwrite_grad(self.backbone.parameters, self.grad_xy, self.grad_dims)
 
             self.optimizer_regime.optimizer.synchronize()
             with self.optimizer_regime.optimizer.skip_synchronize():
@@ -133,9 +143,9 @@ class Agem(ContinualLearner):
                 self.scaler.update()
 
             # Measure accuracy and record metrics
-            prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
-            meters["loss"].update(loss.sum() / aug_y.size(0))
-            meters["prec1"].update(prec1, aug_x.size(0))
-            meters["prec5"].update(prec5, aug_x.size(0))
-            meters["num_samples"].update(aug_x.size(0))
+            prec1, prec5 = accuracy(outputs, y, topk=(1, 5))
+            meters["loss"].update(loss.mean())
+            meters["prec1"].update(prec1, x.size(0))
+            meters["prec5"].update(prec5, x.size(0))
+            meters["num_samples"].update(x.size(0))
             meters["local_rehearsal_size"].update(self.buffer.get_size())
