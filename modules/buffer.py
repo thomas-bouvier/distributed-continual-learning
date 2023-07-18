@@ -155,6 +155,8 @@ class Buffer:
 
         aug_size = self.__get_data(step, batch_metrics=batch_metrics)
 
+        #print("[+] Aug_size : ",aug_size)
+
         # Assemble the minibatch
         with get_timer(
             "assemble",

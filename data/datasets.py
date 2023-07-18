@@ -29,7 +29,7 @@ def get_dataset(
     if dataset == "mnist":
         with FileLock(os.path.expanduser("~/.horovod_lock")):
             return (
-                datasets.MNIST(data_path=root, train=train, download=False),
+                datasets.MNIST(data_path=root, train=train, download=True),
                 COMPATIBILITY,
             )
 

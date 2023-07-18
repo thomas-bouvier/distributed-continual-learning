@@ -58,7 +58,7 @@ class ContinualLearner:
                 self.backbone.load_state_dict(copy.deepcopy(self.initial_snapshot))
             self.optimizer_regime.reset(self.backbone.parameters())
 
-    def after_every_task(self):
+    def after_every_task(self, task_id, train_data_regime):
         pass
 
     def after_all_tasks(self):

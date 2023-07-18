@@ -9,6 +9,7 @@ __all__ = ["resnet18"]
 def resnet18(config):
     lr = config.pop("lr") * hvd.size()
     warmup_epochs = config.pop("warmup_epochs")
+    num_epoch = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
@@ -29,18 +30,30 @@ def resnet18(config):
             return {"lr": rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs)}
         return {}
 
-    model.regime = [
-        {
+    if num_epoch < 25:
+        model.regime = [
+            {
             "epoch": 0,
             "optimizer": "SGD",
             "momentum": 0.9,
-            "weight_decay": 0.00005,
-            "step_lambda": config_by_step,
-        },
-        {"epoch": warmup_epochs, "lr": lr},
-        {"epoch": 18, "lr": lr * 1e-1},
-        {"epoch": 23, "lr": lr * 1e-2},
-        {"epoch": 30, "lr": lr * 1e-3},
-    ]
+            "weight_decay": 0.0001,
+            "lr": 0.03
+        }
+        ]
+
+    else:
+        model.regime = [
+            {
+                "epoch": 0,
+                "optimizer": "SGD",
+                "momentum": 0.9,
+                "weight_decay": 0.00005,
+                "step_lambda": config_by_step,
+            },
+            {"epoch": warmup_epochs, "lr": lr},
+            {"epoch": 18, "lr": lr * 1e-1},
+            {"epoch": 23, "lr": lr * 1e-2},
+            {"epoch": 30, "lr": lr * 1e-3},
+        ]
 
     return model

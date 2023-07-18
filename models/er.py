@@ -9,7 +9,6 @@ from modules import ContinualLearner, Buffer
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
 
-
 __all__ = ["Er"]
 
 
@@ -73,6 +72,18 @@ class Er(ContinualLearner):
         ):
             self.optimizer_regime.update(step)
             self.optimizer_regime.zero_grad()
+            
+            repr_size = 3
+            captions = []
+            for label in zip(y[-repr_size:]):
+                captions.append(f"y={label}")
+            #display(f"img/aug_batch_{step['task_id']}_{step['epoch']}_{step['batch']}", x[-repr_size:], captions=captions)
+            #if self.repr_size > 0:
+            #    captions = []
+            #    for y, w in zip(self.next_minibatch.y[-self.repr_size:], self.next_minibatch.w[-self.repr_size:]):
+            #        captions.append(f"y={y.item()} w={w.item()}")
+            #    display(f"aug_batch_{step["task_id"]}_{step["epoch"]}_{step["batch"]}", self.next_minibatch.x[-self.repr_size:], captions=captions)
+
 
             # Forward pass
             with autocast(enabled=self.use_amp):
