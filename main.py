@@ -264,7 +264,7 @@ def main():
 
     save_path = ""
     if hvd.rank() == 0:
-        wandb.init(project="distributed-continual-learning")
+        wandb.init(mode="disabled")#project="distributed-continual-learning")
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
         if args.model is not None:
             run_name = f"{args.model}-{run_name}"

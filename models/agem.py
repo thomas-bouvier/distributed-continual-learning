@@ -118,9 +118,10 @@ class Agem(ContinualLearner):
             with autocast(enabled=self.use_amp):
                 outputs = self.backbone(x)
                 loss = self.criterion(outputs,y)
-
+        
             # Loss Backwards
-            self.scaler.scale(loss.sum() / loss.size(0)).backward()
+            #self.scaler.scale(loss.sum() / loss.size(0)).backward()
+            (loss.sum() / loss.size(0)).backward()
 
             if step["task_id"] != 0 and self.One:
 
@@ -137,8 +138,9 @@ class Agem(ContinualLearner):
                 #print("[+] Expected : ",buf_y)
 
                 buf_loss = self.criterion(buf_outputs,buf_y)
-                self.scaler.scale(buf_loss.sum() / buf_loss.size(0)).backward()
-
+                #self.scaler.scale(buf_loss.sum() / buf_loss.size(0)).backward()
+                (buf_loss.sum() / buf_loss.size(0)).backward()
+                
                 self.store_grad(self.backbone.parameters,self.grad_er,self.grad_dims) # A voir pour le self.backbone.parameters()
 
                 dot_prod = torch.dot(self.grad_xy,self.grad_er)
