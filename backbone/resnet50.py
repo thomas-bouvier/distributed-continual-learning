@@ -11,8 +11,12 @@ def resnet50(config):
     warmup_epochs = config.pop("warmup_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    # passing num_classes
-    model = timm.create_model("resnet50", num_classes=config.get("num_classes"))
+    # Torchvision defaults zero_init_residual to False. This option set to False
+    # will perform better on short epoch runs, however it is not the case on a
+    # longer training run and actually will outperform the non-zero out version.
+    model = timm.create_model(
+        "resnet50", num_classes=config.get("num_classes"), zero_init_last=False
+    )
 
     def rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs):
         # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
