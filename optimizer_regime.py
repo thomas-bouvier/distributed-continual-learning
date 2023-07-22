@@ -19,7 +19,7 @@ class OptimizerRegime(Regime):
         use_amp,
         defaults={},
     ):
-        super(OptimizerRegime, self).__init__(regime, defaults)
+        super().__init__(regime, defaults)
         self.parameters = list(model.parameters())
         self.named_parameters = list(model.named_parameters())
         self.compression = compression
@@ -64,7 +64,7 @@ class OptimizerRegime(Regime):
             return False
 
         updated = False
-        if super(OptimizerRegime, self).update(step):
+        if super().update(step):
             logging.debug(
                 f"OPTIMIZER REGIME - update (epoch: {step['epoch']}, batch: {step['batch']})"
             )

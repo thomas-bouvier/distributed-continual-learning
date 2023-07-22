@@ -59,10 +59,7 @@ class Regime:
                 config["lr"] *= decay_rate ** (step["batch"] / decay_steps)
 
         elif "step_lambda" in config:
-            config.update(eval_func(config.pop("step_lambda"), step["batch"]))
-
-        elif "epoch_lambda" in config:
-            config.update(eval_func(config.pop("epoch_lambda"), step["epoch"]))
+            config.update(eval_func(config.pop("step_lambda"), step))
 
         if "execute" in config:
             config.pop("execute")()
