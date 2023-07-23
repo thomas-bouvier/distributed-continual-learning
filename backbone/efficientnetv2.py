@@ -24,39 +24,41 @@ def weight_decay_config(value=1e-4, log=False):
 
 
 def efficientnetv2(config):
-    lr = config.pop("lr") * hvd.size()  # 0.00075 * world_size
-    lr_min = config.pop("lr_min") * hvd.size()  # 1e-6 * world_size
+    lr = config.pop("lr")  # 0.00025
+    lr_min = config.pop("lr_min")  # 1e-6
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
     model = timm.create_model(
-        "efficientnetv2_m",
+        "efficientnetv2_s",
         pretrained=False,
         drop_rate=0.225,
         num_classes=config.get("num_classes"),
     )
 
-    def rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs):
-        return lr * step / (num_steps_per_epoch * warmup_epochs)
+    def rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs):
+        lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
+        return lr * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
 
-    def cosine_anneal_lr(lr, step, T_max, eta_min=1e-6):
+    def cosine_anneal_lr(step, lr, T_max, eta_min=1e-6):
         """
         Args:
             eta_min (float): lower lr bound for cyclic schedulers that hit 0 (1e-6)
         """
-        return eta_min + (lr - eta_min) * (1 + math.cos(math.pi * step / T_max)) / 2
+        lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
+        return eta_min + (lr - eta_min) * (1 + math.cos(math.pi * lr_epoch / T_max)) / 2
 
     def config_by_step(step):
         warmup_steps = warmup_epochs * num_steps_per_epoch
 
-        if step < warmup_steps:
-            return {"lr": rampup_lr(lr, step, num_steps_per_epoch, warmup_epochs)}
+        if step["epoch"] * num_steps_per_epoch + step["batch"] < warmup_steps:
+            return {"lr": rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs)}
         else:
             return {
                 "lr": cosine_anneal_lr(
-                    lr, step, num_epochs * num_steps_per_epoch, eta_min=lr_min
+                    step, lr * hvd.size(), num_epochs, eta_min=lr_min * hvd.size()
                 )
             }
 

@@ -17,10 +17,10 @@ def measure_performance(step):
     if -1 in step.values():
         return False
     return (
-        step["task_id"] == 1
-        and step["epoch"] == 10
-        and step["batch"] >= 200
-        and step["batch"] < 300
+        step["task_id"] == 0
+        and step["epoch"] == 0
+        and step["batch"] >= 100
+        and step["batch"] < 200
     )
 
 
