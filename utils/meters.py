@@ -47,7 +47,6 @@ class MeasureTime:
         if not self.dummy:
             self.start = torch.cuda.Event(enable_timing=True)
             self.end = torch.cuda.Event(enable_timing=True)
-            synchronize_cuda(self.cuda)
             self.start.record()
 
         self.rng = nvtx.start_range(message=self.name)
@@ -58,11 +57,11 @@ class MeasureTime:
 
         if not self.dummy:
             self.end.record()
-            synchronize_cuda(self.cuda)
+            torch.cuda.default_stream().synchronize()
             time = self.start.elapsed_time(self.end)
 
             if self.batch_metrics is not None:
-                self.batch_metrics.add(self.step, **dict({self.name: time}))
+                self.batch_metrics.add(self.step, dict({self.name: time}))
 
 
 def get_timer(

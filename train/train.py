@@ -73,20 +73,6 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
                     measure_performance(dict(task_id=task_id, epoch=epoch, batch=batch))
                     and model.batch_metrics is not None
                 ):
-                    metrics = model.batch_metrics.get(
-                        dict(task_id=task_id, epoch=epoch, batch=batch - 1)
-                    )
-
-                    batch_metrics_values = dict(
-                        epoch=epoch,
-                        batch=batch,
-                        batch_time=last_batch_time,
-                        **metrics,
-                        aug_size=meters["num_samples"].val.item(),
-                        local_rehearsal_size=meters["local_rehearsal_size"].val.item(),
-                    )
-
-                    model.batch_metrics.add(step, **batch_metrics_values)
                     model.batch_metrics.save()
 
             # Logging

@@ -211,26 +211,41 @@ class ResultsLog:
 
 
 class PerformanceResultsLog:
-    batch_metrics = {}
+    cpp_keys = [
+        "batch_copy_time",
+        "bulk_prepare_time",
+        "rpcs_resolve_time",
+        "representatives_copy_time",
+        "buffer_update_time",
+    ]
+    metrics = {}
+    last_step_added = {}
+    last_values_added = {}
 
     def __init__(self, save_path):
-        self.data_path = f"{save_path}.json"
+        self.results_logs = ResultsLog(save_path, "batch_metrics")
 
-    def add(self, step, **kwargs):
-        self.batch_metrics.setdefault(step["epoch"], {}).setdefault(
-            step["batch"], {}
-        ).update(kwargs)
+    # todo: adapt to store a task id along epoch and batch
+    def add(self, step, values):
+        if isinstance(values, list):
+            values = dict(zip(self.cpp_keys, values))
+
+        self.metrics.setdefault(step["epoch"], {}).setdefault(step["batch"], {}).update(
+            **values
+        )
+
+        self.last_step_added = step
+        self.last_values_added = self.get(step)
 
     def get(self, step):
         try:
-            return self.batch_metrics[step["epoch"]][step["batch"]]
+            return self.metrics[step["epoch"]][step["batch"]]
         except:
             return {}
 
     def save(self):
-        with open(self.data_path, "w") as outfile:
-            json.dump(self.batch_metrics, outfile)
-            wandb.save(self.data_path)
+        self.results_logs.add(**self.last_step_added, **self.last_values_added)
+        self.results_logs.save()
 
 
 def plot_representatives(rep_values, rep_labels, num_cols):

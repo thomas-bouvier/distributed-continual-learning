@@ -199,16 +199,9 @@ class Buffer:
                     logging.debug(f"Received {n} samples from other nodes")
 
                 if measure_performance(step) and batch_metrics is not None:
-                    names = [
-                        "batch_copy_time",
-                        "bulk_prepare_time",
-                        "rpcs_resolve_time",
-                        "representatives_copy_time",
-                        "buffer_update_time",
-                    ]
                     batch_metrics.add(
                         step,
-                        **dict(zip(names, self.dsl.get_metrics(step["batch"]))),
+                        self.dsl.get_metrics(step["batch"]),
                     )
         else:
             if not self.augmentations_enabled:
