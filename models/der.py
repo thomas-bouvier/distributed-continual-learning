@@ -40,7 +40,6 @@ class Der(ContinualLearner):
         self.use_memory_buffer = True
         self.alpha = 0.3
         self.temp = False
-        self.output = None
 
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(
@@ -51,8 +50,8 @@ class Der(ContinualLearner):
             **self.buffer_config,
         )
 
-        #x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        #self.buffer.add_data(x, y, dict(batch=-1))
+        x, y, _ = next(iter(train_data_regime.get_loader(0)))
+        self.buffer.add_data(x, y, dict(batch=-1))
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
@@ -74,36 +73,39 @@ class Der(ContinualLearner):
         ):
             self.optimizer_regime.update(step)
             self.optimizer_regime.zero_grad()
-            
+
             # Forward pass
             with autocast(enabled=self.use_amp):
                 output = self.backbone(x)
                 loss = self.criterion(output, y)
-            
-            self.output = output.data
+
+            loss = loss.sum() / loss.size(0)
 
             if self.temp:
                 buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
                 buf_inputs, buf_logits = buf.x, buf.logits
                 buf_outputs = self.backbone(buf_inputs)
-                #print(F.mse_loss(buf_outputs, buf_logits))
                 loss += self.alpha * F.mse_loss(buf_outputs, buf_logits)
-                #print(loss)
-            else:
+
+            elif step["task_id"] > 0:
                 self.temp = True
 
-            self.scaler.scale(loss.sum() / loss.size(0)).backward()
+            self.scaler.scale(loss).backward()
+
             self.optimizer_regime.optimizer.synchronize()
             with self.optimizer_regime.optimizer.skip_synchronize():
                 self.scaler.step(self.optimizer_regime.optimizer)
                 self.scaler.update()
-                # Backward pass
 
-            self.buffer.update_with_logits(x,y,self.output,step,batch_metrics=self.batch_metrics)
+            # If scaler doesn't work use this classic backward
+            # loss.backward()
 
-            #loss.backward()
+            self.buffer.update_with_logits(
+                x, y, output.data, step, batch_metrics=self.batch_metrics
+            )
 
-            #self.optimizer_regime.step()
+            # If scaler doesn't work use this classic backward
+            # self.optimizer_regime.step()
 
             # Measure accuracy and record metrics
             prec1, prec5 = accuracy(output, y, topk=(1, 5))
@@ -114,12 +116,11 @@ class Der(ContinualLearner):
             meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_one_step(self, x, y, meters, step):
-        #self.temp = False
         with autocast(enabled=self.use_amp):
             output = self.backbone(x)
             loss = self.criterion(output, y)
 
         prec1, prec5 = accuracy(output, y, topk=(1, 5))
-        meters["loss"].update(loss.sum() / loss.size(0))
+        meters["loss"].update(loss.sum() / loss.size(0))  # loss IF SCALER DESACTIVATED
         meters["prec1"].update(prec1, x.size(0))
         meters["prec5"].update(prec5, x.size(0))

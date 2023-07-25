@@ -99,7 +99,8 @@ class Derpp(ContinualLearner):
 
             elif step["task_id"] > 0:
                 self.temp = True
-                self.scaler.scale(loss).backward()
+
+            self.scaler.scale(loss).backward()
 
             self.optimizer_regime.optimizer.synchronize()
             with self.optimizer_regime.optimizer.skip_synchronize():
