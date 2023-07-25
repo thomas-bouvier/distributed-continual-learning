@@ -13,7 +13,9 @@ def resnet18(config):
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
     # passing num_classes
-    model = timm.create_model("resnet18", num_classes=config.get("num_classes"))
+    model = timm.create_model(
+        "resnet18", num_classes=config.get("num_classes"), zero_init_last=False
+    )
 
     def rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs):
         # Horovod: using `lr = base_lr * hvd.size()` from the very beginning leads to worse final
@@ -33,12 +35,12 @@ def resnet18(config):
     if num_epoch < 25:
         model.regime = [
             {
-            "epoch": 0,
-            "optimizer": "SGD",
-            "momentum": 0.9,
-            "weight_decay": 0.0001,
-            "lr": 0.03
-        }
+                "epoch": 0,
+                "optimizer": "SGD",
+                "momentum": 0.9,
+                "weight_decay": 0.0001,
+                "lr": 0.03,
+            }
         ]
 
     else:
