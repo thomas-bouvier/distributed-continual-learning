@@ -264,7 +264,7 @@ def main():
 
     save_path = ""
     if hvd.rank() == 0:
-        wandb.init(mode="disabled")#project="distributed-continual-learning")
+        wandb.init(project="distributed-continual-learning")
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
         if args.model is not None:
             run_name = f"{args.model}-{run_name}"
@@ -455,6 +455,7 @@ class Experiment:
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
             "pin_memory": True,
+            "drop_last": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
             **literal_eval(self.args.tasksets_config),

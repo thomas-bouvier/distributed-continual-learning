@@ -11,11 +11,12 @@ from utils.log import get_logging_level, display
 
 
 class AugmentedMinibatch:
-    def __init__(self, num_samples, shape, device):
+    def __init__(self, num_samples, shape, device, total_num_classes):
         self.x = torch.zeros(num_samples, *shape, device=device)
         self.y = torch.randint(high=1000, size=(num_samples,), device=device)
         self.w = torch.ones(num_samples, device=device)
-        self.logits = torch.zeros(num_samples, 100)
+        self.logits = torch.zeros(num_samples, total_num_classes)  # TODO
+
 
 class Buffer:
     """
@@ -126,10 +127,8 @@ class Buffer:
             self.rehearsal_counts = [0] * self.total_num_classes
 
             self.rehearsal_logits = torch.empty(
-                [size,self.total_num_classes], device=device
+                [size, self.total_num_classes], device=device
             )
-
-            print('[+] Reheasral logits : ',self.rehearsal_logits)
 
             self.init_augmented_minibatch(device=device)
 
@@ -143,7 +142,9 @@ class Buffer:
 
         for i in range(self.minibatches_ahead):
             self.next_minibatches.append(
-                AugmentedMinibatch(num_samples, self.sample_shape, device)
+                AugmentedMinibatch(
+                    num_samples, self.sample_shape, device, self.total_num_classes
+                )
             )
 
         if self.high_performance and self.implementation == "flyweight":
@@ -162,7 +163,7 @@ class Buffer:
 
         aug_size = self.__get_data(step, batch_metrics=batch_metrics)
 
-        #print("[+] Aug_size : ",aug_size)
+        # print("[+] Aug_size : ",aug_size)
 
         # Assemble the minibatch
         with get_timer(
@@ -182,7 +183,7 @@ class Buffer:
                 concat_y = minibatch.y[:aug_size]
                 concat_w = minibatch.w[:aug_size]
 
-        self.add_data(x, y,step, batch_metrics=batch_metrics)
+        self.add_data(x, y, step, batch_metrics=batch_metrics)
 
         return concat_x, concat_y, concat_w
 
@@ -195,7 +196,7 @@ class Buffer:
 
         aug_size = self.__get_data(step, batch_metrics=batch_metrics)
 
-        #print("[+] Aug_size : ",aug_size)
+        # print("[+] Aug_size : ",aug_size)
 
         # Assemble the minibatch
         with get_timer(
@@ -217,7 +218,7 @@ class Buffer:
 
         self.add_data_with_logits(x, y, logits, step, batch_metrics=batch_metrics)
 
-        return concat_x, concat_y, concat_w
+        return concat_x, concat_y, minibatch.logits, concat_w
 
     def __get_data(self, step, batch_metrics=None):
         aug_size = 0
