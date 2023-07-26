@@ -79,7 +79,7 @@ class Der(ContinualLearner):
                 output = self.backbone(x)
                 loss = self.criterion(output, y)
 
-            loss = loss.sum() / loss.size(0)
+            # loss = loss.sum() / loss.size(0)
 
             if self.temp:
                 buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
@@ -90,7 +90,7 @@ class Der(ContinualLearner):
             elif step["task_id"] > 0:
                 self.temp = True
 
-            self.scaler.scale(loss).backward()
+            self.scaler.scale(loss.sum() / loss.size(0)).backward()
 
             self.optimizer_regime.optimizer.synchronize()
             with self.optimizer_regime.optimizer.skip_synchronize():
