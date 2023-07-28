@@ -28,12 +28,14 @@ class OptimizerRegime(Regime):
         self.use_amp = use_amp
 
         self.optimizer = None
+        self.initial_state = None
 
     def create_optimizer(self, config):
         optim_method = _OPTIMIZERS[config.get("optimizer", "SGD")]
         if not isinstance(self.optimizer, optim_method):
             self.create_distributed_optimizer(optim_method(self.parameters, lr=0))
             logging.debug(f"OPTIMIZER REGIME - setting method = {config['optimizer']}")
+            self.initial_state = self.__getstate__()
 
     def create_distributed_optimizer(self, optimizer):
         # Horovod: broadcast optimizer state and parameters
@@ -117,12 +119,11 @@ class OptimizerRegime(Regime):
         self.optimizer.load_state_dict(state_dict)
 
     def reset(self, parameters):
-        logging.debug("OPTIMIZER REGIME - resetting state..")
-        self.optimizer.load_state_dict(
-            _OPTIMIZERS[self.config.get("optimizer", "SGD")](
-                parameters, lr=0
-            ).state_dict()
+        logging.debug(
+            f"OPTIMIZER REGIME - resetting {self.config.get('optimizer', 'SGD')} state"
         )
+        self.__setstate__(self.initial_state)
+
         # Horovod: broadcast optimizer state.
         hvd.broadcast_optimizer_state(self.optimizer, root_rank=0)
         self.config = self.defaults

@@ -89,7 +89,7 @@ class Er(ContinualLearner):
             dw = aug_w / total_weight * self.batch_size * hvd.size() / self.batch_size
 
             # Backward pass
-            self.scaler.scale(loss).backward(dw)
+            self.scaler.scale(loss.sum() / loss.size(0)).backward()
             self.optimizer_regime.optimizer.synchronize()
             with self.optimizer_regime.optimizer.skip_synchronize():
                 self.scaler.step(self.optimizer_regime.optimizer)
