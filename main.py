@@ -455,6 +455,7 @@ class Experiment:
             "dataset": self.args.dataset,
             "dataset_dir": self.args.dataset_dir,
             "pin_memory": True,
+            "drop_last": True,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
             **literal_eval(self.args.tasksets_config),

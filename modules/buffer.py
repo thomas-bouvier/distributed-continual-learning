@@ -11,10 +11,11 @@ from utils.log import get_logging_level, display
 
 
 class AugmentedMinibatch:
-    def __init__(self, num_samples, shape, device):
+    def __init__(self, num_samples, shape, device, total_num_classes):
         self.x = torch.zeros(num_samples, *shape, device=device)
         self.y = torch.randint(high=1000, size=(num_samples,), device=device)
         self.w = torch.ones(num_samples, device=device)
+        self.logits = torch.zeros(num_samples, total_num_classes)  # TODO
 
 
 class Buffer:
@@ -56,6 +57,7 @@ class Buffer:
         self.rehearsal_tensor = None
         self.rehearsal_metadata = None
         self.rehearsal_counts = None
+        self.rehearsal_logits = None
 
         self.high_performance = True
         try:
@@ -124,6 +126,10 @@ class Buffer:
             self.rehearsal_metadata = [[0, 1.0] for _ in range(self.total_num_classes)]
             self.rehearsal_counts = [0] * self.total_num_classes
 
+            self.rehearsal_logits = torch.empty(
+                [size, self.total_num_classes], device=device
+            )
+
             self.init_augmented_minibatch(device=device)
 
     def init_augmented_minibatch(self, device="gpu"):
@@ -136,7 +142,9 @@ class Buffer:
 
         for i in range(self.minibatches_ahead):
             self.next_minibatches.append(
-                AugmentedMinibatch(num_samples, self.sample_shape, device)
+                AugmentedMinibatch(
+                    num_samples, self.sample_shape, device, self.total_num_classes
+                )
             )
 
         if self.high_performance and self.implementation == "flyweight":
@@ -154,6 +162,8 @@ class Buffer:
             self.dsl.measure_performance(measure_performance(step))
 
         aug_size = self.__get_data(step, batch_metrics=batch_metrics)
+
+        # print("[+] Aug_size : ",aug_size)
 
         # Assemble the minibatch
         with get_timer(
@@ -176,6 +186,39 @@ class Buffer:
         self.add_data(x, y, step, batch_metrics=batch_metrics)
 
         return concat_x, concat_y, concat_w
+
+    def update_with_logits(self, x, y, logits, step, batch_metrics=None):
+        """
+        Updates the buffer with incoming data. Get some data from (x, y) pairs.
+        """
+        if self.high_performance:
+            self.dsl.measure_performance(measure_performance(step))
+
+        aug_size = self.__get_data(step, batch_metrics=batch_metrics)
+
+        # print("[+] Aug_size : ",aug_size)
+
+        # Assemble the minibatch
+        with get_timer(
+            "assemble",
+            step,
+            batch_metrics=batch_metrics,
+            dummy=not measure_performance(step),
+        ):
+            minibatch = self.__get_current_augmented_minibatch(step)
+            if self.implementation == "flyweight":
+                w = torch.ones(x.size(0), device=x.device)
+                concat_x = torch.cat((x, minibatch.x[:aug_size]))
+                concat_y = torch.cat((y, minibatch.y[:aug_size]))
+                concat_w = torch.cat((w, minibatch.w[:aug_size]))
+            else:
+                concat_x = minibatch.x[:aug_size]
+                concat_y = minibatch.y[:aug_size]
+                concat_w = minibatch.w[:aug_size]
+
+        self.add_data_with_logits(x, y, logits, step, batch_metrics=batch_metrics)
+
+        return concat_x, concat_y, minibatch.logits, concat_w
 
     def __get_data(self, step, batch_metrics=None):
         aug_size = 0
@@ -251,6 +294,7 @@ class Buffer:
                     minibatch.x.index_put_(ti, self.rehearsal_tensor[index])
                     minibatch.y.index_put_(ti, torch.tensor(k))
                     minibatch.w.index_put_(ti, torch.tensor(v["weight"]))
+                    minibatch.logits.index_put_(ti, self.rehearsal_logits[index])
                     aug_size += 1
 
         return aug_size
@@ -294,6 +338,53 @@ class Buffer:
                 for r in range(0, self.num_samples_per_representative):
                     j = self.budget_per_class * label + index + r
                     self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i])
+
+                if index >= self.rehearsal_metadata[label][0]:
+                    self.rehearsal_size += 1
+                    self.rehearsal_metadata[label][0] += 1
+
+                self.rehearsal_counts[label] += 1
+
+    def add_data_with_logits(self, x, y, logits, step, batch_metrics=None):
+        """
+        Fills the rehearsal buffer with (x, y) pairs, sampled randomly from the
+        incoming batch of data. Only `num_candidates` will be added to the
+        buffer.
+
+        :param x: tensor containing input images
+        :param y: tensor containing targets
+        :param step: step number, for logging purposes
+        """
+        if self.high_performance:
+            with get_timer(
+                "accumulate",
+                step,
+                batch_metrics=batch_metrics,
+                dummy=not measure_performance(step),
+            ):
+                if self.implementation == "flyweight":
+                    self.dsl.accumulate(x, y)
+                else:
+                    next_minibatch = self.__get_next_augmented_minibatch(step)
+                    self.dsl.accumulate(
+                        x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
+                    )
+        else:
+            for i in range(len(y)):
+                label = y[i].item()
+                self.rehearsal_metadata[0]
+                index = -1
+                if self.rehearsal_metadata[label][0] < self.budget_per_class:
+                    index = self.rehearsal_metadata[label][0]
+                else:
+                    if random.randint(0, self.batch_size - 1) >= self.num_candidates:
+                        continue
+                    index = random.randint(0, self.budget_per_class - 1)
+
+                for r in range(0, self.num_samples_per_representative):
+                    j = self.budget_per_class * label + index + r
+                    self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i])
+                    self.rehearsal_logits.index_put_((torch.tensor([j]),), logits[i])
 
                 if index >= self.rehearsal_metadata[label][0]:
                     self.rehearsal_size += 1

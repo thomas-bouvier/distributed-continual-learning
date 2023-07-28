@@ -413,7 +413,7 @@ def train(
             tasks_metrics.add(**task_metrics)
             tasks_metrics.save()
 
-        model.after_every_task()
+        model.after_every_task(task_id, train_data_regime)
 
     model.after_all_tasks()
     total_end = time.perf_counter()
