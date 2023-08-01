@@ -1,3 +1,5 @@
+import wandb
+from argparse import ArgumentParser
 import argparse
 import copy
 import horovod.torch as hvd
@@ -32,294 +34,18 @@ from utils.yaml_params import YParams
 from utils.utils import move_cuda
 
 
-backbone_model_names = sorted(
-    name
-    for name in backbone.__dict__
-    if not name.startswith("__") and callable(backbone.__dict__[name])
-)
-
-model_names = sorted(
-    name
-    for name in models.__dict__
-    if not name.startswith("__") and callable(models.__dict__[name])
-)
-
-parser = argparse.ArgumentParser(
-    description="Distributed deep/continual learning with Horovod + PyTorch"
-)
-parser.add_argument(
-    "--yaml-config",
-    default="config.yaml",
-    type=str,
-    help="path to yaml file containing training configs",
-)
-parser.add_argument(
-    "--config",
-    default="",
-    type=str,
-    help="name of desired config in yaml file",
-)
-parser.add_argument(
-    "--dataset", metavar="DATASET", default="mnist", help="dataset name"
-)
-parser.add_argument(
-    "--dataset-dir",
-    default="./datasets",
-    help="location of the training dataset in the local filesystem (will be downloaded if needed)",
-)
-parser.add_argument(
-    "--tasksets-config",
-    default="{}",
-    help="additional taskset configuration (useful for continual learning)",
-)
-parser.add_argument(
-    "--backbone",
-    metavar="BACKBONE",
-    default="resnet50",
-    choices=backbone_model_names,
-    help="available backbone models: " + " | ".join(backbone_model_names),
-)
-parser.add_argument(
-    "--backbone-config", default="{}", help="additional backbone configuration"
-)
-parser.add_argument(
-    "--model",
-    metavar="MODEL",
-    default="Vanilla",
-    choices=model_names,
-    help="available models: " + " | ".join(model_names),
-)
-parser.add_argument(
-    "--model-config",
-    default="{}",
-    help="model configuration",
-)
-parser.add_argument(
-    "--buffer-config",
-    default="{}",
-    help="rehearsal buffer configuration",
-)
-parser.add_argument(
-    "--load-checkpoint",
-    default="",
-    type=str,
-    metavar="PATH",
-    help="path to latest checkpoint (default: none)",
-)
-parser.add_argument(
-    "--batch-size",
-    type=int,
-    default=64,
-    metavar="N",
-    help="input batch size for training (default: 64)",
-)
-parser.add_argument(
-    "--eval-batch-size",
-    type=int,
-    default=-1,
-    metavar="N",
-    help="input batch size for testing (default: same as training)",
-)
-parser.add_argument(
-    "--dataloader-workers",
-    type=int,
-    default=0,
-    help="number of dataloaders workers to spawn",
-)
-parser.add_argument(
-    "--epochs",
-    type=int,
-    default=25,
-    metavar="N",
-    help="number of epochs to train (default: 25)",
-)
-parser.add_argument(
-    "--warmup-epochs",
-    type=int,
-    default=5,
-    metavar="N",
-    help="number of epochs to warmup LR, if scheduler supports (default: 5)",
-)
-parser.add_argument(
-    "--training-only",
-    action="store_true",
-    help="don't validate after every epoch, only after training on a new task",
-)
-parser.add_argument(
-    "--lr",
-    type=float,
-    default=0.01,
-    metavar="LR",
-    help="learning rate for a single GPU (default: 0.01)",
-)
-parser.add_argument(
-    "--momentum",
-    type=float,
-    default=0.5,
-    metavar="M",
-    help="SGD momentum (default: 0.5)",
-)
-parser.add_argument(
-    "--optimizer-regime",
-    default="",
-    help="optimizer regime, as an array of dicts containing the epoch key",
-)
-parser.add_argument(
-    "--no-cuda",
-    action="store_true",
-    default=False,
-    help="disables CUDA training",
-)
-parser.add_argument(
-    "--seed",
-    type=int,
-    default=42,
-    metavar="S",
-    help="random seed (default: 42)",
-)
-parser.add_argument("--log-level", default="info", help="logging level")
-parser.add_argument(
-    "--log-interval",
-    type=int,
-    default=10,
-    metavar="N",
-    help="how many batches to wait before logging training status",
-)
-parser.add_argument(
-    "--use-amp",
-    action="store_true",
-    default=False,
-    help="enable Automatic Mixed Precision training",
-)
-parser.add_argument(
-    "--fp16-dali",
-    action="store_true",
-    default=False,
-    help="load images in half precision",
-)
-parser.add_argument(
-    "--fp16-allreduce",
-    action="store_true",
-    default=False,
-    help="use fp16 compression during allreduce",
-)
-parser.add_argument(
-    "--gradient-predivide-factor",
-    type=float,
-    default=1.0,
-    help="apply gradient predivide factor in optimizer (default: 1.0)",
-)
-parser.add_argument(
-    "--weight-decay",
-    "--wd",
-    type=float,
-    default=0,
-    metavar="W",
-    help="weight decay (default: 0)",
-)
-parser.add_argument(
-    "--results-dir",
-    metavar="RESULTS_DIR",
-    default="./results",
-    help="results dir",
-)
-parser.add_argument("--save-dir", metavar="SAVE_DIR", default="", help="saved folder")
-parser.add_argument(
-    "--alpha",
-    type=float,
-    default=0,
-    help="alpha for DER and DERpp",
-)
-parser.add_argument(
-    "--beta",
-    type=float,
-    default=0,
-    help="beta for DER and DERpp",
-)
-
-
-def main():
-    args = parser.parse_args()
-    args.cuda = not args.no_cuda and torch.cuda.is_available()
-    args.evaluate = not args.training_only
-
-    mp.set_start_method("spawn")
-
-    params = vars(args)
-    if args.config:
-        yparams = YParams(os.path.abspath(args.yaml_config), args.config)
-        for k, v in params.items():
-            yparam = yparams[k]
-            if yparam:
-                params[k] = yparam
-                if (
-                    k == "buffer_config"
-                    or k == "backbone_config"
-                    or k == "tasksets_config"
-                    or k == "optimizer_regime"
-                ):
-                    if v:
-                        params[k] = str(literal_eval(v) | literal_eval(yparam))
-    args = Namespace(**params)
-
-    # Horovod: initialize library.
-    hvd.init()
-    args.gpus = hvd.size()
-    torch.manual_seed(args.seed)
-
-    if args.cuda:
-        # Horovod: pin GPU to local rank.
-        torch.cuda.set_device(hvd.local_rank())
-        torch.cuda.manual_seed(args.seed)
-
-    # Horovod: limit # of CPU threads to be used per worker.
-    torch.set_num_threads(1)
-
-    save_path = ""
-    if hvd.rank() == 0:
-        wandb.init(project="distributed-continual-learning")
-        run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
-        if args.model is not None:
-            run_name = f"{args.model}-{run_name}"
-        wandb.run.name = run_name
-
-        if args.save_dir == "":
-            args.save_dir = run_name
-        save_path = path.join(args.results_dir, args.save_dir)
-        if not path.exists(save_path):
-            makedirs(save_path)
-
-        with open(path.join(save_path, "args.json"), "w") as f:
-            json.dump(args.__dict__, f, indent=2)
-            wandb.save(path.join(save_path, "args.json"))
-        wandb.config.update(args)
-
-        setup_logging(
-            path.join(save_path, "log.txt"),
-            level=args.log_level,
-            dummy=hvd.local_rank() > 0,
-        )
-        logging.info(f"Saving to {save_path}")
-
-    device = "GPU" if args.cuda else "CPU"
-    logging.info(f"Number of {device}s: {hvd.size()}")
-    logging.info(f"Run arguments: {args}")
-
-    xp = Experiment(args, save_path)
-    xp.run()
-    wandb.finish()
-
-    logging.info("Done 🎉🎉🎉")
-    sys.exit(0)
-
-
 class Experiment:
     resume_from_task = 0
     resume_from_epoch = 0
 
-    def __init__(self, args, save_path=""):
+    def __init__(self, args, save_path, learning_rate, alpha, beta, batchsize, epochs):
         self.args = args
         self.save_path = save_path
+        self.learning_rate = learning_rate
+        self.alpha = alpha
+        self.beta = beta
+        self.batchsize = batchsize
+        self.epochs = epochs
 
         total_num_classes = self.prepare_dataset()
 
@@ -337,9 +63,9 @@ class Experiment:
         # Creating the model
         backbone_config = {
             "num_classes": total_num_classes,
-            "lr": self.args.lr,
+            "lr": self.learning_rate,
             "warmup_epochs": self.args.warmup_epochs,
-            "num_epochs": self.args.epochs,
+            "num_epochs": self.epochs,
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
             "total_num_samples": self.train_data_regime.total_num_samples,
         }
@@ -405,7 +131,7 @@ class Experiment:
             backbone_model,
             optimizer_regime,
             self.args.use_amp,
-            self.args.batch_size,
+            self.batchsize,
             model_config,
             buffer_config,
             batch_metrics,
@@ -479,7 +205,7 @@ class Experiment:
             {
                 **defaults,
                 "split": "train",
-                "batch_size": self.args.batch_size,
+                "batch_size": self.batchsize,
             },
         )
         logging.info(f"Created train data regime: {str(self.train_data_regime.config)}")
@@ -521,8 +247,8 @@ class Experiment:
         )
 
         train(
-            self.args.alpha,
-            self.args.beta,
+            self.alpha,
+            self.beta,
             self.model,
             self.train_data_regime,
             self.validate_data_regime,
@@ -549,17 +275,38 @@ class Experiment:
         )
 
 
-def on_exit(sig, frame):
-    logging.info("Interrupted")
-    wandb.finish()
-    os.system(
-        "kill $(ps aux | grep multiprocessing.spawn | grep -v grep | awk '{print $2}')"
-    )
-    sys.exit(0)
+class Sweep:
+    def __init__(self, args, save_path=""):
+        self.args = args
+        self.save_path = save_path
 
+    def set_config(self):
+        sweep_config = {
+            "method": "random",
+            "metric": {"name": "continual_val_prec1", "goal": "maximize"},
+            "parameters": {
+                "epochs": {"min": 5, "max": 40},
+                "lr": {"min": 0.0001, "max": 0.5},
+                "alpha": {"min": 0.1, "max": 0.9},
+                "beta": {"min": 0.1, "max": 0.9},
+                "batch-size": {"values": [16, 32, 64, 128]},
+            },
+        }
 
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, on_exit)
-    signal.signal(signal.SIGTERM, on_exit)
+        sweep_id = wandb.sweep(sweep_config, project="distributed-continual-learning")
+        return sweep_id
 
-    main()
+    def train(self):
+        trainer = Experiment(
+            self.args,
+            self.save_path,
+            learning_rate=self.args.lr,
+            alpha=self.args.alpha,
+            beta=self.args.beta,
+            batchsize=self.args.batch_size,
+            epochs=self.args.epochs,
+        )
+        trainer.run()
+
+    def run_sweep_agent(self):
+        wandb.agent(self.set_config(), function=self.train())

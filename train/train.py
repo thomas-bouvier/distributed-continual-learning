@@ -24,7 +24,7 @@ def measure_performance(step):
     )
 
 
-def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
+def train_one_epoch(alpha, beta, model, loader, task_id, epoch, log_interval=10):
     """Forward pass for the current epoch"""
     device = model._device()
     model.backbone.train()
@@ -62,7 +62,7 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
             timer.__exit__(None, None, None)
 
             step = dict(task_id=task_id, epoch=epoch, batch=batch)
-            model.train_one_step(x, y, meters, step)
+            model.train_one_step(x, y, meters, step, alpha, beta)
 
             last_batch_time = time.perf_counter() - start_batch_time
             epoch_time += last_batch_time
@@ -185,6 +185,8 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
 
 
 def train(
+    alpha,
+    beta,
     model,
     train_data_regime,
     validate_data_regime,
@@ -238,6 +240,8 @@ def train(
             # Horovod: set epoch to sampler for shuffling
             train_data_regime.set_epoch(epoch)
             train_results = train_one_epoch(
+                alpha,
+                beta,
                 model,
                 train_data_regime.get_loader(task_id),
                 task_id,
