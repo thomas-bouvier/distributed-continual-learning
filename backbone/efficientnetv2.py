@@ -24,7 +24,10 @@ def weight_decay_config(value=1e-4, log=False):
 
 
 def efficientnetv2(config):
-    lr = config.pop("lr")  # 0.00025
+    """
+    The learning rate shouldn't be scaled when using RMSprop
+    """
+    lr = config.pop("lr")  # 0.002
     lr_min = config.pop("lr_min")  # 1e-6
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
@@ -40,7 +43,7 @@ def efficientnetv2(config):
 
     def rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs):
         lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
-        return lr * (lr_epoch * (hvd.size() - 1) / warmup_epochs + 1)
+        return lr * lr_epoch / warmup_epochs
 
     def cosine_anneal_lr(step, lr, T_max, eta_min=1e-6):
         """
@@ -56,11 +59,7 @@ def efficientnetv2(config):
         if step["epoch"] * num_steps_per_epoch + step["batch"] < warmup_steps:
             return {"lr": rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs)}
         else:
-            return {
-                "lr": cosine_anneal_lr(
-                    step, lr * hvd.size(), num_epochs, eta_min=lr_min * hvd.size()
-                )
-            }
+            return {"lr": cosine_anneal_lr(step, lr, num_epochs, eta_min=lr_min)}
 
     model.regime = [
         {
