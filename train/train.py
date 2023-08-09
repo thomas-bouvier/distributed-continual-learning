@@ -235,11 +235,13 @@ def train(
                 f"TRAINING on task {task_id + 1}/{num_tasks}, epoch: {epoch + 1}/{epochs[task_id]}, {hvd.size()} device(s)"
             )
 
+            loader = train_data_regime.get_loader(task_id)
+
             # Horovod: set epoch to sampler for shuffling
             train_data_regime.set_epoch(epoch)
             train_results = train_one_epoch(
                 model,
-                train_data_regime.get_loader(task_id),
+                loader,
                 task_id,
                 epoch,
                 log_interval=log_interval,
@@ -355,7 +357,7 @@ def train(
             global_batch += train_results["batch"]
 
             if hvd.rank() == 0:
-                img_sec = train_results["num_samples"] / train_results["time"]
+                img_sec = len(loader) * train_results["num_samples"] / train_results["time"]
                 img_secs.append(img_sec)
                 logging.info(
                     "\nRESULTS: Time taken for epoch {} on {} device(s) is {} sec\n"

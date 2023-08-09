@@ -92,8 +92,8 @@ def ptychonn(config):
 
     # https://github.com/bckenstler/CLR
     def triangular2_cyclic_lr(step, lr, max_lr, step_size):
-        cycle = np.floor(1 + step / (2 * step_size))
-        x = np.abs(step / step_size - 2 * cycle + 1)
+        cycle = np.floor(1 + step["batch"] / (2 * step_size))
+        x = np.abs(step["batch"] / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
     def config_by_step(step):
