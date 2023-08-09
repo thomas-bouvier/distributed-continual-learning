@@ -131,14 +131,11 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
                             f"\t[C++] local_rehearsal_size {meters['local_rehearsal_size'].val.item()}"
                         )
 
-            tqdm_postfix = dict(
-                loss=meters["loss"].avg.item(),
-                accuracy=meters["prec1"].avg.item(),
-            )
             progress.set_postfix(
                 {
                     "loss": meters["loss"].avg.item(),
-                    "accuracy": meters["prec1"].avg.item(),
+                    "top1": meters["prec1"].avg.item(),
+                    "top5": meters["prec5"].avg.item(),
                     "num_samples": meters["num_samples"].val.item(),
                     "local_rehearsal_size": meters["local_rehearsal_size"].val.item(),
                 }
@@ -363,6 +360,9 @@ def train(
                     "\nRESULTS: Time taken for epoch {} on {} device(s) is {} sec\n"
                     "Average: {} samples/sec per device\n"
                     "Average on {} device(s): {} samples/sec\n"
+                    "Averaged eval loss on all previous tasks: {}\n"
+                    "Averaged eval top1 accuracy on all previous tasks: {}\n"
+                    "Averaged eval top5 accuracy on all previous tasks: {}\n"
                     "Training loss: {train[loss]:.4f}\n".format(
                         epoch + 1,
                         hvd.size(),
@@ -370,6 +370,9 @@ def train(
                         img_sec,
                         hvd.size(),
                         img_sec * hvd.size(),
+                        averages["loss"],
+                        averages["prec1"],
+                        averages["prec5"],
                         train=train_results,
                     )
                 )

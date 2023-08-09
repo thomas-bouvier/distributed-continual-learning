@@ -47,7 +47,8 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
                 progress.set_postfix(
                     {
                         "loss": meters["loss"].avg.item(),
-                        "accuracy": meters["prec1"].avg.item(),
+                        "top1": meters["prec1"].avg.item(),
+                        "top5": meters["prec5"].avg.item(),
                     }
                 )
                 progress.update(1)
