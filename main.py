@@ -282,12 +282,12 @@ def main():
             wandb.save(path.join(save_path, "args.json"))
         wandb.config.update(args)
 
-        setup_logging(
-            path.join(save_path, "log.txt"),
-            level=args.log_level,
-            dummy=hvd.local_rank() > 0,
-        )
         logging.info(f"Saving to {save_path}")
+
+    setup_logging(
+        path.join(save_path, f"log_{hvd.rank()}.txt"),
+        level=args.log_level,
+    )
 
     device = "GPU" if args.cuda else "CPU"
     logging.info(f"Number of {device}s: {hvd.size()}")

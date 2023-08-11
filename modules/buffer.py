@@ -7,7 +7,7 @@ import torch
 
 from train.train import measure_performance
 from utils.meters import get_timer
-from utils.log import get_logging_level, display
+from utils.log import get_shared_logging_level, display
 
 
 class AugmentedMinibatch:
@@ -109,7 +109,7 @@ class Buffer:
                 list(self.sample_shape),
                 neomem.CPUBuffer,
                 discover_endpoints,
-                get_logging_level() not in ("info"),
+                get_shared_logging_level() < logging.INFO,
             )
 
             self.init_augmented_minibatch(device=device)

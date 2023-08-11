@@ -41,7 +41,7 @@ def train_one_epoch(model, loader, task_id, epoch, log_interval=10):
     epoch_time = 0
     last_batch_time = 0
 
-    enable_tqdm = get_logging_level() in ("info") and hvd.rank() == 0
+    enable_tqdm = get_logging_level() >= logging.INFO and hvd.rank() == 0
     with tqdm(
         total=len(loader),
         desc=f"Task #{task_id + 1} {prefix} epoch #{epoch + 1}",
@@ -436,13 +436,23 @@ def train(
             "Average: %.1f +-%.1f samples/sec per device" % (img_sec_mean, img_sec_conf)
         )
         logging.info(
-            "Average on %d device(s): %.1f +-%.1f"
+            "Average on %d device(s): %.1f +-%.1f samples/sec\n"
             % (
                 hvd.size(),
                 hvd.size() * img_sec_mean,
                 hvd.size() * img_sec_conf,
             )
         )
+        logging.info(
+            "Averaged eval loss on all previous tasks: {}\n"
+            "Averaged eval top1 accuracy on all previous tasks: {}\n"
+            "Averaged eval top5 accuracy on all previous tasks: {}".format(
+                averages["loss"],
+                averages["prec1"],
+                averages["prec5"],
+            )
+        )
+
         values = {
             "total_time": total_time,
             "total_train_time": total_training_time,

@@ -27,7 +27,7 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch):
         epoch_time = 0
         last_batch_time = 0
 
-        enable_tqdm = get_logging_level() in ("info") and hvd.rank() == 0
+        enable_tqdm = get_logging_level() >= logging.INFO and hvd.rank() == 0
         with tqdm(
             total=len(loader),
             desc=f"Task #{task_id + 1} {prefix} epoch #{epoch}",

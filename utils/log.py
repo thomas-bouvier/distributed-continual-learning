@@ -1,5 +1,6 @@
 import json
 import os
+import horovod.torch as hvd
 import logging
 import math
 import matplotlib.pyplot as plt
@@ -17,26 +18,27 @@ from bokeh.models import Div
 from itertools import cycle
 
 
-def setup_logging(log_file="log.txt", level="info", dummy=False):
-    if dummy:
-        logging.getLogger("dummy")
+def setup_logging(log_file="log.txt", level="info"):
+    logging.getLogger("shared").setLevel(level.upper())
+    if hvd.rank() > 0:
         return
 
     file_mode = "a" if os.path.isfile(log_file) else "w"
-
-    logging.basicConfig(
-        level=level.upper(),
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    logging.getLogger("root").setLevel(level.upper())
     fileout = logging.FileHandler(log_file, mode=file_mode)
-    fileout.setLevel(logging.DEBUG)
+    fileout.setLevel(level.upper())
     fileout.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logging.getLogger("root").addHandler(fileout)
 
 
 def get_logging_level():
-    return logging.getLevelName(logging.getLogger("root").getEffectiveLevel()).lower()
+    if hvd.rank() > 0:
+        return logging.WARNING
+    return logging.getLogger("root").getEffectiveLevel()
+
+
+def get_shared_logging_level():
+    return logging.getLogger("shared").getEffectiveLevel()
 
 
 def plot_figure(
