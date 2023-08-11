@@ -256,7 +256,8 @@ def main():
 
     if args.cuda:
         # Horovod: pin GPU to local rank.
-        torch.cuda.set_device(hvd.local_rank())
+        # Pin to rank() instead. This is a hack.
+        torch.cuda.set_device(hvd.rank() % torch.cuda.device_count())
         torch.cuda.manual_seed(args.seed)
 
     # Horovod: limit # of CPU threads to be used per worker.
