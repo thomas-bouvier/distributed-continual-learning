@@ -15,7 +15,7 @@ class AugmentedMinibatch:
         self.x = torch.zeros(num_samples, *shape, device=device)
         self.y = torch.randint(high=1000, size=(num_samples,), device=device)
         self.w = torch.ones(num_samples, device=device)
-        self.logits = torch.zeros(num_samples, total_num_classes)  # TODO
+        self.logits = torch.zeros(num_samples, total_num_classes, device=device)  # TODO
 
 
 class Buffer:

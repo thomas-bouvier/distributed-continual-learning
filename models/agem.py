@@ -18,7 +18,6 @@ __all__ = ["Agem"]
 
 
 class Agem(ContinualLearner):
-
     def __init__(
         self,
         backbone: nn.Module,
@@ -39,7 +38,7 @@ class Agem(ContinualLearner):
             batch_metrics,
         )
 
-        print('[+] DEBUG AGEM : INIT')
+        print("[+] DEBUG AGEM : INIT")
 
         self.use_memory_buffer = True
 
@@ -47,10 +46,10 @@ class Agem(ContinualLearner):
         self.grad_dims = []
         for param in self.backbone.parameters():
             self.grad_dims.append(param.data.numel())
-        print("[+] DEBUG : ",str(np.sum(self.grad_dims)))
-        self.grad_xy = torch.Tensor(np.sum(self.grad_dims)) # TODO add device
-        self.grad_er = torch.Tensor(np.sum(self.grad_dims)) # TODO add device
-        print("[+] DEBUG : ",str((self.grad_xy)))
+        print("[+] DEBUG : ", str(np.sum(self.grad_dims)))
+        self.grad_xy = torch.Tensor(np.sum(self.grad_dims))  # TODO add device
+        self.grad_er = torch.Tensor(np.sum(self.grad_dims))  # TODO add device
+        print("[+] DEBUG : ", str((self.grad_xy)))
         self.opt = SGD(self.backbone.parameters(), lr=0.03)
         self.One = False
 
@@ -75,7 +74,7 @@ class Agem(ContinualLearner):
     def after_every_task(self, task_id, train_data_regime):
         for i in range(100):
             x, y, _ = next(iter(train_data_regime.get_loader(task_id)))
-            self.buffer.update(x,y,dict(batch=-1))
+            self.buffer.update(x, y, dict(batch=-1))
 
     def store_grad(self, params, grads, grad_dims):
         grads.fill_(0.0)
@@ -83,8 +82,8 @@ class Agem(ContinualLearner):
         for param in params():
             if param.grad is not None:
                 begin = 0 if count == 0 else sum(grad_dims[:count])
-                end = np.sum(grad_dims[:count + 1])
-                grads[begin: end].copy_(param.grad.data.view(-1))
+                end = np.sum(grad_dims[: count + 1])
+                grads[begin:end].copy_(param.grad.data.view(-1))
             count += 1
 
     def overwrite_grad(self, params, newgrad, grad_dims):
@@ -92,9 +91,8 @@ class Agem(ContinualLearner):
         for param in params():
             if param.grad is not None:
                 begin = 0 if count == 0 else sum(grad_dims[:count])
-                end = sum(grad_dims[:count + 1])
-                this_grad = newgrad[begin: end].contiguous().view(
-                    param.grad.data.size())
+                end = sum(grad_dims[: count + 1])
+                this_grad = newgrad[begin:end].contiguous().view(param.grad.data.size())
                 param.grad.data.copy_(this_grad)
             count += 1
 
@@ -103,7 +101,6 @@ class Agem(ContinualLearner):
         return gxy - corr * ger
 
     def train_one_step(self, x, y, meters, step):
-
         with get_timer(
             "train",
             step["batch"],
@@ -111,56 +108,69 @@ class Agem(ContinualLearner):
             dummy=not measure_performance(step),
         ):
             self.optimizer_regime.update(step)
-            #self.optimizer_regime.zero_grad()
+            # self.optimizer_regime.zero_grad()
             self.opt.zero_grad()
 
             # Forward pass
             with autocast(enabled=self.use_amp):
                 outputs = self.backbone(x)
-                loss = self.criterion(outputs,y)
-        
+                loss = self.criterion(outputs, y)
+
             # Loss Backwards
-            #self.scaler.scale(loss.sum() / loss.size(0)).backward()
+            # self.scaler.scale(loss.sum() / loss.size(0)).backward()
             (loss.sum() / loss.size(0)).backward()
 
             if step["task_id"] != 0 and self.One:
-
-                self.store_grad(self.backbone.parameters,self.grad_xy,self.grad_dims)  # A voir pour le self.backbone.parameters()
+                self.store_grad(
+                    self.backbone.parameters, self.grad_xy, self.grad_dims
+                )  # A voir pour le self.backbone.parameters()
 
                 buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
-                buf_x,buf_y, = buf.x,buf.y # step ou step-1 ?
-                #self.optimizer_regime.zero_grad() # self.net.zero_grad()
+                (
+                    buf_x,
+                    buf_y,
+                ) = (
+                    buf.x,
+                    buf.y,
+                )  # step ou step-1 ?
+                # self.optimizer_regime.zero_grad() # self.net.zero_grad()
                 self.opt.zero_grad()
 
                 buf_outputs = self.backbone(buf_x)
-                #tmp = [np.argmax(tensor.detach().numpy()) for t in buf_outputs]
-                #print("[+] Reality : ",tmp)
-                #print("[+] Expected : ",buf_y)
+                # tmp = [np.argmax(tensor.detach().numpy()) for t in buf_outputs]
+                # print("[+] Reality : ",tmp)
+                # print("[+] Expected : ",buf_y)
 
-                buf_loss = self.criterion(buf_outputs,buf_y)
-                #self.scaler.scale(buf_loss.sum() / buf_loss.size(0)).backward()
+                buf_loss = self.criterion(buf_outputs, buf_y)
+                # self.scaler.scale(buf_loss.sum() / buf_loss.size(0)).backward()
                 (buf_loss.sum() / buf_loss.size(0)).backward()
-                
-                self.store_grad(self.backbone.parameters,self.grad_er,self.grad_dims) # A voir pour le self.backbone.parameters()
 
-                dot_prod = torch.dot(self.grad_xy,self.grad_er)
-                
-                print("[+] Dot product : ",dot_prod)
+                self.store_grad(
+                    self.backbone.parameters, self.grad_er, self.grad_dims
+                )  # A voir pour le self.backbone.parameters()
+
+                dot_prod = torch.dot(self.grad_xy, self.grad_er)
+
+                print("[+] Dot product : ", dot_prod)
 
                 if dot_prod.item() < 0:
                     g_tilde = self.project(gxy=self.grad_xy, ger=self.grad_er)
-                    self.overwrite_grad(self.backbone.parameters, g_tilde, self.grad_dims)
+                    self.overwrite_grad(
+                        self.backbone.parameters, g_tilde, self.grad_dims
+                    )
                 else:
-                    self.overwrite_grad(self.backbone.parameters, self.grad_xy, self.grad_dims)
+                    self.overwrite_grad(
+                        self.backbone.parameters, self.grad_xy, self.grad_dims
+                    )
 
-            #self.optimizer_regime.optimizer.synchronize()
-            #with self.optimizer_regime.optimizer.skip_synchronize():
+            # self.optimizer_regime.optimizer.synchronize()
+            # with self.optimizer_regime.optimizer.skip_synchronize():
             #    self.scaler.step(self.optimizer_regime.optimizer)
             #    self.scaler.update()
 
             if step["task_id"] != 0 and not self.One:
                 self.One = True
-                self.buffer.update(x,y,step)
+                self.buffer.update(x, y, step)
 
             self.opt.step()
 

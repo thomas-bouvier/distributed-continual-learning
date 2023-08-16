@@ -41,7 +41,7 @@ def resnet18(config):
                 "optimizer": "SGD",
                 "momentum": 0.9,
                 "weight_decay": 0.0001,
-                "lr": 0.03,
+                "lr": lr,
             }
         ]
     else:

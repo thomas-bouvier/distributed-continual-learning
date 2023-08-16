@@ -38,7 +38,7 @@ class Der(ContinualLearner):
         )
 
         self.use_memory_buffer = True
-        self.alpha = 0.3
+        self.alpha, _ = get_alpha_beta_parms()
         self.temp = False
 
     def before_all_tasks(self, train_data_regime):

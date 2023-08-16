@@ -38,9 +38,12 @@ class Derpp(ContinualLearner):
         )
 
         self.use_memory_buffer = True
-        self.alpha = 0.1
-        self.beta = 0.5
+        # self.alpha, self.beta = get_alpha_beta_parms()
         self.temp = False
+
+        # get_alpha_beta_params()
+
+        # print(self.alpha,self.beta)
 
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(
@@ -60,7 +63,7 @@ class Derpp(ContinualLearner):
         if task_id > 0:
             self.buffer.enable_augmentations()
 
-    def train_one_step(self, x, y, meters, step):
+    def train_one_step(self, x, y, meters, step, alpha=0, beta=0):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
@@ -87,7 +90,7 @@ class Derpp(ContinualLearner):
                 buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
                 buf_inputs, buf_logits = buf.x, buf.logits
                 buf_outputs = self.backbone(buf_inputs)
-                loss += self.alpha * F.mse_loss(buf_outputs, buf_logits)
+                loss += alpha * F.mse_loss(buf_outputs, buf_logits)
 
                 # Addidtional Part
                 buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
@@ -95,7 +98,7 @@ class Derpp(ContinualLearner):
                 buf_outputs = self.backbone(buf_inputs)
                 buf_loss = self.criterion(buf_outputs, buf_y)
                 buf_loss = buf_loss.sum() / buf_loss.size(0)
-                loss += self.beta * buf_loss
+                loss += beta * buf_loss
 
             elif step["task_id"] > 0:
                 self.temp = True

@@ -31,6 +31,7 @@ from utils.model import save_checkpoint
 from utils.yaml_params import YParams
 from utils.utils import move_cuda
 
+
 backbone_model_names = sorted(
     name
     for name in backbone.__dict__
@@ -223,6 +224,18 @@ parser.add_argument(
     help="results dir",
 )
 parser.add_argument("--save-dir", metavar="SAVE_DIR", default="", help="saved folder")
+parser.add_argument(
+    "--alpha",
+    type=float,
+    default=0,
+    help="alpha for DER and DERpp",
+)
+parser.add_argument(
+    "--beta",
+    type=float,
+    default=0,
+    help="beta for DER and DERpp",
+)
 
 
 def main():
@@ -509,6 +522,8 @@ class Experiment:
         )
 
         train(
+            self.args.alpha,
+            self.args.beta,
             self.model,
             self.train_data_regime,
             self.validate_data_regime,
