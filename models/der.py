@@ -37,8 +37,12 @@ class Der(ContinualLearner):
             batch_metrics,
         )
 
+        try:
+            self.alpha = config["alpha"]
+        except:
+            raise Exception("Parameter alpha is required for Der")
+
         self.use_memory_buffer = True
-        self.alpha, _ = get_alpha_beta_parms()
         self.temp = False
 
     def before_all_tasks(self, train_data_regime):

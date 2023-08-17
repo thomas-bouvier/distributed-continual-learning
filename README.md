@@ -38,9 +38,9 @@ Values for `optimizer_regime` will override regimes defined by `backbone/` in Py
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|
 | `--backbone` | Yes | DL backbone model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `efficientnetv2`, `convnext`, `ptychonn` |
-| `--backbone-config` |   | Model-specific parameters  | `"{'lr': 0.01, 'lr_min': 1e-6, }"` |
+| `--backbone-config` |   | Backbone-specific parameters  | `"{'lr': 0.01, 'lr_min': 1e-6, }"` |
 | `--model` | Default: `Vanilla` | Continual Learning strategy | `Vanilla`, `Er`, `Agem`, `Der`, `Derpp` |
-| `--model-config` |   | Reset strategies | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks |
+| `--model-config` |   | Reset strategies and CL model-specific parameters | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks<br>`"{'alpha': 0.2}"` is needed for Der model<br>`"{'alpha': 0.2, 'beta': 0.8}"` are needed for Derpp model |
 | `--buffer-config` |   | Rehearsal buffer parameters  |  `"{'rehearsal_ratio': 20}"` sets the proportion of the input dataset to be stored in the rehearsal buffer |
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"`<br>Instance-incremental scenario with 2 tasks: `"{'scenario': 'instance', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
 | `--dataset` |   | Dataset  | `mnist`, `cifar10`, `cifar100`, `tinyimagenet`, `imagenet`, `imagenet_blurred`, `ptycho` |
