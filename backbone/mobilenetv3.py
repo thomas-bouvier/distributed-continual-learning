@@ -23,21 +23,12 @@ def mobilenetv3(config):
         lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
         return lr * lr_epoch / warmup_epochs
 
-    def cosine_anneal_lr(step, lr, T_max, eta_min=1e-6):
-        """
-        Args:
-            eta_min (float): lower lr bound for cyclic schedulers that hit 0 (1e-6)
-        """
-        lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
-        return eta_min + (lr - eta_min) * (1 + math.cos(math.pi * lr_epoch / T_max)) / 2
-
     def config_by_step(step):
         warmup_steps = warmup_epochs * num_steps_per_epoch
 
         if step["epoch"] * num_steps_per_epoch + step["batch"] < warmup_steps:
             return {"lr": rampup_lr(step, lr, num_steps_per_epoch, warmup_epochs)}
-        else:
-            return {"lr": cosine_anneal_lr(step, lr, num_epochs, eta_min=lr_min)}
+        return {}
 
     model.regime = [
         {
@@ -46,13 +37,15 @@ def mobilenetv3(config):
             "alpha": 0.9,
             "momentum": 0.9,
             "eps": 0.001,
-            "weight_decay": 0.000015,
+            "weight_decay": 0.00001,
             "step_lambda": config_by_step,
         },
-        {
-            "epoch": warmup_epochs - 1,
-            "step_lambda": config_by_step,
-        },
+        {"epoch": warmup_epochs, "lr": lr},
+        {"epoch": 8, "lr": lr - 1 * 1e-3},
+        {"epoch": 12, "lr": lr - 2 * 1e-3},
+        {"epoch": 16, "lr": lr - 3 * 1e-3},
+        {"epoch": 22, "lr": lr - 4 * 1e-3},
+        {"epoch": 26, "lr": lr - 5 * 1e-3},
     ]
 
     return model
