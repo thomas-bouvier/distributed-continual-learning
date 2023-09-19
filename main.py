@@ -223,6 +223,12 @@ parser.add_argument(
     default="./results",
     help="results dir",
 )
+parser.add_argument(
+    "--nsys-run",
+    action="store_true",
+    default=False,
+    help="override params to retrieve nsys metrics on one epoch only",
+)
 parser.add_argument("--save-dir", metavar="SAVE_DIR", default="", help="saved folder")
 
 
@@ -249,6 +255,10 @@ def main():
                     if v:
                         params[k] = str(literal_eval(v) | literal_eval(yparam))
     args = Namespace(**params)
+
+    # Nsys mode: train for one epoch only
+    if args.nsys_run:
+        args.epochs = 1
 
     # Horovod: initialize library.
     hvd.init()
@@ -394,6 +404,7 @@ class Experiment:
             backbone_model,
             optimizer_regime,
             self.args.use_amp,
+            self.args.nsys_run,
             self.args.batch_size,
             model_config,
             buffer_config,

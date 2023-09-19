@@ -23,6 +23,7 @@ class Agem(ContinualLearner):
         backbone: nn.Module,
         optimizer_regime,
         use_amp,
+        nsys_run,
         batch_size,
         config,
         buffer_config,
@@ -32,6 +33,7 @@ class Agem(ContinualLearner):
             backbone,
             optimizer_regime,
             use_amp,
+            nsys_run,
             batch_size,
             config,
             buffer_config,
@@ -68,7 +70,7 @@ class Agem(ContinualLearner):
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
-        if task_id > 0:
+        if task_id > 0 or self.nsys_run:
             self.buffer.enable_augmentations()
 
     def after_every_task(self, task_id, train_data_regime):

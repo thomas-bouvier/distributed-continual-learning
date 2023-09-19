@@ -16,6 +16,7 @@ class ContinualLearner:
         backbone: nn.Module,
         optimizer_regime,
         use_amp,
+        nsys_run,
         batch_size,
         config,
         buffer_config,
@@ -26,6 +27,7 @@ class ContinualLearner:
         self.criterion = getattr(backbone, "criterion", CrossEntropyLoss())
         self.optimizer_regime = optimizer_regime
         self.use_amp = use_amp
+        self.nsys_run = nsys_run
         self.batch_size = batch_size
         self.config = config
         self.buffer_config = buffer_config
