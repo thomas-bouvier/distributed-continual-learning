@@ -1,4 +1,5 @@
 from .candlenet import *
+from .ghostnet import *
 from .mnistnet import *
 from .mobilenetv3 import *
 from .resnet18 import *

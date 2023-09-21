@@ -37,7 +37,7 @@ Values for `optimizer_regime` will override regimes defined by `backbone/` in Py
 
 | Parameter name | Required | Description | Possible values |
 |---|---|---|---|
-| `--backbone` | Yes | DL backbone model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `mobilenetv3`, `efficientnetv2`, `convnext`, `ptychonn` |
+| `--backbone` | Yes | DL backbone model to instanciate  | `mnistnet`, `resnet18`, `resnet50`, `mobilenetv3`, `efficientnetv2`, `convnext`, `ghostnet`, `ptychonn` |
 | `--backbone-config` |   | Backbone-specific parameters  | `"{'lr': 0.01, 'lr_min': 1e-6, }"` |
 | `--model` | Default: `Vanilla` | Continual Learning strategy | `Vanilla`, `Er`, `Agem`, `Der`, `Derpp` |
 | `--model-config` |   | Reset strategies and CL model-specific parameters | `"{'reset_state_dict': True}"` allows to reset the model internal state between tasks<br>`"{'alpha': 0.2}"` is needed for Der model<br>`"{'alpha': 0.2, 'beta': 0.8}"` are needed for Derpp model |

@@ -1,23 +1,25 @@
 import horovod.torch as hvd
 import math
 import torch.nn as nn
+import logging
 import timm
 
-__all__ = ["mobilenetv3"]
+__all__ = ["ghostnet"]
 
 
-def mobilenetv3(config):
-    lr = config.pop("lr") # 0.000375
+def ghostnet(config):
+    lr = config.pop("lr")  # 0.01
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    scaling_factor = hvd.size()
+    scaling_factor = min(hvd.size(), 64)
 
     # passing num_classes
     model = timm.create_model(
-        "mobilenetv3_small_100",
+        "ghostnet_050",
         pretrained=False,
+        drop_rate=0.225,
         num_classes=config.get("num_classes"),
     )
 
@@ -35,19 +37,15 @@ def mobilenetv3(config):
     model.regime = [
         {
             "epoch": 0,
-            "optimizer": "RMSprop",
-            "alpha": 0.9,
+            "optimizer": "SGD",
             "momentum": 0.9,
-            "eps": 0.001,
-            "weight_decay": 0.00001,
+            "weight_decay": 0.000015,
             "step_lambda": config_by_step,
         },
         {"epoch": warmup_epochs, "lr": lr * scaling_factor},
-        {"epoch": 8, "lr": (lr - 1 * 6.25e-5) * scaling_factor},
-        {"epoch": 12, "lr": (lr - 2 * 6.25e-5) * scaling_factor},
-        {"epoch": 16, "lr": (lr - 3 * 6.25e-5) * scaling_factor},
-        {"epoch": 22, "lr": (lr - 4 * 6.25e-5) * scaling_factor},
-        {"epoch": 26, "lr": (lr - 5 * 6.25e-5) * scaling_factor},
+        {"epoch": 15, "lr": lr * scaling_factor * 5e-1},
+        {"epoch": 21, "lr": lr * scaling_factor * 5e-2},
+        {"epoch": 28, "lr": lr * scaling_factor * 1e-2},
     ]
 
     return model
