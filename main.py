@@ -204,6 +204,20 @@ parser.add_argument(
     help="use fp16 compression during allreduce",
 )
 parser.add_argument(
+    "--use-adasum",
+    action="store_true",
+    default=False,
+    help="use adasum helping with convergence at scale"
+)
+parser.add_argument(
+    "--batches-per-allreduce",
+    type=int,
+    default=1,
+    help="number of batches processed locally before "
+         "executing allreduce across workers; it multiplies "
+         "effective batch size.",
+)
+parser.add_argument(
     "--gradient-predivide-factor",
     type=float,
     default=1.0,
@@ -336,7 +350,7 @@ class Experiment:
         # Creating the model
         backbone_config = {
             "num_classes": total_num_classes,
-            "lr": self.args.lr,
+            "lr": self.args.lr * self.args.batches_per_allreduce,
             "warmup_epochs": self.args.warmup_epochs,
             "num_epochs": self.args.epochs,
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
@@ -363,7 +377,8 @@ class Experiment:
         optimizer_regime = OptimizerRegime(
             backbone_model,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
-            hvd.Average,
+            self.args.batches_per_allreduce,
+            hvd.Adasum if self.args.use_adasum else hvd.Average,
             self.args.gradient_predivide_factor,
             optimizer_regime_dict,
             self.args.use_amp,
@@ -479,7 +494,7 @@ class Experiment:
             {
                 **defaults,
                 "split": "train",
-                "batch_size": self.args.batch_size,
+                "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
             },
         )
         logging.info(f"Created train data regime: {str(self.train_data_regime.config)}")

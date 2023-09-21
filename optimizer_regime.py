@@ -13,6 +13,7 @@ class OptimizerRegime(Regime):
         self,
         model,
         compression,
+        backward_passes_per_step,
         reduction,
         gradient_predivide_factor,
         regime,
@@ -23,6 +24,7 @@ class OptimizerRegime(Regime):
         self.parameters = list(model.parameters())
         self.named_parameters = list(model.named_parameters())
         self.compression = compression
+        self.backward_passes_per_step = backward_passes_per_step
         self.reduction = reduction
         self.gradient_predivide_factor = gradient_predivide_factor
         self.use_amp = use_amp
@@ -47,6 +49,7 @@ class OptimizerRegime(Regime):
             optimizer,
             named_parameters=self.named_parameters,
             compression=self.compression,
+            backward_passes_per_step=self.backward_passes_per_step,
             op=self.reduction,
             gradient_predivide_factor=self.gradient_predivide_factor,
         )

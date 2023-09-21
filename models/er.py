@@ -51,7 +51,7 @@ class Er(ContinualLearner):
         )
 
         x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        self.buffer.add_data(x, y, dict(batch=-1))
+        self.buffer.add_data(x[:self.batch_size], y[:self.batch_size], dict(batch=-1))
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
@@ -66,48 +66,60 @@ class Er(ContinualLearner):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
-        # Get data from the last iteration (blocking)
-        aug_x, aug_y, aug_w = self.buffer.update(
-            x, y, step, batch_metrics=self.batch_metrics
-        )
+        # If making multiple backward passes per step, we need to cut the
+        # current effective batch into local mini-batches.
+        for i in range(0, len(x), self.batch_size):
+            x_batch = x[i:i + self.batch_size]
+            y_batch = y[i:i + self.batch_size]
 
-        with get_timer(
-            "train",
-            step,
-            batch_metrics=self.batch_metrics,
-            dummy=not measure_performance(step),
-        ):
-            self.optimizer_regime.update(step)
-            self.optimizer_regime.zero_grad()
-
-            # Forward pass
-            with autocast(enabled=self.use_amp):
-                output = self.backbone(aug_x)
-                loss = self.criterion(output, aug_y)
-
-            # TODO: if true for multiple iterations, trigger this
-            # assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
-
-            # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
-            total_weight = hvd.allreduce(
-                torch.sum(aug_w), name="total_weight", op=hvd.Sum
+            # Get data from the last iteration (blocking)
+            aug_x, aug_y, aug_w = self.buffer.update(
+                x_batch, y_batch, step, batch_metrics=self.batch_metrics
             )
-            dw = aug_w / total_weight * self.batch_size * hvd.size() / self.batch_size
 
-            # Backward pass
-            self.scaler.scale(loss.sum() / loss.size(0)).backward()
-            self.optimizer_regime.optimizer.synchronize()
-            with self.optimizer_regime.optimizer.skip_synchronize():
-                self.scaler.step(self.optimizer_regime.optimizer)
-                self.scaler.update()
+            with get_timer(
+                "train",
+                step,
+                batch_metrics=self.batch_metrics,
+                dummy=not measure_performance(step),
+            ):
+                # If performing multiple passes, update the optimizer only once.
+                if i == 0:
+                    self.optimizer_regime.update(step)
+                    self.optimizer_regime.zero_grad()
 
-            # Measure accuracy and record metrics
-            prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
-            meters["loss"].update(loss.sum() / aug_y.size(0))
-            meters["prec1"].update(prec1, aug_x.size(0))
-            meters["prec5"].update(prec5, aug_x.size(0))
-            meters["num_samples"].update(aug_x.size(0))
-            meters["local_rehearsal_size"].update(self.buffer.get_size())
+                # Forward pass
+                with autocast(enabled=self.use_amp):
+                    output = self.backbone(aug_x)
+                    loss = self.criterion(output, aug_y)
+
+                # TODO: if true for multiple iterations, trigger this
+                # assert not torch.isnan(loss).any(), "Loss is NaN, stopping training"
+
+                # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
+                total_weight = hvd.allreduce(
+                    torch.sum(aug_w), name="total_weight", op=hvd.Sum
+                )
+                dw = aug_w / total_weight * self.batch_size * hvd.size() / self.batch_size
+
+                # Backward pass
+                if self.use_amp:
+                    self.scaler.scale(loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
+                else:
+                    (loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.step()
+
+                # Measure accuracy and record metrics
+                prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
+                meters["loss"].update(loss.sum() / aug_y.size(0))
+                meters["prec1"].update(prec1, aug_x.size(0))
+                meters["prec5"].update(prec5, aug_x.size(0))
+                meters["num_samples"].update(aug_x.size(0))
+                meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_one_step(self, x, y, meters, step):
         with autocast(enabled=self.use_amp):
