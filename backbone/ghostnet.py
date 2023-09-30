@@ -1,7 +1,6 @@
 import horovod.torch as hvd
 import math
 import torch.nn as nn
-import logging
 import timm
 
 __all__ = ["ghostnet"]
@@ -9,11 +8,12 @@ __all__ = ["ghostnet"]
 
 def ghostnet(config):
     lr = config.pop("lr")  # 0.01
+    batches_per_allreduce = config.pop("batches_per_allreduce")
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    scaling_factor = min(hvd.size(), 64)
+    scaling_factor = min(batches_per_allreduce * hvd.size(), 64)
 
     # passing num_classes
     model = timm.create_model(

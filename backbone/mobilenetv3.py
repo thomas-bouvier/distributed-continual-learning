@@ -8,15 +8,16 @@ __all__ = ["mobilenetv3"]
 
 def mobilenetv3(config):
     lr = config.pop("lr") # 0.000375
+    batches_per_allreduce = config.pop("batches_per_allreduce")
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    scaling_factor = hvd.size()
+    scaling_factor = batches_per_allreduce * hvd.size()
 
     # passing num_classes
     model = timm.create_model(
-        "mobilenetv3_small_100",
+        "mobilenetv3_small_050",
         pretrained=False,
         num_classes=config.get("num_classes"),
     )

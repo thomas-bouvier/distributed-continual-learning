@@ -323,6 +323,7 @@ def main():
     wandb.finish()
 
     logging.info("Done 🎉🎉🎉")
+    os.exit() # will crash, good to save some walltime
     sys.exit(0)
 
 
@@ -350,7 +351,8 @@ class Experiment:
         # Creating the model
         backbone_config = {
             "num_classes": total_num_classes,
-            "lr": self.args.lr * self.args.batches_per_allreduce,
+            "lr": self.args.lr,
+            "batches_per_allreduce": self.args.batches_per_allreduce,
             "warmup_epochs": self.args.warmup_epochs,
             "num_epochs": self.args.epochs,
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
@@ -468,14 +470,15 @@ class Experiment:
             {
                 "task": 0,
                 "epoch": 0,
-                "model": self.args.model,
-                "state_dict": self.model.model.state_dict(),
-                "optimizer_state_dict": self.model.optimizer_regime.state_dict(),
+                "model": self.args.backbone,
+                "state_dict": self.model.backbone.state_dict(),
+                #"optimizer_state_dict": self.model.optimizer_regime.state_dict(),
             },
             self.save_path,
             is_initial=True,
             dummy=hvd.rank() > 0,
         )
+        logging.info(f"Initial checkpoint created")
         """
 
     def prepare_dataset(self):
