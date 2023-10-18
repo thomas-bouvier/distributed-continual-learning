@@ -121,13 +121,13 @@ class Buffer:
                 * self.num_samples_per_representative
             )
             self.rehearsal_tensor = torch.empty(
-                [size] + list(self.sample_shape), device=device
+                [size] + list(self.sample_shape)
             )
             self.rehearsal_metadata = [[0, 1.0] for _ in range(self.total_num_classes)]
             self.rehearsal_counts = [0] * self.total_num_classes
 
             self.rehearsal_logits = torch.empty(
-                [size, self.total_num_classes], device=device
+                [size, self.total_num_classes]
             )
 
             self.init_augmented_minibatch(device=device)
@@ -291,10 +291,11 @@ class Buffer:
             for k, v in classes_to_sample.items():
                 for index in v["indices"]:
                     ti = (torch.tensor([aug_size]),)
-                    minibatch.x.index_put_(ti, self.rehearsal_tensor[index])
-                    minibatch.y.index_put_(ti, torch.tensor(k))
-                    minibatch.w.index_put_(ti, torch.tensor(v["weight"]))
-                    minibatch.logits.index_put_(ti, self.rehearsal_logits[index])
+                    device = minibatch.x.device
+                    minibatch.x.index_put_(ti, self.rehearsal_tensor[index].to(device))
+                    minibatch.y.index_put_(ti, torch.tensor(k, device=device))
+                    minibatch.w.index_put_(ti, torch.tensor(v["weight"], device=device))
+                    minibatch.logits.index_put_(ti, self.rehearsal_logits[index].to(device))
                     aug_size += 1
 
         return aug_size
@@ -337,7 +338,7 @@ class Buffer:
 
                 for r in range(0, self.num_samples_per_representative):
                     j = self.budget_per_class * label + index + r
-                    self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i])
+                    self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i].cpu())
 
                 if index >= self.rehearsal_metadata[label][0]:
                     self.rehearsal_size += 1
