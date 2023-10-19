@@ -5,6 +5,7 @@ import nvidia.dali.types as types
 import nvidia.dali.fn as fn
 import torch
 
+from continuum.tasks import TaskType
 from nvidia.dali import pipeline_def
 from nvidia.dali.plugin.pytorch import DALIGenericIterator, LastBatchPolicy
 from nvidia.dali.pipeline import Pipeline
@@ -23,6 +24,7 @@ class ExternalInputCallable:
         self.batch_size = batch_size
         self.shard_id = shard_id
         self.num_shards = num_shards
+        self.data_type = taskset.data_type
 
         raw_samples = taskset.get_raw_samples()
         files = np.array(raw_samples[0])
@@ -59,9 +61,14 @@ class ExternalInputCallable:
             ).permutation(len(self.files))
         sample_idx = self.perm[sample_info.idx_in_epoch + self.shard_offset]
 
-        with open(self.files[sample_idx], "rb") as f:
-            encoded_img = np.frombuffer(f.read(), dtype=np.uint8)
+        if self.data_type == TaskType.IMAGE_PATH:
+            with open(self.files[sample_idx], "rb") as f:
+                encoded_img = np.frombuffer(f.read(), dtype=np.uint8)
+        else:
+            encoded_img = self.files[sample_idx]
+
         label = np.int64([self.labels[sample_idx]])
+
         return encoded_img, label, np.int32([self.task_id])
 
 
