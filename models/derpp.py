@@ -38,7 +38,7 @@ class Derpp(ContinualLearner):
             buffer_config,
             batch_metrics,
         )
-        
+
         try:
             self.alpha = config["alpha"]
             self.beta = config["beta"]
@@ -66,11 +66,12 @@ class Derpp(ContinualLearner):
         if task_id > 0 or self.nsys_run:
             self.buffer.enable_augmentations()
 
-    def train_one_step(self, x, y, meters, step):
+    def train_one_step(self, data, meters, step):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
-        # Get data from the last iteration (blocking)
+        x, y, _ = data
+        x, y = x.to(self._device()), y.long().to(self._device())
 
         with get_timer(
             "train",
@@ -131,7 +132,10 @@ class Derpp(ContinualLearner):
             meters["num_samples"].update(x.size(0))
             meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_one_step(self, x, y, meters, step):
+    def evaluate_one_step(self, data, meters, step):
+        x, y, _ = data
+        x, y = x.to(self._device()), y.long().to(self._device())
+
         with autocast(enabled=self.use_amp):
             output = self.backbone(x)
             loss = self.criterion(output, y)

@@ -14,6 +14,24 @@ parser.add_argument("--num-representatives")
 args = parser.parse_args()
 num_representatives = int(int(args.batch_size) * float(args.num_representatives))
 
-host=''
+host = ""
 
-os.system(f"horovodrun -np 2 -H """+host+""" python main.py --backbone resnet18 --model Derpp --model-config "{'alpha': """+args.alpha+""", 'beta': """+args.beta+"""}" --dataset imagenet100 --tasksets-config "{'scenario': 'class', 'increment': 10, 'initial_increment': 10}" --buffer-config "{'num_representatives': """+str(num_representatives)+""", 'rehearsal_ratio': """+args.buffer_size+"""}" --epochs """+args.epochs+""" --dataset-dir /my-spack/datasets/ --batch-size """+args.batch_size+""" --lr """+args.lr)
+os.system(
+    f"horovodrun -np 2 -H "
+    ""
+    + host
+    + """ python main.py --backbone resnet18 --model Derpp --model-config "{'alpha': """
+    + args.alpha
+    + """, 'beta': """
+    + args.beta
+    + """}" --dataset imagenet100 --tasksets-config "{'scenario': 'class', 'increment': 10, 'initial_increment': 10}" --buffer-config "{'num_representatives': """
+    + str(num_representatives)
+    + """, 'rehearsal_ratio': """
+    + args.buffer_size
+    + """}" --epochs """
+    + args.epochs
+    + """ --dataset-dir /my-spack/datasets/ --batch-size """
+    + args.batch_size
+    + """ --lr """
+    + args.lr
+)

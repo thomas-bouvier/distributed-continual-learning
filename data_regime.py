@@ -11,7 +11,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from data.datasets import get_dataset
 from data.preprocess import get_transform
-from data.scenarios import ReconstructionIncremental
+from data.scenarios import ReconstructionIncrementalScenario
 
 
 _DATA_ARGS = {
@@ -24,6 +24,7 @@ _DATA_ARGS = {
     "continual",
 }
 _DATALOADER_ARGS = {
+    "use_dali",
     "batch_size",
     "sampler",
     "batch_sampler",
@@ -67,16 +68,17 @@ class DataRegime:
         self.previous_loaders = {}
         self.config = self.get_config(config)
 
-        self.use_dali = True
-        try:
-            global DaliDataLoader
-            from data.load import DaliDataLoader
-        except ImportError:
-            logging.info(
-                f"NVIDIA DALI is not installed, fallback to the native PyTorch"
-                " native dataloader."
-            )
-            self.use_dali = False
+        self.use_dali = self.get("loader").pop("use_dali")
+        if self.use_dali:
+            try:
+                global DaliDataLoader
+                from data.load import DaliDataLoader
+            except ImportError:
+                logging.info(
+                    f"NVIDIA DALI is not installed, fallback to the native PyTorch"
+                    " native dataloader."
+                )
+                self.use_dali = False
 
         self.prepare_tasksets()
         self.get_data()
@@ -84,7 +86,7 @@ class DataRegime:
     def prepare_tasksets(self):
         dataset, compatibility = get_dataset(**self.config["data"])
         self.total_num_samples = len(dataset.get_data()[0])
-        scenario = self.config["tasks"].get("scenario", None)
+        scenario = self.get("tasks").get("scenario", None)
         if scenario:
             assert (
                 scenario in compatibility
@@ -107,7 +109,7 @@ class DataRegime:
                 transformations=[self.config["transform"]["compose"]],
             )
         elif scenario == "reconstruction":
-            self.tasksets = ReconstructionIncremental(
+            self.tasksets = ReconstructionIncrementalScenario(
                 dataset,
                 nb_tasks=self.config["tasks"].get("num_tasks", 5),
             )
@@ -123,7 +125,9 @@ class DataRegime:
         logging.info(
             f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets"
         )
-        self.total_num_classes = self.tasksets.nb_classes
+        self.total_num_classes = (
+            self.tasksets.nb_classes if scenario != "reconstruction" else 1
+        )
 
     def get_taskset(self):
         """

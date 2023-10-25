@@ -6,7 +6,7 @@ import torch
 import random
 
 from continuum import datasets
-from continuum.datasets import InMemoryDataset
+from continuum.datasets import _ContinuumDataset
 from continuum.tasks import TaskType
 from filelock import FileLock
 from scipy.stats import circmean
@@ -133,6 +133,7 @@ def get_dataset(
         shape12 = np.array(x).shape[-2:]
         x = np.reshape(x, [-1, *shape12])
         y = np.reshape(y, [-1, *shape12])
+        y_amp = np.abs(y)
         y_ph = np.angle(y)
 
         logging.debug(f"Before downscaling, max of x is {np.max(x)}")
@@ -140,11 +141,13 @@ def get_dataset(
         logging.debug(f"After downscaling, max of x is {np.max(x)}")
 
         x = x[:, np.newaxis, ...]  # .astype("float32")
+        y_amp = y_amp[:, np.newaxis, ...]
         y_ph = y_ph[:, np.newaxis, ...]
 
         logging.debug(
             f"Shape of new training data is:\n"
             f"\tx: {np.shape(x)}\n"
+            f"\ty_amp: {np.shape(y_amp)}\n"
             f"\ty_ph: {np.shape(y_ph)}"
         )
 
@@ -156,26 +159,27 @@ def get_dataset(
         np.random.seed(0)
         np.random.shuffle(indices)
         x = x[indices]
+        y_amp = y_amp[indices]
         y_ph = y_ph[indices]
 
         if train:
-            return ReconstructionInMemoryDataset(x[:ntrain], y_ph[:ntrain]), [
-                "reconstruction"
-            ]
+            return ReconstructionInMemoryDataset(
+                x[:ntrain], y_amp[:ntrain], y_ph[:ntrain]
+            ), ["reconstruction"]
         else:
-            return ReconstructionInMemoryDataset(x[ntrain:], y_ph[ntrain:]), [
-                "reconstruction"
-            ]
+            return ReconstructionInMemoryDataset(
+                x[ntrain:], y_amp[ntrain:], y_ph[ntrain:]
+            ), ["reconstruction"]
 
     else:
         raise ValueError("Unknown dataset")
 
 
-class ReconstructionInMemoryDataset(InMemoryDataset):
+class ReconstructionInMemoryDataset(_ContinuumDataset):
     """Continuum dataset for in-memory data.
 
     :param x: Numpy array of images or paths to images for the train set.
-    :param y: Targets for the train set.
+    :param y_amp: Targets for the train set.
     :param data_type: Format of the data.
     :param t_train: Optional task ids for the train set.
     """
@@ -183,28 +187,27 @@ class ReconstructionInMemoryDataset(InMemoryDataset):
     def __init__(
         self,
         x: np.ndarray,
-        y: np.ndarray,
+        y_amp: np.ndarray,
+        y_ph: np.ndarray,
         t: Union[None, np.ndarray] = None,
         data_type: TaskType = TaskType.TENSOR,
-        train: bool = True,
-        download: bool = True,
     ):
         self._data_type = data_type
-        super().__init__(x, y, train=train, download=download)
+        super().__init__(download=False)
 
-        if len(x) != len(y):
+        if len(x) != len(y_amp) or len(x) != len(y_ph):
             raise ValueError(
-                f"Number of datapoints ({len(x)}) != number of labels ({len(y)})!"
+                f"Number of datapoints ({len(x)}) != number of targets ({len(y_amp)}, {len(y_ph)})!"
             )
         if t is not None and len(t) != len(x):
             raise ValueError(
                 f"Number of datapoints ({len(x)}) != number of task ids ({len(t)})!"
             )
 
-        self.data = (x, y, t)
+        self.data = (x, y_amp, y_ph, t)
         self._nb_classes = 1
 
-    def get_data(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def get_data(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         return self.data
 
     @property

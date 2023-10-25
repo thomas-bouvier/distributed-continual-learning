@@ -192,6 +192,12 @@ parser.add_argument(
     help="enable Automatic Mixed Precision training",
 )
 parser.add_argument(
+    "--use-dali",
+    action="store_true",
+    default=False,
+    help="enable DALI loading pipeline",
+)
+parser.add_argument(
     "--fp16-dali",
     action="store_true",
     default=False,
@@ -207,15 +213,15 @@ parser.add_argument(
     "--use-adasum",
     action="store_true",
     default=False,
-    help="use adasum helping with convergence at scale"
+    help="use adasum helping with convergence at scale",
 )
 parser.add_argument(
     "--batches-per-allreduce",
     type=int,
     default=1,
     help="number of batches processed locally before "
-         "executing allreduce across workers; it multiplies "
-         "effective batch size.",
+    "executing allreduce across workers; it multiplies "
+    "effective batch size.",
 )
 parser.add_argument(
     "--gradient-predivide-factor",
@@ -323,7 +329,7 @@ def main():
     wandb.finish()
 
     logging.info("Done 🎉🎉🎉")
-    os.exit() # will crash, good to save some walltime
+    os.exit()  # will crash, good to save some walltime
     sys.exit(0)
 
 
@@ -487,6 +493,7 @@ class Experiment:
             "dataset_dir": self.args.dataset_dir,
             "pin_memory": True,
             "drop_last": True,
+            "use_dali": self.args.use_dali,
             # https://github.com/horovod/horovod/issues/2053
             "num_workers": self.args.dataloader_workers,
             **literal_eval(self.args.tasksets_config),

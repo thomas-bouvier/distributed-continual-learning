@@ -120,15 +120,11 @@ class Buffer:
                 * self.budget_per_class
                 * self.num_samples_per_representative
             )
-            self.rehearsal_tensor = torch.empty(
-                [size] + list(self.sample_shape)
-            )
+            self.rehearsal_tensor = torch.empty([size] + list(self.sample_shape))
             self.rehearsal_metadata = [[0, 1.0] for _ in range(self.total_num_classes)]
             self.rehearsal_counts = [0] * self.total_num_classes
 
-            self.rehearsal_logits = torch.empty(
-                [size, self.total_num_classes]
-            )
+            self.rehearsal_logits = torch.empty([size, self.total_num_classes])
 
             self.init_augmented_minibatch(device=device)
 
@@ -295,7 +291,9 @@ class Buffer:
                     minibatch.x.index_put_(ti, self.rehearsal_tensor[index].to(device))
                     minibatch.y.index_put_(ti, torch.tensor(k, device=device))
                     minibatch.w.index_put_(ti, torch.tensor(v["weight"], device=device))
-                    minibatch.logits.index_put_(ti, self.rehearsal_logits[index].to(device))
+                    minibatch.logits.index_put_(
+                        ti, self.rehearsal_logits[index].to(device)
+                    )
                     aug_size += 1
 
         return aug_size

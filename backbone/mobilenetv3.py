@@ -7,7 +7,7 @@ __all__ = ["mobilenetv3"]
 
 
 def mobilenetv3(config):
-    lr = config.pop("lr") # 0.000375
+    lr = config.pop("lr")  # 0.000375
     batches_per_allreduce = config.pop("batches_per_allreduce")
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")

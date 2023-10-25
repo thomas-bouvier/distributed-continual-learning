@@ -51,7 +51,7 @@ class Er(ContinualLearner):
         )
 
         x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        self.buffer.add_data(x[:self.batch_size], y[:self.batch_size], dict(batch=-1))
+        self.buffer.add_data(x[: self.batch_size], y[: self.batch_size], dict(batch=-1))
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
@@ -59,18 +59,21 @@ class Er(ContinualLearner):
         if task_id > 0 or self.nsys_run:
             self.buffer.enable_augmentations()
         if task_id > 0 and self.nsys_run:
-            #todo: this function doesn't exist, so the app will be killed.
+            # todo: this function doesn't exist, so the app will be killed.
             os.exit()
 
-    def train_one_step(self, x, y, meters, step):
+    def train_one_step(self, data, meters, step):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
+        x, y, _ = data
+        x, y = x.to(self._device()), y.long().to(self._device())
+
         # If making multiple backward passes per step, we need to cut the
         # current effective batch into local mini-batches.
         for i in range(0, len(x), self.batch_size):
-            x_batch = x[i:i + self.batch_size]
-            y_batch = y[i:i + self.batch_size]
+            x_batch = x[i : i + self.batch_size]
+            y_batch = y[i : i + self.batch_size]
 
             # Get data from the last iteration (blocking)
             aug_x, aug_y, aug_w = self.buffer.update(
@@ -100,7 +103,13 @@ class Er(ContinualLearner):
                 total_weight = hvd.allreduce(
                     torch.sum(aug_w), name="total_weight", op=hvd.Sum
                 )
-                dw = aug_w / total_weight * self.batch_size * hvd.size() / self.batch_size
+                dw = (
+                    aug_w
+                    / total_weight
+                    * self.batch_size
+                    * hvd.size()
+                    / self.batch_size
+                )
 
                 # Backward pass
                 if self.use_amp:
@@ -121,7 +130,10 @@ class Er(ContinualLearner):
                 meters["num_samples"].update(aug_x.size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_one_step(self, x, y, meters, step):
+    def evaluate_one_step(self, data, meters, step):
+        x, y, _ = data
+        x, y = x.to(self._device()), y.long().to(self._device())
+
         with autocast(enabled=self.use_amp):
             output = self.backbone(x)
             loss = self.criterion(output, y)
