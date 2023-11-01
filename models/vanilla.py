@@ -102,7 +102,7 @@ class Vanilla(ContinualLearner):
         """
         step: dict containing `task_id`, `epoch` and `batch` keys for logging purposes only
         """
-        x, amp, ph, _ = data
+        x, _, amp, ph, _ = data
         x, amp, ph = x.to(self._device()), amp.to(self._device()), ph.to(self._device())
 
         # If making multiple backward passes per step, we need to cut the
@@ -140,6 +140,7 @@ class Vanilla(ContinualLearner):
                 meters["loss"].update(loss.sum(), loss.size(0))
                 meters["loss_amp"].update(amp_loss.sum() / amp_loss.size(0))
                 meters["loss_ph"].update(ph_loss.sum() / ph_loss.size(0))
+                meters["num_samples"].update(x_batch.size(0))
 
     def evaluate_recon_one_step(self, data, meters, step):
         x, amp, ph, _ = data

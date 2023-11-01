@@ -11,11 +11,22 @@ from utils.log import get_shared_logging_level, display
 
 
 class AugmentedMinibatch:
-    def __init__(self, num_samples, shape, device, total_num_classes):
-        self.x = torch.zeros(num_samples, *shape, device=device)
-        self.y = torch.randint(high=1000, size=(num_samples,), device=device)
-        self.w = torch.ones(num_samples, device=device)
-        self.logits = torch.zeros(num_samples, total_num_classes, device=device)  # TODO
+    def __init__(
+        self,
+        num_samples,
+        shape,
+        device,
+        total_num_classes,
+        num_samples_per_representative=1,
+    ):
+        self.input = torch.zeros(num_samples, *shape, device=device)
+        self.ground_truth = [
+            torch.zeros(num_samples, *shape, device=device)
+            for _ in range(num_samples_per_representative - 1)
+        ]
+        self.labels = torch.randint(high=1000, size=(num_samples,), device=device)
+        self.weights = torch.ones(num_samples, device=device)
+        self.logits = torch.zeros(num_samples, total_num_classes, device=device)
 
 
 class Buffer:
@@ -37,6 +48,7 @@ class Buffer:
         cuda_rdma=False,
         mode="separate",
         implementation="standard",
+        num_samples_per_representative=1,
     ):
         assert mode in ("separate")
         assert implementation in ("standard", "flyweight")
@@ -51,7 +63,7 @@ class Buffer:
         self.mode = mode
         self.implementation = implementation
 
-        self.num_samples_per_representative = 1
+        self.num_samples_per_representative = num_samples_per_representative
         self.augmentations_enabled = False
         self.rehearsal_size = 0
         self.rehearsal_tensor = None
@@ -139,7 +151,11 @@ class Buffer:
         for i in range(self.minibatches_ahead):
             self.next_minibatches.append(
                 AugmentedMinibatch(
-                    num_samples, self.sample_shape, device, self.total_num_classes
+                    num_samples,
+                    self.sample_shape,
+                    device,
+                    self.total_num_classes,
+                    num_samples_per_representative=self.num_samples_per_representative,
                 )
             )
 
@@ -150,16 +166,17 @@ class Buffer:
                 self.next_minibatches[0].w,
             )
 
-    def update(self, x, y, step, batch_metrics=None):
+    def update(self, x, y, step, batch_metrics=None, ground_truth=[]):
         """
         Updates the buffer with incoming data. Get some data from (x, y) pairs.
         """
+        if self.num_samples_per_representative > 1:
+            assert len(ground_truth) > 0, "Some ground-truth tensors should be provided"
+
         if self.high_performance:
             self.dsl.measure_performance(measure_performance(step))
 
         aug_size = self.__get_data(step, batch_metrics=batch_metrics)
-
-        # print("[+] Aug_size : ",aug_size)
 
         # Assemble the minibatch
         with get_timer(
@@ -169,19 +186,29 @@ class Buffer:
             dummy=not measure_performance(step),
         ):
             minibatch = self.__get_current_augmented_minibatch(step)
+            concat_ground_truth = []
+
             if self.implementation == "flyweight":
                 w = torch.ones(x.size(0), device=x.device)
-                concat_x = torch.cat((x, minibatch.x[:aug_size]))
-                concat_y = torch.cat((y, minibatch.y[:aug_size]))
-                concat_w = torch.cat((w, minibatch.w[:aug_size]))
+                concat_x = torch.cat((x, minibatch.input[:aug_size]))
+                for i, v in enumerate(ground_truth):
+                    concat_ground_truth.append(
+                        torch.cat((v, minibatch.ground_truth[i][:aug_size]))
+                    )
+                concat_y = torch.cat((y, minibatch.labels[:aug_size]))
+                concat_w = torch.cat((w, minibatch.weights[:aug_size]))
             else:
-                concat_x = minibatch.x[:aug_size]
-                concat_y = minibatch.y[:aug_size]
-                concat_w = minibatch.w[:aug_size]
+                concat_x = minibatch.input[:aug_size]
+                for i in range(len(ground_truth)):
+                    concat_ground_truth.append(minibatch.ground_truth[i][:aug_size])
+                concat_y = minibatch.labels[:aug_size]
+                concat_w = minibatch.weights[:aug_size]
 
-        self.add_data(x, y, step, batch_metrics=batch_metrics)
+        self.add_data(
+            x, y, step, batch_metrics=batch_metrics, ground_truth=ground_truth
+        )
 
-        return concat_x, concat_y, concat_w
+        return concat_x, concat_ground_truth, concat_y, concat_w
 
     def update_with_logits(self, x, y, logits, step, batch_metrics=None):
         """
@@ -191,8 +218,6 @@ class Buffer:
             self.dsl.measure_performance(measure_performance(step))
 
         aug_size = self.__get_data(step, batch_metrics=batch_metrics)
-
-        # print("[+] Aug_size : ",aug_size)
 
         # Assemble the minibatch
         with get_timer(
@@ -287,10 +312,24 @@ class Buffer:
             for k, v in classes_to_sample.items():
                 for index in v["indices"]:
                     ti = (torch.tensor([aug_size]),)
-                    device = minibatch.x.device
-                    minibatch.x.index_put_(ti, self.rehearsal_tensor[index].to(device))
-                    minibatch.y.index_put_(ti, torch.tensor(k, device=device))
-                    minibatch.w.index_put_(ti, torch.tensor(v["weight"], device=device))
+                    device = minibatch.input.device
+
+                    # input tensor
+                    minibatch.input.index_put_(
+                        ti, self.rehearsal_tensor[index].to(device)
+                    )
+
+                    # other ground_truth tensors
+                    for r in range(0, self.num_samples_per_representative - 1):
+                        j = index + r + 1
+                        minibatch.ground_truth[r].index_put_(
+                            ti, self.rehearsal_tensor[index].to(device)
+                        )
+
+                    minibatch.labels.index_put_(ti, torch.tensor(k, device=device))
+                    minibatch.weights.index_put_(
+                        ti, torch.tensor(v["weight"], device=device)
+                    )
                     minibatch.logits.index_put_(
                         ti, self.rehearsal_logits[index].to(device)
                     )
@@ -298,7 +337,7 @@ class Buffer:
 
         return aug_size
 
-    def add_data(self, x, y, step, batch_metrics=None):
+    def add_data(self, x, y, step, batch_metrics=None, ground_truth=[]):
         """
         Fills the rehearsal buffer with (x, y) pairs, sampled randomly from the
         incoming batch of data. Only `num_candidates` will be added to the
@@ -308,6 +347,11 @@ class Buffer:
         :param y: tensor containing targets
         :param step: step number, for logging purposes
         """
+        if self.num_samples_per_representative > 1:
+            assert (
+                len(ground_truth) == self.num_samples_per_representative - 1
+            ), "Some ground-truth tensors should be provided"
+
         if self.high_performance:
             with get_timer(
                 "accumulate",
@@ -323,9 +367,10 @@ class Buffer:
                         x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
                     )
         else:
-            for i in range(len(y)):
+            for i in range(len(x)):
                 label = y[i].item()
-                self.rehearsal_metadata[0]
+
+                # picking an index to replace/append to
                 index = -1
                 if self.rehearsal_metadata[label][0] < self.budget_per_class:
                     index = self.rehearsal_metadata[label][0]
@@ -334,9 +379,16 @@ class Buffer:
                         continue
                     index = random.randint(0, self.budget_per_class - 1)
 
-                for r in range(0, self.num_samples_per_representative):
-                    j = self.budget_per_class * label + index + r
-                    self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i].cpu())
+                # input tensor
+                j = self.budget_per_class * label + index
+                self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i].cpu())
+
+                # other ground_truth tensors
+                for r in range(0, self.num_samples_per_representative - 1):
+                    j = self.budget_per_class * label + index + r + 1
+                    self.rehearsal_tensor.index_put_(
+                        (torch.tensor([j]),), ground_truth[r][i].cpu()
+                    )
 
                 if index >= self.rehearsal_metadata[label][0]:
                     self.rehearsal_size += 1

@@ -189,4 +189,4 @@ class DaliDataLoader(object):
             x = token[0]["x"]
             y = token[0]["y"].squeeze()
             t = token[0]["t"].squeeze()
-            yield x, y, t
+            yield [x, y, t]

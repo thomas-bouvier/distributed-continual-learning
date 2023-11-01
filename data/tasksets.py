@@ -145,7 +145,7 @@ class DiffractionArrayTaskSet(Dataset):
             y_amp = self.get_task_target_trsf(t)(y_amp)
             y_ph = self.get_task_target_trsf(t)(y_ph)
 
-        return x, y_amp, y_ph, t
+        return x, 0, y_amp, y_ph, t
 
     def get_task_trsf(self, t: int):
         if isinstance(self.trsf, list):
