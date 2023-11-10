@@ -1,4 +1,3 @@
-import horovod.torch as hvd
 import numpy as np
 import torch
 import torch.nn as nn
@@ -83,11 +82,12 @@ class PtychoNNModel(nn.Module):
 
 
 def ptychonn(config):
-    lr = config.pop("lr", 5e-4) * hvd.size()
-    lr_min = config.pop("lr_min", 1e-4) * hvd.size()
-    warmup_epochs = config.pop("warmup_epochs")
+    world_size = config.pop("world_size", 1)
+    lr = config.pop("lr", 5e-4) * world_size
+    lr_min = config.pop("lr_min", 1e-4) * world_size
+    warmup_epochs = config.pop("warmup_epochs", 0)
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
-    num_samples = config.pop("total_num_samples") / hvd.size()
+    num_samples = config.pop("total_num_samples") / world_size
 
     model = PtychoNNModel(loss_scaling=num_samples)
 

@@ -367,7 +367,7 @@ class Buffer:
                         x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
                     )
         else:
-            for i in range(len(x)):
+            for i in range(len(y)):
                 label = y[i].item()
 
                 # picking an index to replace/append to

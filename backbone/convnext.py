@@ -1,4 +1,3 @@
-import horovod.torch as hvd
 import math
 import torch
 import torch.nn as nn
@@ -9,8 +8,9 @@ __all__ = ["convnext"]
 
 
 def convnext(config):
-    lr = config.pop("lr") * hvd.size()  # 4e-3 * world_size
-    lr_min = config.pop("lr_min") * hvd.size()  # 1e-6 * world_size
+    world_size = config.pop("world_size", 1)
+    lr = config.pop("lr") * world_size  # 4e-3 * world_size
+    lr_min = config.pop("lr_min") * world_size  # 1e-6 * world_size
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")

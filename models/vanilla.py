@@ -143,7 +143,7 @@ class Vanilla(ContinualLearner):
                 meters["num_samples"].update(x_batch.size(0))
 
     def evaluate_recon_one_step(self, data, meters, step):
-        x, amp, ph, _ = data
+        x, _, amp, ph, _ = data
         x, amp, ph = x.to(self._device()), amp.to(self._device()), ph.to(self._device())
 
         with autocast(enabled=self.use_amp):

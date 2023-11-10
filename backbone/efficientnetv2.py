@@ -1,4 +1,3 @@
-import horovod.torch as hvd
 import math
 import torch.nn as nn
 import logging

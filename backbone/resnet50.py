@@ -1,4 +1,3 @@
-import horovod.torch as hvd
 import math
 import torch.nn as nn
 import timm
@@ -7,12 +6,13 @@ __all__ = ["resnet50"]
 
 
 def resnet50(config):
+    world_size = config.pop("world_size", 1)
     lr = config.pop("lr")  # 0.0125
     batches_per_allreduce = config.pop("batches_per_allreduce")
     warmup_epochs = config.pop("warmup_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    scaling_factor = min(batches_per_allreduce * hvd.size(), 64)
+    scaling_factor = min(batches_per_allreduce * world_size, 64)
 
     # Torchvision defaults zero_init_residual to False. This option set to False
     # will perform better on short epoch runs, however it is not the case on a

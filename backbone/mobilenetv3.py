@@ -1,4 +1,3 @@
-import horovod.torch as hvd
 import math
 import torch.nn as nn
 import timm
@@ -7,13 +6,14 @@ __all__ = ["mobilenetv3"]
 
 
 def mobilenetv3(config):
+    world_size = config.pop("world_size", 1)
     lr = config.pop("lr")  # 0.000375
     batches_per_allreduce = config.pop("batches_per_allreduce")
     warmup_epochs = config.pop("warmup_epochs")
     num_epochs = config.pop("num_epochs")
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
 
-    scaling_factor = batches_per_allreduce * hvd.size()
+    scaling_factor = batches_per_allreduce * world_size
 
     # passing num_classes
     model = timm.create_model(

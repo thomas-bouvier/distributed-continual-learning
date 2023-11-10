@@ -60,6 +60,12 @@ parser.add_argument(
     help="name of desired config in yaml file",
 )
 parser.add_argument(
+    "--wandb-project",
+    default="distributed-continual-learning",
+    type=str,
+    help="name of your Weigths & Biases project",
+)
+parser.add_argument(
     "--dataset", metavar="DATASET", default="mnist", help="dataset name"
 )
 parser.add_argument(
@@ -296,7 +302,8 @@ def main():
 
     save_path = ""
     if hvd.rank() == 0:
-        wandb.init(project="distributed-continual-learning")
+        wandb.init(project=args.wandb_project)
+
         run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
         if args.model is not None:
             run_name = f"{args.model}-{run_name}"
@@ -356,13 +363,14 @@ class Experiment:
 
         # Creating the model
         backbone_config = {
+            "world_size": hvd.size(),
             "num_classes": total_num_classes,
             "lr": self.args.lr,
             "batches_per_allreduce": self.args.batches_per_allreduce,
             "warmup_epochs": self.args.warmup_epochs,
             "num_epochs": self.args.epochs,
-            "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
             "total_num_samples": self.train_data_regime.total_num_samples,
+            "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
         }
         if self.args.backbone_config != "":
             backbone_config = dict(
