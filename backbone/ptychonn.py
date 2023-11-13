@@ -39,8 +39,8 @@ class PtychoNNModel(nn.Module):
             nn.Tanh(),
         )
 
-        # self.criterion = nn.L1Loss()
-        self.criterion = ScaledMeanAbsoluteErrorLoss(scaling=loss_scaling)
+        self.criterion = nn.L1Loss(reduction="none")
+        #self.criterion = ScaledMeanAbsoluteErrorLoss(scaling=loss_scaling)
 
     def down_block(self, filters_in, filters_out):
         block = [
@@ -93,12 +93,16 @@ def ptychonn(config):
 
     # https://github.com/bckenstler/CLR
     def triangular2_cyclic_lr(step, lr, max_lr, step_size):
-        cycle = np.floor(1 + step["batch"] / (2 * step_size))
-        x = np.abs(step["batch"] / step_size - 2 * cycle + 1)
+        """
+            step_size: number of epochs to complete a cycle
+        """
+        lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
+        cycle = np.floor(1 + lr_epoch / (2 * step_size))
+        x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
     def config_by_step(step):
-        step_size = 6 * num_steps_per_epoch
+        step_size = 6
         return {"lr": triangular2_cyclic_lr(step, lr_min, lr, step_size)}
 
     model.regime = [
