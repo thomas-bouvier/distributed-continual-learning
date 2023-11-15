@@ -10,6 +10,8 @@ from continuum.datasets import _ContinuumDataset
 from continuum.tasks import TaskType
 from filelock import FileLock
 from scipy.stats import circmean
+from sklearn.utils import shuffle
+from tqdm import tqdm
 from typing import Callable, List, Optional, Tuple, Union
 
 
@@ -102,73 +104,156 @@ def get_dataset(
             )
 
     elif dataset == "ptycho":
-        root = os.path.join(root, "Ptycho")
+        if split != "test":
+            root = os.path.join(root, "Ptycho/new")
         logging.info("Assembling Ptycho dataset...")
-        datafiles_train = glob.glob(root + "/trainingData/*.npz")
-        diffraction_downscaling = 1
 
-        x = []
-        y = []
-        positions_train = []
-        for df in datafiles_train:
-            logging.info(df)
-            with np.load(df) as f:
-                try:
-                    x.append(np.array(f["reciprocal"]))
-                except Exception as e:
-                    logging.info(e)
-                else:
-                    positions_train.append(f["position"])
-                    realspace = np.array(f["real"])
-                    phases = np.angle(realspace)
-                    phase_mean = circmean(phases, low=-np.pi, high=np.pi)
-                    y.append(realspace * np.exp(-1j * phase_mean))
+        H = 256
+        W = 256
+        # reshape all training images to this dimension
+        im_shape = (256, 256)
 
-        logging.debug(
-            f"Shape of new training data is:\n"
-            f"\tx: {np.shape(x)}\n"
-            f"\ty: {np.shape(y)}"
-        )
+        real_space = []
+        diff_data = []
+        amp_data = []
+        ph_data = []
 
-        shape12 = np.array(x).shape[-2:]
-        x = np.reshape(x, [-1, *shape12])
-        y = np.reshape(y, [-1, *shape12])
-        y_amp = np.abs(y)
-        y_ph = np.angle(y)
+        # Train or validate workflow
+        if split == "train" or split == "validate":
+            # the square of the phase image must be above this value to be placed into training
+            mean_phsqr_val = 0.02
 
-        logging.debug(f"Before downscaling, max of x is {np.max(x)}")
-        x = np.floor(x / diffraction_downscaling)
-        logging.debug(f"After downscaling, max of x is {np.max(x)}")
+            start_scan = 204
+            end_scan = 269
 
-        x = x[:, np.newaxis, ...]  # .astype("float32")
-        y_amp = y_amp[:, np.newaxis, ...]
-        y_ph = y_ph[:, np.newaxis, ...]
+            for scan_num in tqdm(
+                range(start_scan, end_scan + 1),
+                position=0,
+                leave=False,
+                desc="Loading ptychography scans",
+            ):
+                r_space = np.load(f"{root}/trainingData/{scan_num}/patched_psi.npy")
+                real_space.append(r_space)
+                ampli = np.abs(r_space)
+                amp_data.append(ampli)
+                phase = np.angle(r_space)
+                ph_data.append(phase)
 
-        logging.debug(
-            f"Shape of new training data is:\n"
-            f"\tx: {np.shape(x)}\n"
-            f"\ty_amp: {np.shape(y_amp)}\n"
-            f"\ty_ph: {np.shape(y_ph)}"
-        )
+                diff_data.append(
+                    np.load(
+                        f"{root}/trainingData/{scan_num}/cropped_exp_diffr_data.npy"
+                    )
+                )
 
-        ntrain_full = np.shape(x)[0]
-        valid_data_ratio = 0.1
-        nvalid = int(ntrain_full * valid_data_ratio)
-        ntrain = ntrain_full - nvalid
-        indices = list(range(ntrain_full))
-        np.random.seed(0)
-        np.random.shuffle(indices)
-        x = x[indices]
-        y_amp = y_amp[indices]
-        y_ph = y_ph[indices]
+            if len(diff_data) != 1:
+                total_data_diff = np.concatenate(diff_data)
+            else:
+                _ = np.asarray(diff_data, dtype="float32")
+                _ = _[0, :, :, :]
+                total_data_diff = _[:, np.newaxis, :, :]
 
-        if train:
-            return ReconstructionInMemoryDataset(
-                x[:ntrain], y_amp[:ntrain], y_ph[:ntrain]
-            ), ["reconstruction"]
+            with tqdm(total=3, leave=False, desc="Resizing data") as pbar:
+                total_data_amp = np.concatenate(amp_data)
+                total_data_phase = np.concatenate(ph_data)
+                av_vals = np.mean(total_data_phase**2, axis=(1, 2))
+                idx = np.argwhere(av_vals >= mean_phsqr_val)
+                total_data_diff = total_data_diff[idx].astype("float32")
+                total_data_amp = total_data_amp[idx].astype("float32")
+                total_data_phase = total_data_phase[idx].astype("float32")
+
+            X_train = total_data_diff.reshape(-1, H, W)[:, np.newaxis, :, :]
+            Y_I_train = total_data_amp.reshape(-1, H, W)[:, np.newaxis, :, :]
+            Y_phi_train = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
+
+            logging.debug(f"Train data shape: {X_train.shape}")
+            X_train, Y_I_train, Y_phi_train = shuffle(
+                X_train, Y_I_train, Y_phi_train, random_state=0
+            )
+
+            # Training data
+            X_train_tensor = torch.Tensor(X_train)
+            Y_I_train_tensor = torch.Tensor(Y_I_train)
+            Y_phi_train_tensor = torch.Tensor(Y_phi_train)
+            logging.debug(
+                f"""
+                x shape: {X_train_tensor.shape}
+                amp shape: {Y_I_train_tensor.shape}
+                phi shape: {Y_phi_train_tensor.shape}
+                """
+            )
+
+            N_TRAIN = X_train_tensor.shape[0]
+            N_VALID = int(0.2 * N_TRAIN)
+
+            if train:
+                return ReconstructionInMemoryDataset(
+                    X_train_tensor[: N_TRAIN - N_VALID],
+                    Y_I_train_tensor[: N_TRAIN - N_VALID],
+                    Y_phi_train_tensor[: N_TRAIN - N_VALID],
+                ), ["reconstruction"]
+            else:
+                return ReconstructionInMemoryDataset(
+                    X_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
+                    Y_I_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
+                    Y_phi_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
+                ), ["reconstruction"]
+
         else:
+            start_scan = 270
+            end_scan = 270
+
+            for scan_num in tqdm(
+                range(start_scan, end_scan + 1),
+                position=0,
+                leave=False,
+                desc="Loading ptychography scans",
+            ):
+                r_space = np.load(f"{root}/{scan_num}/patched_psi.npy")  # recon_data
+                real_space.append(r_space)
+                ampli = np.abs(r_space)
+                amp_data.append(ampli)
+                phase = np.angle(r_space)
+                ph_data.append(phase)
+
+                diff_data.append(
+                    np.load(f"{root}/{scan_num}/cropped_exp_diffr_data.npy")
+                )  # diff_data
+
+            if len(diff_data) != 1:
+                total_data_diff = np.concatenate(diff_data)
+            else:
+                _ = np.asarray(diff_data, dtype="float32")
+                _ = _[0, :, :, :]
+                total_data_diff = _[:, np.newaxis, :, :]
+
+            total_data_amp = np.concatenate(amp_data)
+            total_data_phase = np.concatenate(ph_data)
+            total_data_diff = total_data_diff.astype("float32")
+            total_data_amp = total_data_amp.astype("float32")
+            total_data_phase = total_data_phase.astype("float32")
+
+            X_test = total_data_diff.reshape(-1, H, W)[:, np.newaxis, :, :]
+            Y_I_test = total_data_amp.reshape(-1, H, W)[:, np.newaxis, :, :]
+            Y_phi_test = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
+
+            logging.debug(f"Test data shape: {X_test.shape}")
+
+            # Testing data
+            X_test_tensor = torch.Tensor(X_test)
+            Y_I_test_tensor = torch.Tensor(Y_I_test)
+            Y_phi_test_tensor = torch.Tensor(Y_phi_test)
+            logging.debug(
+                f"""
+                x shape: {X_test_tensor.shape}
+                amp shape: {Y_I_test_tensor.shape}
+                phi shape: {Y_phi_test_tensor.shape}
+                """
+            )
+
             return ReconstructionInMemoryDataset(
-                x[ntrain:], y_amp[ntrain:], y_ph[ntrain:]
+                X_test_tensor,
+                Y_I_test_tensor,
+                Y_phi_test_tensor,
             ), ["reconstruction"]
 
     else:
