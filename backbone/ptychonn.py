@@ -9,9 +9,10 @@ __all__ = ["ptychonn"]
 
 
 class PtychoNNModel(nn.Module):
-    def __init__(self, nconv: int = 16, loss_scaling=1.0):
+    def __init__(self, nconv=32, use_batch_norm=False):
         super().__init__()
         self.nconv = nconv
+        self.use_batch_norm = use_batch_norm
 
         self.encoder = nn.Sequential(
             *self.down_block(1, self.nconv),
@@ -39,8 +40,8 @@ class PtychoNNModel(nn.Module):
             nn.Tanh(),
         )
 
-        self.criterion = nn.L1Loss(reduction="none")
-        #self.criterion = ScaledMeanAbsoluteErrorLoss(scaling=loss_scaling)
+        #self.criterion = nn.L1Loss(reduction="none")
+        self.criterion = ScaledMeanAbsoluteErrorLoss(scaling=1.0)
 
     def down_block(self, filters_in, filters_out):
         block = [
@@ -51,8 +52,12 @@ class PtychoNNModel(nn.Module):
                 stride=1,
                 padding=(1, 1),
             ),
+            nn.BatchNorm2d(filters_out)
+            if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.Conv2d(filters_out, filters_out, 3, stride=1, padding=(1, 1)),
+            nn.BatchNorm2d(filters_out)
+            if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.MaxPool2d((2, 2)),
         ]
@@ -61,8 +66,12 @@ class PtychoNNModel(nn.Module):
     def up_block(self, filters_in, filters_out):
         block = [
             nn.Conv2d(filters_in, filters_out, 3, stride=1, padding=(1, 1)),
+            nn.BatchNorm2d(filters_out)
+            if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.Conv2d(filters_out, filters_out, 3, stride=1, padding=(1, 1)),
+            nn.BatchNorm2d(filters_out)
+            if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.Upsample(scale_factor=2, mode="bilinear"),
         ]
@@ -89,7 +98,7 @@ def ptychonn(config):
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
     num_samples = config.pop("total_num_samples") / world_size
 
-    model = PtychoNNModel(loss_scaling=num_samples)
+    model = PtychoNNModel()
 
     # https://github.com/bckenstler/CLR
     def triangular2_cyclic_lr(step, lr, max_lr, step_size):
