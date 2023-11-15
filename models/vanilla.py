@@ -155,3 +155,4 @@ class Vanilla(ContinualLearner):
         meters["loss"].update(loss.sum(), loss.size(0))
         meters["loss_amp"].update(amp_loss.sum() / amp_loss.size(0))
         meters["loss_ph"].update(ph_loss.sum() / ph_loss.size(0))
+        meters["num_samples"].update(x.size(0))
