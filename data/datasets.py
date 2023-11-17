@@ -1,9 +1,9 @@
-import glob
+import horovod.torch as hvd
 import logging
 import numpy as np
 import os
-import torch
 import random
+import torch
 
 from continuum import datasets
 from continuum.datasets import _ContinuumDataset
@@ -104,14 +104,14 @@ def get_dataset(
             )
 
     elif dataset == "ptycho":
-        if split != "test":
-            root = os.path.join(root, "Ptycho/new")
+        root = os.path.join(root, "Ptycho")
         logging.info("Assembling Ptycho dataset...")
 
         H = 256
         W = 256
         # reshape all training images to this dimension
         im_shape = (256, 256)
+        num_train_scans = 150
 
         real_space = []
         diff_data = []
@@ -123,16 +123,22 @@ def get_dataset(
             # the square of the phase image must be above this value to be placed into training
             mean_phsqr_val = 0.02
 
-            start_scan = 204
-            end_scan = 269
+            train_scans = list(range(204, 340 + 1))
+            train_scans += list(range(457, 479 + 1))
+            train_scans = train_scans[: min(num_train_scans, len(train_scans))]
+
+            # shard training scans from the rank
+            num_shards = hvd.size()
+            shard_id = hvd.rank()
+            shard_size = len(train_scans) // num_shards
+            shard_offset = shard_size * shard_id
+            train_scans = train_scans[shard_offset : shard_offset + shard_size]
 
             for scan_num in tqdm(
-                range(start_scan, end_scan + 1),
-                position=0,
-                leave=False,
+                train_scans,
                 desc="Loading ptychography scans",
             ):
-                r_space = np.load(f"{root}/trainingData/{scan_num}/patched_psi.npy")
+                r_space = np.load(f"{root}/train/{scan_num}/patched_psi.npy")
                 real_space.append(r_space)
                 ampli = np.abs(r_space)
                 amp_data.append(ampli)
@@ -140,9 +146,7 @@ def get_dataset(
                 ph_data.append(phase)
 
                 diff_data.append(
-                    np.load(
-                        f"{root}/trainingData/{scan_num}/cropped_exp_diffr_data.npy"
-                    )
+                    np.load(f"{root}/train/{scan_num}/cropped_exp_diffr_data.npy")
                 )
 
             if len(diff_data) != 1:
@@ -152,15 +156,20 @@ def get_dataset(
                 _ = _[0, :, :, :]
                 total_data_diff = _[:, np.newaxis, :, :]
 
-            with tqdm(total=3, leave=False, desc="Resizing data") as pbar:
-                total_data_amp = np.concatenate(amp_data)
-                total_data_phase = np.concatenate(ph_data)
-                av_vals = np.mean(total_data_phase**2, axis=(1, 2))
-                idx = np.argwhere(av_vals >= mean_phsqr_val)
-                total_data_diff = total_data_diff[idx].astype("float32")
-                total_data_amp = total_data_amp[idx].astype("float32")
-                total_data_phase = total_data_phase[idx].astype("float32")
+            logging.info("Converting the data to np array...")
+            total_data_amp = np.concatenate(amp_data)
+            total_data_phase = np.concatenate(ph_data)
 
+            logging.info("Removing useless data...")
+            av_vals = np.mean(total_data_phase**2, axis=(1, 2))
+            idx = np.argwhere(av_vals >= mean_phsqr_val)
+
+            logging.info("Converting data to float32...")
+            total_data_diff = total_data_diff[idx].astype("float32")
+            total_data_amp = total_data_amp[idx].astype("float32")
+            total_data_phase = total_data_phase[idx].astype("float32")
+
+            logging.info("Reshaping data...")
             X_train = total_data_diff.reshape(-1, H, W)[:, np.newaxis, :, :]
             Y_I_train = total_data_amp.reshape(-1, H, W)[:, np.newaxis, :, :]
             Y_phi_train = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
@@ -199,16 +208,14 @@ def get_dataset(
                 ), ["reconstruction"]
 
         else:
-            start_scan = 270
-            end_scan = 270
+            start_scan = 489
+            end_scan = 489
 
             for scan_num in tqdm(
                 range(start_scan, end_scan + 1),
-                position=0,
-                leave=False,
                 desc="Loading ptychography scans",
             ):
-                r_space = np.load(f"{root}/{scan_num}/patched_psi.npy")  # recon_data
+                r_space = np.load(f"{root}/test/{scan_num}/patched_psi.npy")
                 real_space.append(r_space)
                 ampli = np.abs(r_space)
                 amp_data.append(ampli)
@@ -216,8 +223,8 @@ def get_dataset(
                 ph_data.append(phase)
 
                 diff_data.append(
-                    np.load(f"{root}/{scan_num}/cropped_exp_diffr_data.npy")
-                )  # diff_data
+                    np.load(f"{root}/test/{scan_num}/cropped_exp_diffr_data.npy")
+                )
 
             if len(diff_data) != 1:
                 total_data_diff = np.concatenate(diff_data)
@@ -226,12 +233,16 @@ def get_dataset(
                 _ = _[0, :, :, :]
                 total_data_diff = _[:, np.newaxis, :, :]
 
+            logging.info("Converting the data to np array...")
             total_data_amp = np.concatenate(amp_data)
             total_data_phase = np.concatenate(ph_data)
+
+            logging.info("Converting data to float32...")
             total_data_diff = total_data_diff.astype("float32")
             total_data_amp = total_data_amp.astype("float32")
             total_data_phase = total_data_phase.astype("float32")
 
+            logging.info("Reshaping data...")
             X_test = total_data_diff.reshape(-1, H, W)[:, np.newaxis, :, :]
             Y_I_test = total_data_amp.reshape(-1, H, W)[:, np.newaxis, :, :]
             Y_phi_test = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]

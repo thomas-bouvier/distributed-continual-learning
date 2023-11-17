@@ -24,7 +24,9 @@ def measure_performance(step):
     )
 
 
-def train_one_epoch(model, loader, task_id, epoch, global_batch, global_epoch, scenario, log_interval=10):
+def train_one_epoch(
+    model, loader, task_id, epoch, global_batch, global_epoch, scenario, log_interval=10
+):
     """Forward pass for the current epoch"""
     model.backbone.train()
 

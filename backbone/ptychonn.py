@@ -40,7 +40,7 @@ class PtychoNNModel(nn.Module):
             nn.Tanh(),
         )
 
-        #self.criterion = nn.L1Loss(reduction="none")
+        # self.criterion = nn.L1Loss(reduction="none")
         self.criterion = ScaledMeanAbsoluteErrorLoss(scaling=1.0)
 
     def down_block(self, filters_in, filters_out):
@@ -52,12 +52,10 @@ class PtychoNNModel(nn.Module):
                 stride=1,
                 padding=(1, 1),
             ),
-            nn.BatchNorm2d(filters_out)
-            if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.Conv2d(filters_out, filters_out, 3, stride=1, padding=(1, 1)),
-            nn.BatchNorm2d(filters_out)
-            if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.MaxPool2d((2, 2)),
         ]
@@ -66,12 +64,10 @@ class PtychoNNModel(nn.Module):
     def up_block(self, filters_in, filters_out):
         block = [
             nn.Conv2d(filters_in, filters_out, 3, stride=1, padding=(1, 1)),
-            nn.BatchNorm2d(filters_out)
-            if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.Conv2d(filters_out, filters_out, 3, stride=1, padding=(1, 1)),
-            nn.BatchNorm2d(filters_out)
-            if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
             nn.ReLU(),
             nn.Upsample(scale_factor=2, mode="bilinear"),
         ]
@@ -96,6 +92,7 @@ def ptychonn(config):
     lr_min = config.pop("lr_min", 1e-4) * world_size
     warmup_epochs = config.pop("warmup_epochs", 0)
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
+    num_epochs = config.pop("num_epochs")
     num_samples = config.pop("total_num_samples") / world_size
 
     model = PtychoNNModel()
@@ -103,15 +100,19 @@ def ptychonn(config):
     # https://github.com/bckenstler/CLR
     def triangular2_cyclic_lr(step, lr, max_lr, step_size):
         """
-            step_size: number of epochs to complete a cycle
+        step_size: number of GLOBAL epochs to complete a cycle
         """
-        lr_epoch = step["epoch"] + step["batch"] / num_steps_per_epoch
+        lr_epoch = (
+            step["task_id"] * num_epochs
+            + step["epoch"]
+            + step["batch"] / num_steps_per_epoch
+        )
         cycle = np.floor(1 + lr_epoch / (2 * step_size))
         x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
     def config_by_step(step):
-        step_size = 6
+        step_size = 16
         return {"lr": triangular2_cyclic_lr(step, lr_min, lr, step_size)}
 
     model.regime = [
