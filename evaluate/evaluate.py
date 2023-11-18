@@ -31,7 +31,7 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch, scenario):
         enable_tqdm = get_logging_level() >= logging.INFO and hvd.rank() == 0
         with tqdm(
             total=len(loader),
-            desc=f"Task #{task_id + 1} {prefix} epoch #{epoch}",
+            desc=f"Task #{task_id + 1} {prefix} epoch #{epoch + 1}",
             disable=not enable_tqdm,
         ) as progress:
             start_batch_time = time.perf_counter()
