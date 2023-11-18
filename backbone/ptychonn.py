@@ -111,9 +111,23 @@ def ptychonn(config):
         x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
+    # https://github.com/bckenstler/CLR
+    def exp_range_cyclic_lr(step, lr, max_lr, step_size, gamma=0.992):
+        """
+        step_size: number of GLOBAL epochs to complete a cycle
+        """
+        lr_epoch = (
+            step["task_id"] * num_epochs
+            + step["epoch"]
+            + step["batch"] / num_steps_per_epoch
+        )
+        cycle = np.floor(1 + lr_epoch / (2 * step_size))
+        x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
+        return lr + (max_lr - lr) * np.maximum(0, (1 - x)) * gamma ** (lr_epoch)
+
     def config_by_step(step):
         step_size = 16
-        return {"lr": triangular2_cyclic_lr(step, lr_min, lr, step_size)}
+        return {"lr": exp_range_cyclic_lr(step, lr_min, lr, step_size)}
 
     model.regime = [
         {
