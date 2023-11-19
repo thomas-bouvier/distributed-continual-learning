@@ -45,6 +45,14 @@ Values for `optimizer_regime` will override regimes defined by `backbone/` in Py
 | `--tasksets-config` |   | Scenario configuration, as defined in the [`continuum` package](https://continuum.readthedocs.io/en/latest/tutorials/scenarios/scenarios.html)  | Class-incremental scenario with 2 tasks: `"{'scenario': 'class', 'initial_increment': 5, 'increment': 5}"`<br>Instance-incremental scenario with 2 tasks: `"{'scenario': 'instance', 'num_tasks': 5}"`<br>`"{'concatenate_tasksets': True}"` allows to concatenate previous tasksets before next task |
 | `--dataset` |   | Dataset  | `mnist`, `cifar10`, `cifar100`, `tinyimagenet`, `imagenet`, `imagenet_blurred`, `ptycho` |
 
+### WandB sweeps
+
+To run a hyperparameter search, first adapt the `sweep.py` (located in this directory) file if needed. Then, configure your optimization objective in `sweep.yaml`.
+
+Make sure you exported your WandB API key before running anything `export WANDB_API_KEY=key` and set `WANDB_MODE=run`. Once you are ready, execute the `sweep_launcher.sh <hostname>` script on the master machine, not forgetting to provide the address of the current machine e.g., `chifflot-7.lille.grid5000.fr:1`.
+
+To stop a sweep run, go to the online WandB dashboard and click "Stop run". To stop the whole sweep process, `ps aux | grep 'wandb agent'` on the machine and kill the process.
+
 ## Continual Learning Strategies
 
 Specific implementations have to be selected using `--buffer-config "{'implementation': <implementation>}"`. ER with implementation `standard` was used in the paper.
