@@ -194,7 +194,11 @@ def train(
     epochs: a number of epochs, or a list of number of epochs if you want to be
     task-specific
     """
-    num_tasks = train_data_regime.get("tasks")["num_tasks"]
+    # In case of an in-memory dataset that does not fit entirely in memory,
+    # num_tasks should be defined however len(tasksets) will be wrong.
+    num_tasks = train_data_regime.get("tasks").get("num_tasks") or len(
+        train_data_regime.tasksets
+    )
     if not isinstance(epochs, list):
         epochs = [epochs] * num_tasks
     if len(epochs) < num_tasks:
@@ -293,7 +297,7 @@ def train(
 
                     if hvd.rank() == 0:
                         logging.info(
-                            "RESULTS: Testing loss: {validate[loss]:.4f}\n".format(
+                            "RESULTS: Validate loss: {validate[loss]:.4f}\n".format(
                                 validate=validate_results
                             )
                         )

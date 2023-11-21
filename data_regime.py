@@ -64,6 +64,9 @@ class DataRegime:
         self.data_len = 0
         self.classes_mask = None
 
+        # TODO: temporay hack to load segments of memory independently
+        self.in_memory_shard = 0
+
         self.previous_classes_mask = None
         self.previous_loaders = {}
         self.config = self.get_config(config)
@@ -84,13 +87,34 @@ class DataRegime:
         self.get_data()
 
     def prepare_tasksets(self):
-        dataset, compatibility = get_dataset(**self.config["data"])
-        self.total_num_samples = len(dataset.get_data()[0])
-        scenario = self.get("tasks").get("scenario", None)
-        if scenario:
+        scenario = self.get("tasks").get("scenario", "class")
+        num_tasks = self.get("tasks").get("num_tasks", 1)
+
+        if scenario == "reconstruction":
+            num_train_scans = 150
+            num_in_memory_train_scans = 50
             assert (
-                scenario in compatibility
-            ), f"{self.config['data']['dataset']} is only compatible with {compatibility} scenarios"
+                num_train_scans % num_in_memory_train_scans == 0
+            ), "The total number of reconstruction scans should be a multiple of the number of scans held in memory at once"
+            assert (
+                num_tasks >= num_train_scans // num_in_memory_train_scans
+            ), "Tasks should not overlap multiple scans held in memory"
+
+            dataset, compatibility = get_dataset(
+                **self.config["data"],
+                num_train_scans=num_train_scans,
+                num_in_memory_train_scans=num_in_memory_train_scans,
+            )
+            self.total_num_samples = len(dataset.get_data()[0]) * (
+                num_train_scans // num_in_memory_train_scans
+            )
+        else:
+            dataset, compatibility = get_dataset(**self.config["data"])
+            self.total_num_samples = len(dataset.get_data()[0])
+
+        assert (
+            scenario in compatibility
+        ), f"{self.config['data']['dataset']} is only compatible with {compatibility} scenarios"
 
         if scenario == "class":
             ii = self.config["tasks"].get("initial_increment", 0)
@@ -105,13 +129,14 @@ class DataRegime:
         elif scenario == "instance":
             self.tasksets = InstanceIncremental(
                 dataset,
-                nb_tasks=self.config["tasks"].get("num_tasks", 5),
+                nb_tasks=num_tasks,
                 transformations=[self.config["transform"]["compose"]],
             )
         elif scenario == "reconstruction":
             self.tasksets = ReconstructionIncrementalScenario(
                 dataset,
-                nb_tasks=self.config["tasks"].get("num_tasks", 5),
+                starting_task=self.in_memory_shard * num_in_memory_train_scans,
+                nb_tasks=min(num_tasks, num_in_memory_train_scans),
             )
         else:
             assert not self.config[
@@ -134,6 +159,12 @@ class DataRegime:
         Get the taskset refered to by self.task_id, with all previous data
         accumulated if enabled by parameter `concatenate_tasksets`.
         """
+        # TODO: temporay hack to load segments of memory independently
+        # Only useful when using a ReconstructionIncrementalScenario
+        if self.task_id > 0 and self.task_id % len(self.tasksets) == 0:
+            self.in_memory_shard += 1
+            self.prepare_tasksets(in_memory_shard=self.in_memory_shard)
+
         current_taskset = self.tasksets[self.task_id]
 
         if self.config["data"].get("split") == "train":
@@ -189,6 +220,7 @@ class DataRegime:
         if task_id == self.task_id:
             return self.loader
 
+        # Useful for model validation
         if task_id in self.previous_loaders.keys():
             self.data_len = self.previous_loaders[task_id][1]
             loader = self.previous_loaders[task_id][0]
@@ -280,5 +312,5 @@ class DataRegime:
             "transform": transform_config,
         }
 
-    def get(self, key, default=None):
+    def get(self, key, default={}):
         return self.config.get(key, default)

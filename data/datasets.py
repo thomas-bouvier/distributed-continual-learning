@@ -24,6 +24,9 @@ def get_dataset(
     split="train",
     transform=None,
     dataset_dir="./data",
+    in_memory_shard=0,
+    num_train_scans=1,
+    num_in_memory_train_scans=1,
 ):
     train = split == "train"
     root = os.path.expanduser(dataset_dir)
@@ -105,13 +108,12 @@ def get_dataset(
 
     elif dataset == "ptycho":
         root = os.path.join(root, "Ptycho")
-        logging.info("Assembling Ptycho dataset...")
+        logging.info(f"Assembling Ptycho {split} dataset...")
 
         H = 256
         W = 256
         # reshape all training images to this dimension
         im_shape = (256, 256)
-        num_train_scans = 150
 
         real_space = []
         diff_data = []
@@ -133,6 +135,14 @@ def get_dataset(
             shard_size = len(train_scans) // num_shards
             shard_offset = shard_size * shard_id
             train_scans = train_scans[shard_offset : shard_offset + shard_size]
+
+            # inside the rank shard, take the current in-memory shard
+            in_memory_shard_offset = num_in_memory_train_scans * in_memory_shard
+            train_scans = train_scans[
+                in_memory_shard_offset : min(
+                    in_memory_shard_offset + num_in_memory_train_scans, len(train_scans)
+                )
+            ]
 
             for scan_num in tqdm(
                 train_scans,

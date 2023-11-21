@@ -27,8 +27,10 @@ class ReconstructionIncrementalScenario(_BaseScenario):
         nb_tasks: Optional[int] = None,
         transformations: Union[List[Callable], List[List[Callable]]] = None,
         random_seed: int = 1,
+        starting_task=0,
     ):
         self.cl_dataset = cl_dataset
+        self.starting_task = starting_task
         self._nb_tasks = self._setup(nb_tasks)
         super().__init__(
             cl_dataset=cl_dataset,
@@ -86,7 +88,10 @@ class ReconstructionIncrementalScenario(_BaseScenario):
         )
 
     def _split_dataset(self, y, nb_tasks):
-        tasks_ids = np.repeat(np.arange(nb_tasks), np.shape(y)[0] // nb_tasks)
+        tasks_ids = np.repeat(
+            np.arange(self.starting_task, self.starting_task + nb_tasks),
+            np.shape(y)[0] // nb_tasks,
+        )
         if np.shape(y)[0] % nb_tasks != 0:
             tasks_ids = np.concatenate(
                 (tasks_ids, np.arange(nb_tasks)[: np.shape(y)[0] % nb_tasks])
