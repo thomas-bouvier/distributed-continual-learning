@@ -185,9 +185,9 @@ def get_dataset(
             Y_phi_train = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
 
             logging.debug(f"Train data shape: {X_train.shape}")
-            X_train, Y_I_train, Y_phi_train = shuffle(
-                X_train, Y_I_train, Y_phi_train, random_state=0
-            )
+            # X_train, Y_I_train, Y_phi_train = shuffle(
+            #    X_train, Y_I_train, Y_phi_train, random_state=0
+            # )
 
             # Training data
             X_train_tensor = torch.Tensor(X_train)

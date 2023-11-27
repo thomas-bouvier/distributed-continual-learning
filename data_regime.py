@@ -86,13 +86,13 @@ class DataRegime:
         self.prepare_tasksets()
         self.get_data()
 
-    def prepare_tasksets(self):
+    def prepare_tasksets(self, in_memory_shard=0):
         scenario = self.get("tasks").get("scenario", "class")
         num_tasks = self.get("tasks").get("num_tasks", 1)
 
         if scenario == "reconstruction":
             num_train_scans = 150
-            num_in_memory_train_scans = 50
+            num_in_memory_train_scans = 25
             assert (
                 num_train_scans % num_in_memory_train_scans == 0
             ), "The total number of reconstruction scans should be a multiple of the number of scans held in memory at once"
@@ -135,7 +135,7 @@ class DataRegime:
         elif scenario == "reconstruction":
             self.tasksets = ReconstructionIncrementalScenario(
                 dataset,
-                starting_task=self.in_memory_shard * num_in_memory_train_scans,
+                starting_task=in_memory_shard * num_in_memory_train_scans,
                 nb_tasks=min(num_tasks, num_in_memory_train_scans),
             )
         else:

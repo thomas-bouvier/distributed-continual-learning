@@ -42,6 +42,7 @@ class Buffer:
         budget_per_class=16,
         num_representatives=8,
         num_candidates=8,
+        augmentations_offset=0,
         provider="na+sm",
         discover_endpoints=True,
         cuda=True,
@@ -59,6 +60,7 @@ class Buffer:
         self.budget_per_class = budget_per_class
         self.num_representatives = num_representatives
         self.num_candidates = num_candidates
+        self.augmentations_offset = augmentations_offset
         self.next_minibatches = []
         self.mode = mode
         self.implementation = implementation
@@ -161,9 +163,10 @@ class Buffer:
 
         if self.high_performance and self.implementation == "flyweight":
             self.dsl.use_these_allocated_variables(
-                self.next_minibatches[0].x,
-                self.next_minibatches[0].y,
-                self.next_minibatches[0].w,
+                self.next_minibatches[0].input,
+                self.next_minibatches[0].ground_truth,
+                self.next_minibatches[0].labels,
+                self.next_minibatches[0].weights,
             )
 
     def update(self, x, y, step, batch_metrics=None, ground_truth=[]):
@@ -364,7 +367,13 @@ class Buffer:
                 else:
                     next_minibatch = self.__get_next_augmented_minibatch(step)
                     self.dsl.accumulate(
-                        x, y, next_minibatch.x, next_minibatch.y, next_minibatch.w
+                        x,
+                        y,
+                        ground_truth,
+                        next_minibatch.input,
+                        next_minibatch.labels,
+                        next_minibatch.weights,
+                        next_minibatch.ground_truth,
                     )
         else:
             for i in range(len(y)):

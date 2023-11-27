@@ -9,7 +9,7 @@ from torch.cuda.amp import autocast
 from modules import ContinualLearner, Buffer
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
-
+from utils.log import display
 
 __all__ = ["Er"]
 
@@ -61,7 +61,7 @@ class Er(ContinualLearner):
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
-        if task_id > 0 or self.nsys_run:
+        if task_id > self.buffer.augmentations_offset or self.nsys_run:
             self.buffer.enable_augmentations()
         if task_id > 0 and self.nsys_run:
             # todo: this function doesn't exist, so the app will be killed.
@@ -179,6 +179,15 @@ class Er(ContinualLearner):
                 batch_metrics=self.batch_metrics,
                 ground_truth=[amp_batch, ph_batch],
             )
+
+            """
+            if hvd.rank() == 0 and step["batch"] % 10 == 0:
+                repr_size = aug_x.size(0) - self.batch_size
+                if repr_size > 0:
+                    display(f"aug_x_{step['task_id']}_{step['epoch']}_{step['batch']}", aug_x[-repr_size:])
+                    display(f"aug_amp_{step['task_id']}_{step['epoch']}_{step['batch']}", aug_ground_truth[0][-repr_size:])
+                    display(f"aug_ph_{step['task_id']}_{step['epoch']}_{step['batch']}", aug_ground_truth[1][-repr_size:])
+            """
 
             with get_timer(
                 "train",

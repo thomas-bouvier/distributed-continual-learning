@@ -1,19 +1,21 @@
-method: bayes
+method: random
 metric:
   name: continual_val_loss_ph
   goal: minimize
 parameters:
+  augmentations-offset:
+    values: [0, 10, 25, 50, 75]
   lr:
-    min: 0.001
-    max: 0.004
+    min: 0.0005
+    max: 0.002
   batch-size:
-    values: [16, 24, 32, 48, 64]
+    values: [16, 24, 32, 48]
   num-representatives:
-    values: [1, 4, 8, 12, 16, 24, 32, 48, 64]
+    values: [0, 1, 4, 8, 12, 16]
   num-candidates:
     values: [1, 4, 8, 12, 16, 24, 32]
   rehearsal-ratio:
-    values: [5, 10, 20, 30]
+    values: [1, 2, 5, 10, 20, 30]
 command:
   - python
   - sweep.py
