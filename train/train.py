@@ -63,7 +63,9 @@ def train_one_epoch(
         for data in loader:
             timer.__exit__(None, None, None)
 
-            step = dict(task_id=task_id, epoch=epoch, batch=batch)
+            step = dict(
+                task_id=task_id, epoch=epoch, batch=batch, global_epoch=global_epoch
+            )
             train_fn = (
                 model.train_one_step
                 if scenario != "reconstruction"

@@ -218,6 +218,7 @@ class Er(ContinualLearner):
                 meters["loss_amp"].update(amp_loss.sum() / aug_x.size(0))
                 meters["loss_ph"].update(ph_loss.sum() / aug_x.size(0))
                 meters["num_samples"].update(aug_x.size(0))
+                meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_recon_one_step(self, data, meters, step):
         x, _, amp, ph, _ = data
