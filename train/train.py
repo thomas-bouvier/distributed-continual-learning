@@ -255,20 +255,32 @@ def train(
             )
 
             if hvd.rank() == 0:
-                meters = {}
-                for key, value in train_results.items():
-                    meters[f"train_{key}"] = train_results[key]
-                wandb.log(
-                    {
-                        "epoch": global_epoch,
-                        **meters,
-                    }
+                img_sec = (
+                    len(loader) * train_results["num_samples"] / train_results["time"]
+                )
+                img_secs.append(img_sec)
+                logging.info(
+                    "\nRESULTS: Time taken for epoch {} on {} device(s) is {} sec\n"
+                    "Average: {} samples/sec per device\n"
+                    "Average on {} device(s): {} samples/sec\n".format(
+                        epoch + 1,
+                        hvd.size(),
+                        train_results["time"],
+                        img_sec,
+                        hvd.size(),
+                        img_sec * hvd.size(),
+                    )
+                )
+                logging.info(
+                    "Training loss: {train[loss]:.4f}\n".format(
+                        train=train_results,
+                    )
                 )
 
             # evaluate on test set
             before_evaluate_time = time.perf_counter()
             tasks_meters = []
-            if evaluate or epoch + 1 == epochs[task_id]:
+            if evaluate and epoch + 1 == epochs[task_id]:
                 for test_task_id in range(0, task_id + 1):
                     logging.info(
                         f"EVALUATING on task {test_task_id + 1}..{task_id + 1}"
@@ -328,13 +340,24 @@ def train(
 
                 if hvd.rank() == 0:
                     meters = {}
+                    for key, value in train_results.items():
+                        meters[f"train_{key}"] = train_results[key]
+
+                    continual_meters = {}
                     for key in metrics_to_average:
-                        meters[f"continual_task1_val_{key}"] = tasks_meters[0][key]
-                        meters[f"continual_val_{key}"] = averages[key]
+                        continual_meters[f"continual_task1_val_{key}"] = tasks_meters[
+                            0
+                        ][key]
+                        continual_meters[f"continual_val_{key}"] = averages[key]
+
+                        logging.info(
+                            f"Averaged eval {key} on all previous tasks: {averages[key]}"
+                        )
                     wandb.log(
                         {
                             "epoch": global_epoch,
                             **meters,
+                            **continual_meters,
                         }
                     )
 
@@ -351,33 +374,8 @@ def train(
             global_epoch += 1
             global_batch += train_results["batch"]
 
+            # Log metrics
             if hvd.rank() == 0:
-                img_sec = (
-                    len(loader) * train_results["num_samples"] / train_results["time"]
-                )
-                img_secs.append(img_sec)
-                logging.info(
-                    "\nRESULTS: Time taken for epoch {} on {} device(s) is {} sec\n"
-                    "Average: {} samples/sec per device\n"
-                    "Average on {} device(s): {} samples/sec\n".format(
-                        epoch + 1,
-                        hvd.size(),
-                        train_results["time"],
-                        img_sec,
-                        hvd.size(),
-                        img_sec * hvd.size(),
-                    )
-                )
-                for key in metrics_to_average:
-                    logging.info(
-                        f"Averaged eval {key} on all previous tasks: {averages[key]}"
-                    )
-                logging.info(
-                    "Training loss: {train[loss]:.4f}\n".format(
-                        train=train_results,
-                    )
-                )
-
                 # DL metrics
                 dl_metrics_values = dict(
                     task_id=task_id,
@@ -444,8 +442,12 @@ def train(
                 hvd.size() * img_sec_conf,
             )
         )
-        for key in metrics_to_average:
-            logging.info(f"Averaged eval {key} on all previous tasks: {averages[key]}")
+
+        if evaluate:
+            for key in metrics_to_average:
+                logging.info(
+                    f"Averaged eval {key} on all previous tasks: {averages[key]}"
+                )
 
         values = {
             "total_time": total_time,
@@ -456,3 +458,11 @@ def train(
         if time_metrics is not None:
             time_metrics.add(**values)
             time_metrics.save()
+
+    return {
+        "task": num_tasks - 1,
+        "epoch": global_epoch,
+        "model": model.__class__.__name__,
+        "state_dict": model.backbone.state_dict(),
+        "optimizer_state_dict": model.optimizer_regime.state_dict(),
+    }

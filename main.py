@@ -553,13 +553,14 @@ class Experiment:
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
 
-        train(
+        final_checkpoint_info = train(
             self.model,
             self.train_data_regime,
             self.validate_data_regime,
             literal_eval(self.args.tasksets_config).get("epochs", self.args.epochs),
             resume_from_task=self.resume_from_task,
             resume_from_epoch=self.resume_from_epoch,
+            evaluate=self.args.evaluate,
             log_interval=self.args.log_interval,
             dl_metrics=dl_metrics,
             tasks_metrics=tasks_metrics,
@@ -567,13 +568,7 @@ class Experiment:
         )
 
         save_checkpoint(
-            {
-                "task": len(self.train_data_regime.tasksets) - 1,
-                "epoch": self.args.epochs - 1,
-                "model": self.args.backbone,
-                "state_dict": self.model.backbone.state_dict(),
-                "optimizer_state_dict": self.model.optimizer_regime.state_dict(),
-            },
+            final_checkpoint_info,
             self.save_path,
             is_final=True,
             dummy=hvd.rank() > 0,
