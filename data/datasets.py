@@ -126,7 +126,7 @@ def get_dataset(
             mean_phsqr_val = 0.02
 
             train_scans = list(range(204, 340 + 1))
-            train_scans += list(range(457, 479 + 1))
+            train_scans += list(range(457, 486 + 1))
             train_scans = train_scans[: min(num_train_scans, len(train_scans))]
 
             # shard training scans from the rank
@@ -149,24 +149,46 @@ def get_dataset(
                 desc="Loading ptychography scans",
             ):
                 r_space = np.load(f"{root}/train/{scan_num}/patched_psi.npy")
+
+                random.seed(42)
+                num_samples_eval = int(0.1 * len(r_space))
+                random_indices = random.sample(range(len(r_space)), num_samples_eval)
+                if not train:
+                    r_space = r_space[random_indices]
+                else:
+                    train_indices = []
+                    for i in range(len(r_space)):
+                        if i not in random_indices:
+                            train_indices.append(i)
+                    r_space = r_space[train_indices]
+
+                # permutation_indices = np.random.permutation(len(r_space))
+                # N_TRAIN = len(r_space)
+                # N_VALID = int(0.2 * N_TRAIN)
+                # if train:
+                #    r_space = r_space[: N_TRAIN - N_VALID]
+                # else:
+                #    r_space = r_space[N_TRAIN - N_VALID : N_TRAIN]
+                # r_space = r_space[permutation_indices]
+
                 real_space.append(r_space)
                 ampli = np.abs(r_space)
                 amp_data.append(ampli)
                 phase = np.angle(r_space)
                 ph_data.append(phase)
-
                 diff_data.append(
-                    np.load(f"{root}/train/{scan_num}/cropped_exp_diffr_data.npy")
+                    np.load(
+                        f"{root}/train/{scan_num}/cropped_exp_diffr_data.npy"
+                    )  # [permutation_indices]
                 )
 
+            logging.info("Converting the data to np array...")
             if len(diff_data) != 1:
                 total_data_diff = np.concatenate(diff_data)
             else:
                 _ = np.asarray(diff_data, dtype="float32")
                 _ = _[0, :, :, :]
                 total_data_diff = _[:, np.newaxis, :, :]
-
-            logging.info("Converting the data to np array...")
             total_data_amp = np.concatenate(amp_data)
             total_data_phase = np.concatenate(ph_data)
 
@@ -201,6 +223,7 @@ def get_dataset(
                 """
             )
 
+            """
             N_TRAIN = X_train_tensor.shape[0]
             N_VALID = int(0.2 * N_TRAIN)
 
@@ -216,7 +239,12 @@ def get_dataset(
                     Y_I_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
                     Y_phi_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
                 ), ["reconstruction"]
-
+            """
+            return ReconstructionInMemoryDataset(
+                X_train_tensor,
+                Y_I_train_tensor,
+                Y_phi_train_tensor,
+            ), ["reconstruction"]
         else:
             start_scan = 489
             end_scan = 489

@@ -91,8 +91,8 @@ class DataRegime:
         num_tasks = self.get("tasks").get("num_tasks", 1)
 
         if scenario == "reconstruction":
-            num_train_scans = 150
-            num_in_memory_train_scans = 25
+            num_train_scans = 168
+            num_in_memory_train_scans = 42
             assert (
                 num_train_scans % num_in_memory_train_scans == 0
             ), "The total number of reconstruction scans should be a multiple of the number of scans held in memory at once"
@@ -175,6 +175,8 @@ class DataRegime:
                     logging.debug(
                         f"DATA LOADER {self.config['data']['split']} - concatenating taskset with all previous ones.."
                     )
+                    self.concat_taskset.concat(current_taskset)
+                    """
                     x, y, t = self.concat_taskset.get_raw_samples(
                         np.arange(len(self.concat_taskset))
                     )
@@ -191,6 +193,7 @@ class DataRegime:
                         trsf=current_taskset.trsf,
                         data_type=current_taskset.data_type,
                     )
+                    """
                 return self.concat_taskset
 
         # Update the mask of observed classes so far
