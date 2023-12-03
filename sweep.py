@@ -24,8 +24,9 @@ command = (
     f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 3, 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'rehearsal_ratio': {args.rehearsal_ratio}, 'augmentations_offset': {args.augmentations_offset}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
     f"--batch-size {args.batch_size} "
     f"--lr {args.lr} "
-    f"--epochs 1 "
+    f"--epochs 15 "
     f"--use-amp "
+    f"--load-checkpoint /root/distributed-continual-learning/checkpoint_initial_ptychonn_1.pth.tar "
 )
 
 os.system(command)
