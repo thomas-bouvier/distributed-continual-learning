@@ -1,6 +1,7 @@
 import os
 import shutil
 import torch
+import wandb
 
 
 def save_checkpoint(
@@ -19,7 +20,9 @@ def save_checkpoint(
     filename = os.path.join(save_path, filename)
     torch.save(state, filename)
     if is_initial:
-        shutil.copyfile(filename, os.path.join(save_path, "checkpoint_initial.pth.tar"))
+        file_path = os.path.join(save_path, "checkpoint_initial.pth.tar")
+        shutil.copyfile(filename, file_path)
+        wandb.save(file_path)
     if is_final:
         shutil.copyfile(filename, os.path.join(save_path, "checkpoint_final.pth.tar"))
     if is_best:

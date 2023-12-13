@@ -94,6 +94,9 @@ def ptychonn(config):
     num_steps_per_epoch = config.pop("num_steps_per_epoch")
     num_epochs = config.pop("num_epochs")
     num_samples = config.pop("total_num_samples") / world_size
+    epoch_cycle_size = config.pop("epoch_cycle_size", 16)
+    weight_decay = config.pop("weight_decay", 0.001)
+    lr_schedule = config.pop("lr_schedule", "exp_range_cyclic_lr")
 
     model = PtychoNNModel()
 
@@ -118,7 +121,7 @@ def ptychonn(config):
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
     # https://github.com/bckenstler/CLR
-    def exp_range_cyclic_lr(step, lr, max_lr, step_size, gamma=0.992):
+    def exp_range_cyclic_lr(step, lr, max_lr, step_size, gamma=0.996):
         """
         step_size: number of GLOBAL epochs to complete a cycle
         """
@@ -127,14 +130,22 @@ def ptychonn(config):
         x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) * gamma ** (lr_epoch)
 
+    schedules = {
+        "triangular_cyclic_lr": triangular_cyclic_lr,
+        "triangular2_cyclic_lr": triangular2_cyclic_lr,
+        "exp_range_cyclic_lr": exp_range_cyclic_lr,
+    }
+
     def config_by_step(step):
-        step_size = 16
-        return {"lr": exp_range_cyclic_lr(step, lr_min, lr, step_size)}
+        return {"lr": schedules[lr_schedule](step, lr_min, lr, epoch_cycle_size)}
+
+    print(f"{lr_schedule} {weight_decay} {epoch_cycle_size}")
 
     model.regime = [
         {
             "epoch": 0,
             "optimizer": "Adam",
+            # "weight_decay": weight_decay,
             "step_lambda": config_by_step,
         }
     ]

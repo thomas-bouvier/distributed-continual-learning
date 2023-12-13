@@ -9,6 +9,7 @@ from continuum import datasets
 from continuum.datasets import _ContinuumDataset
 from continuum.tasks import TaskType
 from filelock import FileLock
+from random import shuffle
 from scipy.stats import circmean
 from sklearn.utils import shuffle
 from tqdm import tqdm
@@ -116,7 +117,7 @@ def get_dataset(
         im_shape = (256, 256)
 
         real_space = []
-        diff_data = []
+        diffraction_data = []
         amp_data = []
         ph_data = []
 
@@ -149,44 +150,38 @@ def get_dataset(
                 desc="Loading ptychography scans",
             ):
                 r_space = np.load(f"{root}/train/{scan_num}/patched_psi.npy")
+                diff_data = np.load(
+                    f"{root}/train/{scan_num}/cropped_exp_diffr_data.npy"
+                )
 
                 random.seed(42)
                 num_samples_eval = int(0.1 * len(r_space))
                 random_indices = random.sample(range(len(r_space)), num_samples_eval)
                 if not train:
                     r_space = r_space[random_indices]
+                    diff_data = diff_data[random_indices]
                 else:
                     train_indices = []
                     for i in range(len(r_space)):
                         if i not in random_indices:
                             train_indices.append(i)
+                    # Shuffle inside the current scan position
+                    #train_indices = shuffle(train_indices)
                     r_space = r_space[train_indices]
-
-                # permutation_indices = np.random.permutation(len(r_space))
-                # N_TRAIN = len(r_space)
-                # N_VALID = int(0.2 * N_TRAIN)
-                # if train:
-                #    r_space = r_space[: N_TRAIN - N_VALID]
-                # else:
-                #    r_space = r_space[N_TRAIN - N_VALID : N_TRAIN]
-                # r_space = r_space[permutation_indices]
+                    diff_data = diff_data[train_indices]
 
                 real_space.append(r_space)
+                diffraction_data.append(diff_data)
                 ampli = np.abs(r_space)
                 amp_data.append(ampli)
                 phase = np.angle(r_space)
                 ph_data.append(phase)
-                diff_data.append(
-                    np.load(
-                        f"{root}/train/{scan_num}/cropped_exp_diffr_data.npy"
-                    )  # [permutation_indices]
-                )
 
             logging.info("Converting the data to np array...")
-            if len(diff_data) != 1:
-                total_data_diff = np.concatenate(diff_data)
+            if len(diffraction_data) != 1:
+                total_data_diff = np.concatenate(diffraction_data)
             else:
-                _ = np.asarray(diff_data, dtype="float32")
+                _ = np.asarray(diffraction_data, dtype="float32")
                 _ = _[0, :, :, :]
                 total_data_diff = _[:, np.newaxis, :, :]
             total_data_amp = np.concatenate(amp_data)
@@ -207,6 +202,8 @@ def get_dataset(
             Y_phi_train = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
 
             logging.debug(f"Train data shape: {X_train.shape}")
+
+            # Shuffle across all scan positions, this is not streaming anymore!!
             # X_train, Y_I_train, Y_phi_train = shuffle(
             #    X_train, Y_I_train, Y_phi_train, random_state=0
             # )
@@ -223,23 +220,6 @@ def get_dataset(
                 """
             )
 
-            """
-            N_TRAIN = X_train_tensor.shape[0]
-            N_VALID = int(0.2 * N_TRAIN)
-
-            if train:
-                return ReconstructionInMemoryDataset(
-                    X_train_tensor[: N_TRAIN - N_VALID],
-                    Y_I_train_tensor[: N_TRAIN - N_VALID],
-                    Y_phi_train_tensor[: N_TRAIN - N_VALID],
-                ), ["reconstruction"]
-            else:
-                return ReconstructionInMemoryDataset(
-                    X_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
-                    Y_I_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
-                    Y_phi_train_tensor[N_TRAIN - N_VALID : N_TRAIN],
-                ), ["reconstruction"]
-            """
             return ReconstructionInMemoryDataset(
                 X_train_tensor,
                 Y_I_train_tensor,
@@ -260,14 +240,14 @@ def get_dataset(
                 phase = np.angle(r_space)
                 ph_data.append(phase)
 
-                diff_data.append(
+                diffraction_data.append(
                     np.load(f"{root}/test/{scan_num}/cropped_exp_diffr_data.npy")
                 )
 
-            if len(diff_data) != 1:
-                total_data_diff = np.concatenate(diff_data)
+            if len(diffraction_data) != 1:
+                total_data_diff = np.concatenate(diffraction_data)
             else:
-                _ = np.asarray(diff_data, dtype="float32")
+                _ = np.asarray(diffraction_data, dtype="float32")
                 _ = _[0, :, :, :]
                 total_data_diff = _[:, np.newaxis, :, :]
 

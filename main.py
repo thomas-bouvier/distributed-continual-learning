@@ -479,21 +479,19 @@ class Experiment:
         ).item()
 
         # Saving an initial checkpoint
-        """
         save_checkpoint(
             {
                 "task": 0,
                 "epoch": 0,
                 "model": self.args.backbone,
                 "state_dict": self.model.backbone.state_dict(),
-                #"optimizer_state_dict": self.model.optimizer_regime.state_dict(),
+                # "optimizer_state_dict": self.model.optimizer_regime.state_dict(),
             },
             self.save_path,
             is_initial=True,
             dummy=hvd.rank() > 0,
         )
         logging.info(f"Initial checkpoint created")
-        """
 
     def prepare_dataset(self):
         defaults = {
