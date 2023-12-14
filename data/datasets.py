@@ -166,7 +166,7 @@ def get_dataset(
                         if i not in random_indices:
                             train_indices.append(i)
                     # Shuffle inside the current scan position
-                    #train_indices = shuffle(train_indices)
+                    # train_indices = shuffle(train_indices)
                     r_space = r_space[train_indices]
                     diff_data = diff_data[train_indices]
 

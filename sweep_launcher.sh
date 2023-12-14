@@ -2,7 +2,8 @@
 
 HOST="$1"
 WANDB_PROJECT="$2"
-SWEEP_ID="$3"
+SWEEP_CONF="$3"
+SWEEP_ID="$4"
 
 # Check if WANDB_MODE is set
 if [ -z "$WANDB_MODE" ]; then
@@ -30,17 +31,24 @@ fi
 
 # Check if HOST is set
 if [ -z "$HOST" ]; then
-  echo "Error: HOST is not set. Please provide it with ./sweep_launcher <host> <wandb_project>."
+  echo "Error: HOST is not set. Please provide it with ./sweep_launcher <host> <wandb_project> <sweep_conf>."
   exit 1
 fi
 
 # Check if WANDB_PROJECT is set
 if [ -z "$WANDB_PROJECT" ]; then
-  echo "Error: WANDB_PROJECT is not set. Please provide it with ./sweep_launcher <host> <wandb_project>."
+  echo "Error: WANDB_PROJECT is not set. Please provide it with ./sweep_launcher <host> <wandb_project> <sweep_conf>."
+  exit 1
+fi
+
+# Check if SWEEP_CONF is set
+if [ -z "$SWEEP_CONF" ]; then
+  echo "Error: SWEEP_CONF is not set. This corresponds to a key in sweep.py. Please provide it with ./sweep_launcher <host> <wandb_project> <sweep_conf>."
   exit 1
 fi
 
 cd /root/distributed-continual-learning/ && sed -i "s/host = .*/host = \"$HOST\"/g" "sweep.py"
+cd /root/distributed-continual-learning/ && sed -i "s/sweep_conf = .*/sweep_conf = \"$SWEEP_CONF\"/g" "sweep.py"
 
 cd /root/distributed-continual-learning/ && git config --global --add safe.directory /root/distributed-continual-learning
 
