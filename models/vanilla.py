@@ -137,7 +137,7 @@ class Vanilla(ContinualLearner):
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
 
-                meters["loss"].update(loss.sum(), loss.size(0))
+                meters["loss"].update(loss.sum() / loss.size(0))
                 meters["loss_amp"].update(amp_loss.sum() / amp_loss.size(0))
                 meters["loss_ph"].update(ph_loss.sum() / ph_loss.size(0))
                 meters["num_samples"].update(x_batch.size(0))
@@ -152,7 +152,7 @@ class Vanilla(ContinualLearner):
             ph_loss = self.criterion(ph_output, ph)
             loss = amp_loss + ph_loss
 
-        meters["loss"].update(loss.sum(), loss.size(0))
+        meters["loss"].update(loss.sum() / loss.size(0))
         meters["loss_amp"].update(amp_loss.sum() / amp_loss.size(0))
         meters["loss_ph"].update(ph_loss.sum() / ph_loss.size(0))
         meters["num_samples"].update(x.size(0))
