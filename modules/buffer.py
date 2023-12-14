@@ -326,7 +326,7 @@ class Buffer:
                     for r in range(0, self.num_samples_per_representative - 1):
                         j = index + r + 1
                         minibatch.ground_truth[r].index_put_(
-                            ti, self.rehearsal_tensor[index].to(device)
+                            ti, self.rehearsal_tensor[j].to(device)
                         )
 
                     minibatch.labels.index_put_(ti, torch.tensor(k, device=device))

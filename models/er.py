@@ -61,7 +61,7 @@ class Er(ContinualLearner):
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
-        if task_id > self.buffer.augmentations_offset or self.nsys_run:
+        if task_id >= self.buffer.augmentations_offset or self.nsys_run:
             self.buffer.enable_augmentations()
         if task_id > 0 and self.nsys_run:
             # todo: this function doesn't exist, so the app will be killed.
