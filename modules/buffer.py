@@ -317,25 +317,23 @@ class Buffer:
                     ti = (torch.tensor([aug_size]),)
                     device = minibatch.input.device
 
+                    j = index * self.num_samples_per_representative
+
                     # input tensor
-                    minibatch.input.index_put_(
-                        ti, self.rehearsal_tensor[index].to(device)
-                    )
+                    minibatch.input.index_put_(ti, self.rehearsal_tensor[j].to(device))
 
                     # other ground_truth tensors
                     for r in range(0, self.num_samples_per_representative - 1):
-                        j = index + r + 1
+                        k = j + r + 1
                         minibatch.ground_truth[r].index_put_(
-                            ti, self.rehearsal_tensor[j].to(device)
+                            ti, self.rehearsal_tensor[k].to(device)
                         )
 
                     minibatch.labels.index_put_(ti, torch.tensor(k, device=device))
                     minibatch.weights.index_put_(
                         ti, torch.tensor(v["weight"], device=device)
                     )
-                    minibatch.logits.index_put_(
-                        ti, self.rehearsal_logits[index].to(device)
-                    )
+                    minibatch.logits.index_put_(ti, self.rehearsal_logits[j].to(device))
                     aug_size += 1
 
         return aug_size
@@ -389,14 +387,16 @@ class Buffer:
                     index = random.randint(0, self.budget_per_class - 1)
 
                 # input tensor
-                j = self.budget_per_class * label + index
+                j = (
+                    self.budget_per_class * label + index
+                ) * self.num_samples_per_representative
                 self.rehearsal_tensor.index_put_((torch.tensor([j]),), x[i].cpu())
 
                 # other ground_truth tensors
                 for r in range(0, self.num_samples_per_representative - 1):
-                    j = self.budget_per_class * label + index + r + 1
+                    k = j + r + 1
                     self.rehearsal_tensor.index_put_(
-                        (torch.tensor([j]),), ground_truth[r][i].cpu()
+                        (torch.tensor([k]),), ground_truth[r][i].cpu()
                     )
 
                 if index >= self.rehearsal_metadata[label][0]:
