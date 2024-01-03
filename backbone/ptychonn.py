@@ -103,21 +103,23 @@ def ptychonn(config):
     # https://github.com/bckenstler/CLR
     def triangular_cyclic_lr(step, lr, max_lr, step_size):
         """
-        step_size: number of GLOBAL epochs to complete a cycle
+        step_size: number of GLOBAL batches to complete a cycle
         """
-        lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
-        cycle = np.floor(1 + lr_epoch / (2 * step_size))
-        x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
+        lr_batch = step["global_batch"]
+        # lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
+        cycle = np.floor(1 + lr_batch / (2 * step_size))
+        x = np.abs(lr_batch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x))
 
     # https://github.com/bckenstler/CLR
     def triangular2_cyclic_lr(step, lr, max_lr, step_size):
         """
-        step_size: number of GLOBAL epochs to complete a cycle
+        step_size: number of GLOBAL batches to complete a cycle
         """
-        lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
-        cycle = np.floor(1 + lr_epoch / (2 * step_size))
-        x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
+        lr_batch = step["global_batch"]
+        # lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
+        cycle = np.floor(1 + lr_batch / (2 * step_size))
+        x = np.abs(lr_batch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
     # https://github.com/bckenstler/CLR
@@ -125,9 +127,10 @@ def ptychonn(config):
         """
         step_size: number of GLOBAL epochs to complete a cycle
         """
+        lr_batch = step["global_batch"]
         lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
-        cycle = np.floor(1 + lr_epoch / (2 * step_size))
-        x = np.abs(lr_epoch / step_size - 2 * cycle + 1)
+        cycle = np.floor(1 + lr_batch / (2 * step_size))
+        x = np.abs(lr_batch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) * gamma ** (lr_epoch)
 
     schedules = {
@@ -139,13 +142,10 @@ def ptychonn(config):
     def config_by_step(step):
         return {"lr": schedules[lr_schedule](step, lr_min, lr, epoch_cycle_size)}
 
-    print(f"{lr_schedule} {weight_decay} {epoch_cycle_size}")
-
     model.regime = [
         {
             "epoch": 0,
             "optimizer": "Adam",
-            # "weight_decay": weight_decay,
             "step_lambda": config_by_step,
         }
     ]
