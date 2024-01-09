@@ -1,8 +1,9 @@
 import collections
 import numpy as np
-import types
 import nvidia.dali.types as types
 import nvidia.dali.fn as fn
+import random
+import tempfile
 import torch
 
 from continuum.tasks import TaskType
@@ -72,10 +73,10 @@ class ExternalInputCallable:
         return encoded_img, label, np.int32([self.task_id])
 
 
-class DaliDataLoader(object):
+class DaliDataLoader:
     def __init__(
         self,
-        dataset,
+        taskset,
         task_id,
         batch_size=1,
         num_workers=1,
@@ -84,7 +85,7 @@ class DaliDataLoader(object):
         num_shards=1,
         precision=32,
         training=True,
-        **kwargs
+        **kwargs,
     ):
         cuda = torch.cuda.is_available()
         decoder_device, device = ("mixed", "gpu") if cuda else ("cpu", "cpu")
@@ -100,7 +101,7 @@ class DaliDataLoader(object):
         preallocate_height_hint = 6430 if decoder_device == "mixed" else 0
 
         self.external_data = ExternalInputCallable(
-            dataset, task_id, batch_size, shard_id, num_shards
+            taskset, task_id, batch_size, shard_id, num_shards
         )
 
         @pipeline_def(
@@ -111,16 +112,17 @@ class DaliDataLoader(object):
             py_start_method="spawn",
         )
         def callable_pipeline():
-            inputs, target, task_ids = fn.external_source(
+            images, target, task_ids = fn.external_source(
                 source=self.external_data,
                 num_outputs=3,
                 dtype=[types.UINT8, types.INT64, types.INT32],
                 batch=False,
                 parallel=True,
             )
+
             if training:
                 images = fn.decoders.image_random_crop(
-                    inputs,
+                    images,
                     device=decoder_device,
                     output_type=types.RGB,
                     device_memory_padding=device_memory_padding,
@@ -161,9 +163,11 @@ class DaliDataLoader(object):
                 std=[0.229 * 255, 0.224 * 255, 0.225 * 255],
                 mirror=mirror,
             )
+
             if cuda:
                 target = target.gpu()
                 task_ids = task_ids.gpu()
+
             return images, target, task_ids
 
         self.pipeline = callable_pipeline()
@@ -190,3 +194,234 @@ class DaliDataLoader(object):
             y = token[0]["y"].squeeze()
             t = token[0]["t"].squeeze()
             yield [x, y, t]
+
+
+class PtychoExternalInputCallable:
+    def __init__(
+        self, taskset, task_id, batch_size, shard_id, num_shards, training=True
+    ):
+        self.task_id = task_id
+        self.batch_size = batch_size
+        self.shard_id = shard_id
+        self.num_shards = num_shards
+
+        file_paths = taskset.get_raw_samples()[0]
+        diffraction_paths = [f"{p}/cropped_exp_diffr_data.npy" for p in file_paths]
+        rspace_paths = [f"{p}/patched_psi.npy" for p in file_paths]
+
+        task_diff_data = np.array([])
+        task_ampli_data = np.array([])
+        task_phase_data = np.array([])
+        for i, _ in enumerate(file_paths):
+            # Calculating the phase and amplitude from the real-space data
+            rspace_data = np.load(rspace_paths[i])
+            ampli_data = np.abs(rspace_data)
+            phase_data = np.angle(rspace_data)
+
+            # Filtering out void patterns
+            av_vals = np.mean(phase_data**2, axis=(1, 2))
+            mean_phsqr_val = 0.02
+            idx = np.argwhere(av_vals >= mean_phsqr_val)
+
+            # Concatenating scan positions for this task
+            diff_data = np.load(diffraction_paths[i])
+            if len(task_diff_data) == 0:
+                task_diff_data = diff_data[idx]
+                task_ampli_data = ampli_data[idx]
+                task_phase_data = phase_data[idx]
+            else:
+                task_diff_data = np.concatenate([diff_data[idx], task_diff_data])
+                task_ampli_data = np.concatenate([ampli_data[idx], task_ampli_data])
+                task_phase_data = np.concatenate([phase_data[idx], task_phase_data])
+
+        # Preparing the train/validation sets
+        random.seed(42)
+        num_samples_eval = int(0.1 * len(task_diff_data))
+        random_indices = random.sample(range(len(task_diff_data)), num_samples_eval)
+
+        shard_size = (
+            (len(task_diff_data) - num_samples_eval) // num_shards
+            if training
+            else num_samples_eval // num_shards
+        )
+        shard_offset = shard_id * shard_size
+        random_indices = random_indices[shard_offset : shard_offset + shard_size]
+
+        if training:
+            train_indices = []
+            for j in range(shard_size):
+                if j not in random_indices:
+                    train_indices.append(j)
+            # Shuffle inside the current scan position
+            # train_indices = shuffle(train_indices)
+            random_indices = train_indices
+
+        diff_data = task_diff_data[random_indices]
+        ampli_data = task_ampli_data[random_indices]
+        phase_data = task_phase_data[random_indices]
+
+        H = 256
+        W = 256
+        diff_data = diff_data.reshape(-1, H, W)[:, np.newaxis, :, :]
+        self.diff_data = diff_data.astype("float32")
+        self.ampli_data = ampli_data.reshape(-1, H, W)[:, np.newaxis, :, :]
+        self.phase_data = phase_data.reshape(-1, H, W)[:, np.newaxis, :, :]
+
+        self.full_iterations = len(self.diff_data) // batch_size
+
+    def __call__(self, sample_info):
+        if sample_info.iteration >= self.full_iterations:
+            raise StopIteration
+        sample_idx = sample_info.idx_in_epoch
+        return (
+            self.diff_data[sample_idx],
+            self.ampli_data[sample_idx],
+            self.phase_data[sample_idx],
+            np.int32([self.task_id]),
+        )
+
+
+class PtychoDaliDataLoader:
+    def __init__(
+        self,
+        taskset,
+        task_id,
+        batch_size=1,
+        num_workers=1,
+        device_id=1,
+        shard_id=0,
+        num_shards=1,
+        precision=32,
+        training=True,
+        **kwargs,
+    ):
+        cuda = torch.cuda.is_available()
+        decoder_device, device = ("mixed", "gpu") if cuda else ("cpu", "cpu")
+        crop_size = 256
+
+        # Not used yet because of https://github.com/NVIDIA/DALI/issues/5265
+        # In the future, maybe the two pipelines should be chained?
+        # - https://github.com/NVIDIA/DALI/issues/3702
+        # - https://github.com/NVIDIA/DALI/issues/5070
+        @pipeline_def(batch_size=1, num_threads=1, device_id=device_id)
+        def input_pipeline():
+            """
+            This pipeline reads scan positions from the disk. One scan position
+            (containing many diffraction patterns) is returned at every
+            iteration.
+
+            https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/general/data_loading/numpy_reader.html
+            https://docs.nvidia.com/deeplearning/dali/user-guide/docs/operations/nvidia.dali.fn.readers.numpy.html
+            """
+            file_paths = taskset.get_raw_samples()[0]
+            diffraction_paths = [f"{p}/cropped_exp_diffr_data.npy" for p in file_paths]
+            rspace_paths = [f"{p}/patched_psi.npy" for p in file_paths]
+
+            # GPU Direct Storage :)
+            # TODO: use ROIs to manage shards
+            diff_data = fn.readers.numpy(
+                device="gpu",
+                files=diffraction_paths,
+                shard_id=shard_id,
+                num_shards=num_shards,
+            )
+            # This npy file contains complex numbers, unfortunately not
+            # supported yet by DALI.
+            rspace_data = fn.readers.numpy(
+                device="gpu",
+                files=rspace_paths,
+                shard_id=shard_id,
+                num_shards=num_shards,
+            )
+
+            return diff_data, rspace_data
+
+        # input_pipeline = input_pipeline()
+        # input_pipeline.build()
+
+        self.external_data = PtychoExternalInputCallable(
+            taskset, task_id, batch_size, shard_id, num_shards, training=training
+        )
+
+        @pipeline_def(
+            batch_size=batch_size,
+            num_threads=num_workers or 1,
+            device_id=device_id,
+            py_num_workers=1,
+            py_start_method="spawn",
+        )
+        def callable_pipeline():
+            """
+            This pipeline read individual diffraction patterns from a scan
+            position read by a previous pipeline.
+            """
+            images, amp, ph, task_ids = fn.external_source(
+                source=self.external_data,
+                num_outputs=4,
+                dtype=[types.FLOAT, types.FLOAT, types.FLOAT, types.INT32],
+                batch=False,
+                parallel=True,
+            )
+
+            # Cropping down from 256x256 to 128x128
+            """
+            if training:
+                images = fn.decoders.image(
+                    images, device=decoder_device, output_type=types.RGB
+                )
+                images = fn.resize(
+                    images,
+                    device=device,
+                    resize_x=crop_size,
+                    resize_y=crop_size,
+                    interp_type=types.INTERP_TRIANGULAR,
+                )
+                mirror = fn.random.coin_flip(probability=0.5)
+            else:
+                images = fn.decoders.image(
+                    inputs, device=decoder_device, output_type=types.RGB
+                )
+                images = fn.resize(
+                    images,
+                    device=device,
+                    size=val_size,
+                    mode="not_smaller",
+                    interp_type=types.INTERP_TRIANGULAR,
+                )
+                mirror = False
+            """
+
+            if cuda:
+                images = images.gpu()
+                amp = amp.gpu()
+                ph = ph.gpu()
+                task_ids = task_ids.gpu()
+
+            return images, amp, ph, task_ids
+
+        self.pipeline = callable_pipeline()
+        self.pipeline.build()
+
+        self.iterator = DALIGenericIterator(
+            self.pipeline,
+            ["x", "amp", "ph", "t"],
+            last_batch_padded=True,
+            prepare_first_batch=True,
+            auto_reset=True,
+        )
+
+    def release(self):
+        del self.pipeline, self.iterator
+        # dali.backend.ReleaseUnusedMemory()
+
+    def __len__(self):
+        return self.external_data.full_iterations
+
+    def __iter__(self):
+        for token in self.iterator:
+            x = token[0]["x"]
+            amp = token[0]["amp"]
+            ph = token[0]["ph"]
+            t = token[0]["t"].squeeze()
+            y = torch.zeros_like(t)
+            yield [x, y, amp, ph, t]

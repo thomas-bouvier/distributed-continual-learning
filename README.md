@@ -18,6 +18,7 @@ The current version of the code has been tested with Python 3.10 with the follow
 * `timm 0.9.2`
 * `horovod 0.28.1`
 * `continuum 1.2.7`
+* `nvidia-dali-cuda110 1.27.0` (optional)
 
 Make sure to install [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/neomem) to benefit from global sampling of representatives. Simlink it using `ln -s ../neomem cpp_loader`. If not available, this code will fallback to a Python, local only, low performance rehearsal buffer implementation.
 

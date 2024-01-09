@@ -11,7 +11,8 @@ from torch.utils.data.distributed import DistributedSampler
 
 from data.datasets import get_dataset
 from data.preprocess import get_transform
-from data.scenarios import ReconstructionIncrementalScenario
+from data.scenarios import ReconstructionIncremental
+from data.tasksets import DiffractionPathTaskSet
 
 
 _DATA_ARGS = {
@@ -41,6 +42,7 @@ _TASKS_ARGS = {
     "initial_increment",
     "num_tasks",
     "concatenate_tasksets",
+    "epochs_over_all_tasksets",
 }
 _TRANSFORM_ARGS = {"transform_name"}
 
@@ -53,7 +55,7 @@ class DataRegime:
         self.config = config
         self.epoch = 0
         self.task_id = -1
-        self.tasksets = None
+        self.scenario = None
         self.total_num_classes = 0
         self.total_num_samples = 0
         self.concat_taskset = None
@@ -64,9 +66,6 @@ class DataRegime:
         self.data_len = 0
         self.classes_mask = None
 
-        # TODO: temporay hack to load segments of memory independently
-        self.in_memory_shard = 0
-
         self.previous_classes_mask = None
         self.previous_loaders = {}
         self.config = self.get_config(config)
@@ -74,8 +73,8 @@ class DataRegime:
         self.use_dali = self.get("loader").pop("use_dali")
         if self.use_dali:
             try:
-                global DaliDataLoader
-                from data.load import DaliDataLoader
+                global DaliDataLoader, PtychoDaliDataLoader
+                from data.load import DaliDataLoader, PtychoDaliDataLoader
             except ImportError:
                 logging.info(
                     f"NVIDIA DALI is not installed, fallback to the native PyTorch"
@@ -83,30 +82,15 @@ class DataRegime:
                 )
                 self.use_dali = False
 
-        self.prepare_tasksets()
-        self.get_data()
+        self.prepare_scenario()
 
-    def prepare_tasksets(self, in_memory_shard=0):
+    def prepare_scenario(self):
         scenario = self.get("tasks").get("scenario", "class")
         num_tasks = self.get("tasks").get("num_tasks", 1)
 
         if scenario == "reconstruction":
-            num_train_scans = 168
-            num_in_memory_train_scans = 42
-            assert (
-                num_train_scans % num_in_memory_train_scans == 0
-            ), "The total number of reconstruction scans should be a multiple of the number of scans held in memory at once"
-            assert (
-                num_tasks >= num_train_scans // num_in_memory_train_scans
-            ), "Tasks should not overlap multiple scans held in memory"
-
             dataset, compatibility = get_dataset(
                 **self.config["data"],
-                num_train_scans=num_train_scans,
-                num_in_memory_train_scans=num_in_memory_train_scans,
-            )
-            self.total_num_samples = len(dataset.get_data()[0]) * (
-                num_train_scans // num_in_memory_train_scans
             )
         else:
             dataset, compatibility = get_dataset(**self.config["data"])
@@ -120,52 +104,44 @@ class DataRegime:
             ii = self.config["tasks"].get("initial_increment", 0)
             i = self.config["tasks"].get("increment", 1)
 
-            self.tasksets = ClassIncremental(
+            self.scenario = ClassIncremental(
                 dataset,
                 initial_increment=ii,
                 increment=i,
                 transformations=[self.config["transform"]["compose"]],
             )
         elif scenario == "instance":
-            self.tasksets = InstanceIncremental(
+            self.scenario = InstanceIncremental(
                 dataset,
                 nb_tasks=num_tasks,
                 transformations=[self.config["transform"]["compose"]],
             )
         elif scenario == "reconstruction":
-            self.tasksets = ReconstructionIncrementalScenario(
+            self.scenario = ReconstructionIncremental(
                 dataset,
-                starting_task=in_memory_shard * num_in_memory_train_scans,
-                nb_tasks=min(num_tasks, num_in_memory_train_scans),
+                nb_tasks=num_tasks,
             )
         else:
             assert not self.config[
                 "tasks"
             ], "You forgot to pass a scenario type (class, instance, reconstruction)"
-            self.tasksets = InstanceIncremental(
+            self.scenario = InstanceIncremental(
                 dataset,
                 nb_tasks=1,
                 transformations=[self.config["transform"]["compose"]],
             )
         logging.info(
-            f"Prepared {len(self.tasksets)} {self.config['data']['split']} tasksets"
+            f"Prepared {len(self.scenario)} {self.config['data']['split']} tasksets"
         )
         self.total_num_classes = (
-            self.tasksets.nb_classes if scenario != "reconstruction" else 1
+            self.scenario.nb_classes if scenario != "reconstruction" else 1
         )
 
     def get_taskset(self):
-        """
-        Get the taskset refered to by self.task_id, with all previous data
+        """Get the taskset refered to by self.task_id, with all previous data
         accumulated if enabled by parameter `concatenate_tasksets`.
         """
-        # TODO: temporay hack to load segments of memory independently
-        # Only useful when using a ReconstructionIncrementalScenario
-        if self.task_id > 0 and self.task_id % len(self.tasksets) == 0:
-            self.in_memory_shard += 1
-            self.prepare_tasksets(in_memory_shard=self.in_memory_shard)
-
-        current_taskset = self.tasksets[self.task_id]
+        current_taskset = self.scenario[self.task_id]
 
         if self.config["data"].get("split") == "train":
             if self.config["tasks"].get("concatenate_tasksets", False):
@@ -206,15 +182,6 @@ class DataRegime:
 
         return current_taskset
 
-    def get_data(self):
-        """Get the current taskset"""
-        data = self.get_taskset()
-        logging.debug(
-            f"DATA LOADER {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {len(data)}"
-        )
-
-        return data
-
     def get_loader(self, task_id):
         """
         Get the loader refered to by self.task_id
@@ -235,8 +202,11 @@ class DataRegime:
         )
         self.task_id = task_id
 
-        data = self.get_data()
-        self.data_len = len(data)
+        taskset = self.get_taskset()
+        self.data_len = len(taskset)
+        logging.debug(
+            f"DATA LOADER {self.config['data']['split']} - taskset updated: changed to {self.task_id}, len = {self.data_len}"
+        )
 
         # When supported, use 'forkserver' to spawn dataloader workers instead of 'fork' to prevent
         # issues with Infiniband implementations that are not fork-safe
@@ -254,14 +224,18 @@ class DataRegime:
             if self.config["data"].get("split") == "train" and self.loader is not None:
                 self.loader.release()
 
-            precision = 16 if False else 32
-            self.loader = DaliDataLoader(
-                data,
+            loader_class = (
+                PtychoDaliDataLoader
+                if isinstance(taskset, DiffractionPathTaskSet)
+                else DaliDataLoader
+            )
+            self.loader = loader_class(
+                taskset,
                 self.task_id,
                 device_id=hvd.local_rank(),
                 shard_id=hvd.rank(),
                 num_shards=hvd.size(),
-                precision=precision,
+                precision=32,
                 training=self.config["data"].get("split", True) == "train",
                 **self.config["loader"],
             )
@@ -272,11 +246,11 @@ class DataRegime:
         else:
             if hvd.size() > 1:
                 self.config["loader"]["sampler"] = DistributedSampler(
-                    data, num_replicas=hvd.size(), rank=hvd.rank()
+                    taskset, num_replicas=hvd.size(), rank=hvd.rank()
                 )
                 self.sampler = self.config["loader"]["sampler"]
             self.config["loader"]["shuffle"] = self.sampler is None
-            self.loader = DataLoader(data, **self.config["loader"])
+            self.loader = DataLoader(taskset, **self.config["loader"])
             logging.debug(
                 f"DATA LOADER {self.config['data']['split']} - data distributed using sampler"
             )

@@ -407,8 +407,12 @@ class Experiment:
         # ------------------#
 
         buffer_config = literal_eval(self.args.buffer_config)
-        if bool(buffer_config):
-            rehearsal_ratio = buffer_config.pop("rehearsal_ratio", 30)
+        rehearsal_ratio = buffer_config.pop("rehearsal_ratio", 30)
+        if (
+            bool(buffer_config)
+            and literal_eval(self.args.tasksets_config).get("scenario", "class")
+            != "reconstruction"
+        ):
             budget_per_class = math.floor(
                 self.train_data_regime.total_num_samples
                 * rehearsal_ratio

@@ -1,14 +1,14 @@
 import warnings
 import numpy as np
 
-from data.tasksets import DiffractionArrayTaskSet
+from data.tasksets import DiffractionPathTaskSet
 
 from continuum.datasets import _ContinuumDataset
 from continuum.scenarios import _BaseScenario
 from typing import Callable, List, Optional, Union
 
 
-class ReconstructionIncrementalScenario(_BaseScenario):
+class ReconstructionIncremental(_BaseScenario):
     """Continual Loader, generating instance incremental consecutive tasks.
 
     Scenario: Classes are always the same but instances change (NI scenario)
@@ -27,10 +27,8 @@ class ReconstructionIncrementalScenario(_BaseScenario):
         nb_tasks: Optional[int] = None,
         transformations: Union[List[Callable], List[List[Callable]]] = None,
         random_seed: int = 1,
-        starting_task=0,
     ):
         self.cl_dataset = cl_dataset
-        self.starting_task = starting_task
         self._nb_tasks = self._setup(nb_tasks)
         super().__init__(
             cl_dataset=cl_dataset,
@@ -41,17 +39,17 @@ class ReconstructionIncrementalScenario(_BaseScenario):
         self._random_state = np.random.RandomState(seed=random_seed)
 
     def _setup(self, nb_tasks: Optional[int]) -> int:
-        x, y_amp, y_ph, t = self.cl_dataset.get_data()
+        x, t = self.cl_dataset.get_data()
 
         if (
             nb_tasks is not None and nb_tasks > 0
         ):  # If the user wants a particular nb of tasks
-            task_ids = self._split_dataset(y_amp, nb_tasks)
-            self.dataset = (x, y_amp, y_ph, task_ids)
+            task_ids = self._split_dataset(x, nb_tasks)
+            self.dataset = (x, task_ids)
         elif (
             t is not None
         ):  # Otherwise use the default task ids if provided by the dataset
-            self.dataset = (x, y_amp, y_ph, t)
+            self.dataset = (x, t)
             nb_tasks = len(np.unique(t))
         else:
             raise Exception(
@@ -75,12 +73,10 @@ class ReconstructionIncrementalScenario(_BaseScenario):
                 "different set of transformations per task"
             )
 
-        x, y_amp, y_ph, t, _, data_indexes = self._select_data_by_task(task_index)
+        x, t, _, data_indexes = self._select_data_by_task(task_index)
 
-        return DiffractionArrayTaskSet(
+        return DiffractionPathTaskSet(
             x,
-            y_amp,
-            y_ph,
             t,
             trsf=self.trsf[task_index] if isinstance(self.trsf, list) else self.trsf,
             target_trsf=None,
@@ -89,7 +85,7 @@ class ReconstructionIncrementalScenario(_BaseScenario):
 
     def _split_dataset(self, y, nb_tasks):
         tasks_ids = np.repeat(
-            np.arange(self.starting_task, self.starting_task + nb_tasks),
+            np.arange(nb_tasks),
             np.shape(y)[0] // nb_tasks,
         )
         if np.shape(y)[0] % nb_tasks != 0:
@@ -100,7 +96,7 @@ class ReconstructionIncrementalScenario(_BaseScenario):
 
     def _select_data_by_task(
         self, task_index: Union[int, slice, np.ndarray]
-    ) -> Union[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Union[int, List[int]]]:
+    ) -> Union[np.ndarray, np.ndarray, Union[int, List[int]]]:
         """Selects a subset of the whole data for a given task.
 
         This class returns the "task_index" in addition of the x, y, t data.
@@ -130,7 +126,7 @@ class ReconstructionIncrementalScenario(_BaseScenario):
         if isinstance(task_index, np.ndarray):
             task_index = list(task_index)
 
-        x, y_amp, y_ph, t = self.dataset  # type: ignore
+        x, t = self.dataset  # type: ignore
 
         if isinstance(task_index, list):
             task_index = [
@@ -151,14 +147,10 @@ class ReconstructionIncrementalScenario(_BaseScenario):
                 data_indexes = np.where(t == task_index)[0]
 
         selected_x = x[data_indexes]
-        selected_y_amp = y_amp[data_indexes]
-        selected_y_ph = y_ph[data_indexes]
         selected_t = t[data_indexes]
 
         return (
             selected_x,
-            selected_y_amp,
-            selected_y_ph,
             selected_t,
             task_index,
             data_indexes,

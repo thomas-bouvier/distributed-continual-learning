@@ -25,9 +25,6 @@ def get_dataset(
     split="train",
     transform=None,
     dataset_dir="./data",
-    in_memory_shard=0,
-    num_train_scans=1,
-    num_in_memory_train_scans=1,
 ):
     train = split == "train"
     root = os.path.expanduser(dataset_dir)
@@ -109,219 +106,35 @@ def get_dataset(
 
     elif dataset == "ptycho":
         root = os.path.join(root, "Ptycho")
-        logging.info(f"Assembling Ptycho {split} dataset...")
 
-        H = 256
-        W = 256
-        # reshape all training images to this dimension
-        im_shape = (256, 256)
+        num_train_scans = 156
+        train_scans = list(range(204, 340 + 1))
+        train_scans += list(range(457, 486 + 1))
+        train_scans = train_scans[: min(num_train_scans, len(train_scans))]
 
-        real_space = []
-        diffraction_data = []
-        amp_data = []
-        ph_data = []
+        train_scans_paths = np.array([f"{root}/train/{scan}" for scan in train_scans])
 
-        # Train or validate workflow
-        if split == "train" or split == "validate":
-            # the square of the phase image must be above this value to be placed into training
-            mean_phsqr_val = 0.02
-
-            train_scans = list(range(204, 340 + 1))
-            train_scans += list(range(457, 486 + 1))
-            train_scans = train_scans[: min(num_train_scans, len(train_scans))]
-
-            # shard training scans from the rank
-            num_shards = hvd.size()
-            shard_id = hvd.rank()
-            shard_size = len(train_scans) // num_shards
-            shard_offset = shard_size * shard_id
-            train_scans = train_scans[shard_offset : shard_offset + shard_size]
-
-            # inside the rank shard, take the current in-memory shard
-            in_memory_shard_offset = num_in_memory_train_scans * in_memory_shard
-            train_scans = train_scans[
-                in_memory_shard_offset : min(
-                    in_memory_shard_offset + num_in_memory_train_scans, len(train_scans)
-                )
-            ]
-
-            for scan_num in tqdm(
-                train_scans,
-                desc="Loading ptychography scans",
-            ):
-                r_space = np.load(f"{root}/train/{scan_num}/patched_psi.npy")
-                diff_data = np.load(
-                    f"{root}/train/{scan_num}/cropped_exp_diffr_data.npy"
-                )
-
-                random.seed(42)
-                num_samples_eval = int(0.1 * len(r_space))
-                random_indices = random.sample(range(len(r_space)), num_samples_eval)
-                if not train:
-                    r_space = r_space[random_indices]
-                    diff_data = diff_data[random_indices]
-                else:
-                    train_indices = []
-                    for i in range(len(r_space)):
-                        if i not in random_indices:
-                            train_indices.append(i)
-                    # Shuffle inside the current scan position
-                    # train_indices = shuffle(train_indices)
-                    r_space = r_space[train_indices]
-                    diff_data = diff_data[train_indices]
-
-                real_space.append(r_space)
-                diffraction_data.append(diff_data)
-                ampli = np.abs(r_space)
-                amp_data.append(ampli)
-                phase = np.angle(r_space)
-                ph_data.append(phase)
-
-            logging.info("Converting the data to np array...")
-            if len(diffraction_data) != 1:
-                total_data_diff = np.concatenate(diffraction_data)
-            else:
-                _ = np.asarray(diffraction_data, dtype="float32")
-                _ = _[0, :, :, :]
-                total_data_diff = _[:, np.newaxis, :, :]
-            total_data_amp = np.concatenate(amp_data)
-            total_data_phase = np.concatenate(ph_data)
-
-            logging.info("Removing useless data...")
-            av_vals = np.mean(total_data_phase**2, axis=(1, 2))
-            idx = np.argwhere(av_vals >= mean_phsqr_val)
-
-            logging.info("Converting data to float32...")
-            total_data_diff = total_data_diff[idx].astype("float32")
-            total_data_amp = total_data_amp[idx].astype("float32")
-            total_data_phase = total_data_phase[idx].astype("float32")
-
-            logging.info("Reshaping data...")
-            X_train = total_data_diff.reshape(-1, H, W)[:, np.newaxis, :, :]
-            Y_I_train = total_data_amp.reshape(-1, H, W)[:, np.newaxis, :, :]
-            Y_phi_train = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
-
-            logging.debug(f"Train data shape: {X_train.shape}")
-
-            # Shuffle across all scan positions, this is not streaming anymore!!
-            # X_train, Y_I_train, Y_phi_train = shuffle(
-            #    X_train, Y_I_train, Y_phi_train, random_state=0
-            # )
-
-            # Training data
-            X_train_tensor = torch.Tensor(X_train)
-            Y_I_train_tensor = torch.Tensor(Y_I_train)
-            Y_phi_train_tensor = torch.Tensor(Y_phi_train)
-            logging.debug(
-                f"""
-                x shape: {X_train_tensor.shape}
-                amp shape: {Y_I_train_tensor.shape}
-                phi shape: {Y_phi_train_tensor.shape}
-                """
-            )
-
-            return ReconstructionInMemoryDataset(
-                X_train_tensor,
-                Y_I_train_tensor,
-                Y_phi_train_tensor,
-            ), ["reconstruction"]
-        else:
-            start_scan = 489
-            end_scan = 489
-
-            for scan_num in tqdm(
-                range(start_scan, end_scan + 1),
-                desc="Loading ptychography scans",
-            ):
-                r_space = np.load(f"{root}/test/{scan_num}/patched_psi.npy")
-                real_space.append(r_space)
-                ampli = np.abs(r_space)
-                amp_data.append(ampli)
-                phase = np.angle(r_space)
-                ph_data.append(phase)
-
-                diffraction_data.append(
-                    np.load(f"{root}/test/{scan_num}/cropped_exp_diffr_data.npy")
-                )
-
-            if len(diffraction_data) != 1:
-                total_data_diff = np.concatenate(diffraction_data)
-            else:
-                _ = np.asarray(diffraction_data, dtype="float32")
-                _ = _[0, :, :, :]
-                total_data_diff = _[:, np.newaxis, :, :]
-
-            logging.info("Converting the data to np array...")
-            total_data_amp = np.concatenate(amp_data)
-            total_data_phase = np.concatenate(ph_data)
-
-            logging.info("Converting data to float32...")
-            total_data_diff = total_data_diff.astype("float32")
-            total_data_amp = total_data_amp.astype("float32")
-            total_data_phase = total_data_phase.astype("float32")
-
-            logging.info("Reshaping data...")
-            X_test = total_data_diff.reshape(-1, H, W)[:, np.newaxis, :, :]
-            Y_I_test = total_data_amp.reshape(-1, H, W)[:, np.newaxis, :, :]
-            Y_phi_test = total_data_phase.reshape(-1, H, W)[:, np.newaxis, :, :]
-
-            logging.debug(f"Test data shape: {X_test.shape}")
-
-            # Testing data
-            X_test_tensor = torch.Tensor(X_test)
-            Y_I_test_tensor = torch.Tensor(Y_I_test)
-            Y_phi_test_tensor = torch.Tensor(Y_phi_test)
-            logging.debug(
-                f"""
-                x shape: {X_test_tensor.shape}
-                amp shape: {Y_I_test_tensor.shape}
-                phi shape: {Y_phi_test_tensor.shape}
-                """
-            )
-
-            return ReconstructionInMemoryDataset(
-                X_test_tensor,
-                Y_I_test_tensor,
-                Y_phi_test_tensor,
-            ), ["reconstruction"]
-
+        return DiffractionDataset(train_scans_paths), ["reconstruction"]
     else:
         raise ValueError("Unknown dataset")
 
 
-class ReconstructionInMemoryDataset(_ContinuumDataset):
-    """Continuum dataset for in-memory data.
+class DiffractionDataset(_ContinuumDataset):
+    """Continuum dataset for diffraction data.
 
-    :param x: Numpy array of images or paths to images for the train set.
-    :param y_amp: Targets for the train set.
+    :param x: Numpy array of paths to diffractions for the train set.
     :param data_type: Format of the data.
     :param t_train: Optional task ids for the train set.
     """
 
-    def __init__(
-        self,
-        x: np.ndarray,
-        y_amp: np.ndarray,
-        y_ph: np.ndarray,
-        t: Union[None, np.ndarray] = None,
-        data_type: TaskType = TaskType.TENSOR,
-    ):
-        self._data_type = data_type
+    def __init__(self, x: np.ndarray, t: Union[None, np.ndarray] = None):
+        self._data_type = TaskType.IMAGE_PATH
         super().__init__(download=False)
 
-        if len(x) != len(y_amp) or len(x) != len(y_ph):
-            raise ValueError(
-                f"Number of datapoints ({len(x)}) != number of targets ({len(y_amp)}, {len(y_ph)})!"
-            )
-        if t is not None and len(t) != len(x):
-            raise ValueError(
-                f"Number of datapoints ({len(x)}) != number of task ids ({len(t)})!"
-            )
-
-        self.data = (x, y_amp, y_ph, t)
+        self.data = (x, t)
         self._nb_classes = 1
 
-    def get_data(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def get_data(self) -> Tuple[np.ndarray, np.ndarray]:
         return self.data
 
     @property

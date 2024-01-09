@@ -7,18 +7,18 @@ from torch.utils.data import Dataset
 from typing import Tuple, Union, Optional, List
 
 
-class DiffractionArrayTaskSet(Dataset):
+class DiffractionPathTaskSet(Dataset):
     def __init__(
         self,
         x: np.ndarray,
-        y_amp: np.ndarray,
-        y_ph: np.ndarray,
+        # y_amp: np.ndarray,
+        # y_ph: np.ndarray,
         t: np.ndarray,
         trsf: Union[transforms.Compose, List[transforms.Compose]],
         target_trsf: Optional[Union[transforms.Compose, List[transforms.Compose]]],
         bounding_boxes: Optional[np.ndarray] = None,
     ):
-        self._x, self._y_amp, self._y_ph, self._t = x, y_amp, y_ph, t
+        self._x, self._t = x, t
 
         # if task index are not provided t is always -1
         if self._t is None:
@@ -27,7 +27,6 @@ class DiffractionArrayTaskSet(Dataset):
         self.trsf = trsf
         self.data_type = TaskType.TENSOR
         self.target_trsf = target_trsf
-        self.data_type = TaskType.TENSOR
         self.bounding_boxes = bounding_boxes
 
         self._to_tensor = transforms.ToTensor()
@@ -65,8 +64,8 @@ class DiffractionArrayTaskSet(Dataset):
     def add_samples(
         self,
         x: np.ndarray,
-        y_amp: np.ndarray,
-        y_ph: np.ndarray,
+        # y_amp: np.ndarray,
+        # y_ph: np.ndarray,
         t: Union[None, np.ndarray] = None,
     ):
         """Add memory for rehearsal.
@@ -78,8 +77,8 @@ class DiffractionArrayTaskSet(Dataset):
                          defaulted to -1.
         """
         self._x = np.concatenate((self._x, x))
-        self._y_amp = np.concatenate((self._y_amp, y_amp))
-        self._y_ph = np.concatenate((self._y_ph, y_ph))
+        # self._y_amp = np.concatenate((self._y_amp, y_amp))
+        # self._y_ph = np.concatenate((self._y_ph, y_ph))
         if t is not None:
             self._t = np.concatenate((self._t, t))
         else:
@@ -87,7 +86,7 @@ class DiffractionArrayTaskSet(Dataset):
 
     def __len__(self) -> int:
         """The amount of images in the current task."""
-        return self._y_amp.shape[0]
+        return self._x.shape[0]
 
     def get_random_samples(self, nb_samples):
         nb_tot_samples = self._x.shape[0]
@@ -107,19 +106,20 @@ class DiffractionArrayTaskSet(Dataset):
 
         return (
             _tensorize_list(samples),
-            _tensorize_list(targets_amp),
-            _tensorize_list(targets_ph),
+            # _tensorize_list(targets_amp),
+            # _tensorize_list(targets_ph),
             _tensorize_list(tasks),
         )
 
     def get_raw_samples(self, indexes=None):
-        """Get samples without preprocessing, for split train/val for example."""
+        """Return paths to diffraction patterns.
+        Get samples without preprocessing, for split train/val for example."""
         if indexes is None:
-            return self._x, self._y_amp, self._y_ph, self._t
+            return self._x, self._t
         return (
             self._x[indexes],
-            self._y_amp[indexes],
-            self._y_ph[indexes],
+            # self._y_amp[indexes],
+            # self._y_ph[indexes],
             self._t[indexes],
         )
 
@@ -129,16 +129,14 @@ class DiffractionArrayTaskSet(Dataset):
         :param index: Index to query the image.
         :return: A Pillow image.
         """
-        x = self._x[index]
-        if not torch.is_tensor(x):
-            x = torch.tensor(x)
-        return x
+        return np.load(f"{self._x[index]}/cropped_exp_diffr_data.npy")
 
     def __getitem__(self, index: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
         """Method used by PyTorch's DataLoaders to query a sample and its target."""
         x = self.get_sample(index)
-        y_amp = self._y_amp[index]
-        y_ph = self._y_ph[index]
+        r_space = np.load(f"{self._x[index]}/patched_psi.npy")
+        y_amp = np.abs(r_space)
+        y_ph = np.angle(r_space)
         t = self._t[index]
 
         if self.target_trsf is not None:
