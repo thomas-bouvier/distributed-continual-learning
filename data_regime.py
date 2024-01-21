@@ -1,9 +1,9 @@
-import horovod.torch as hvd
 import logging
+
+import horovod.torch as hvd
 import numpy as np
 import torch.multiprocessing as mp
 
-from copy import deepcopy
 from continuum import ClassIncremental, InstanceIncremental
 from continuum.tasks import TaskSet
 from torch.utils.data import DataLoader
@@ -42,7 +42,6 @@ _TASKS_ARGS = {
     "initial_increment",
     "num_tasks",
     "concatenate_tasksets",
-    "epochs_over_all_tasksets",
 }
 _TRANSFORM_ARGS = {"transform_name"}
 
@@ -77,7 +76,7 @@ class DataRegime:
                 from data.load import DaliDataLoader, PtychoDaliDataLoader
             except ImportError:
                 logging.info(
-                    f"NVIDIA DALI is not installed, fallback to the native PyTorch"
+                    "NVIDIA DALI is not installed, fallback to the native PyTorch"
                     " native dataloader."
                 )
                 self.use_dali = False

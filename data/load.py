@@ -1,16 +1,13 @@
-import collections
-import numpy as np
-import nvidia.dali.types as types
-import nvidia.dali.fn as fn
 import random
-import tempfile
+
+import numpy as np
 import torch
 
 from continuum.tasks import TaskType
-from nvidia.dali import pipeline_def
+from nvidia.dali import pipeline_def, fn, types
 from nvidia.dali.plugin.pytorch import DALIGenericIterator, LastBatchPolicy
 from nvidia.dali.pipeline import Pipeline
-from random import shuffle
+from tqdm import tqdm
 
 
 """
@@ -198,85 +195,41 @@ class DaliDataLoader:
 
 class PtychoExternalInputCallable:
     def __init__(
-        self, taskset, task_id, batch_size, shard_id, num_shards, training=True
+        self, taskset, task_id, batch_size, shard_id, num_shards, training=True, shuffle=False,
     ):
         self.task_id = task_id
         self.batch_size = batch_size
         self.shard_id = shard_id
         self.num_shards = num_shards
 
-        file_paths = taskset.get_raw_samples()[0]
-        diffraction_paths = [f"{p}/cropped_exp_diffr_data.npy" for p in file_paths]
-        rspace_paths = [f"{p}/patched_psi.npy" for p in file_paths]
-
-        task_diff_data = np.array([])
-        task_ampli_data = np.array([])
-        task_phase_data = np.array([])
-        for i, _ in enumerate(file_paths):
-            # Calculating the phase and amplitude from the real-space data
-            rspace_data = np.load(rspace_paths[i])
-            ampli_data = np.abs(rspace_data)
-            phase_data = np.angle(rspace_data)
-
-            # Filtering out void patterns
-            av_vals = np.mean(phase_data**2, axis=(1, 2))
-            mean_phsqr_val = 0.02
-            idx = np.argwhere(av_vals >= mean_phsqr_val)
-
-            # Concatenating scan positions for this task
-            diff_data = np.load(diffraction_paths[i])
-            if len(task_diff_data) == 0:
-                task_diff_data = diff_data[idx]
-                task_ampli_data = ampli_data[idx]
-                task_phase_data = phase_data[idx]
-            else:
-                task_diff_data = np.concatenate([diff_data[idx], task_diff_data])
-                task_ampli_data = np.concatenate([ampli_data[idx], task_ampli_data])
-                task_phase_data = np.concatenate([phase_data[idx], task_phase_data])
+        self.diff_data, self.ampli_data, self.phase_data = taskset
+        num_samples = len(self.diff_data)
 
         # Preparing the train/validation sets
         random.seed(42)
-        num_samples_eval = int(0.1 * len(task_diff_data))
-        random_indices = random.sample(range(len(task_diff_data)), num_samples_eval)
-
-        shard_size = (
-            (len(task_diff_data) - num_samples_eval) // num_shards
-            if training
-            else num_samples_eval // num_shards
-        )
-        shard_offset = shard_id * shard_size
-        random_indices = random_indices[shard_offset : shard_offset + shard_size]
+        num_samples_eval = int(0.1 * num_samples)
+        self.random_indices = random.sample(range(num_samples), num_samples_eval)
 
         if training:
             train_indices = []
-            for j in range(shard_size):
-                if j not in random_indices:
+            for j in range(num_samples):
+                if j not in self.random_indices:
                     train_indices.append(j)
-            # Shuffle inside the current scan position
-            # train_indices = shuffle(train_indices)
-            random_indices = train_indices
+            # Shuffle inside the current task
+            if shuffle:
+                train_indices = shuffle(train_indices)
+            self.random_indices = train_indices
 
-        diff_data = task_diff_data[random_indices]
-        ampli_data = task_ampli_data[random_indices]
-        phase_data = task_phase_data[random_indices]
-
-        H = 256
-        W = 256
-        diff_data = diff_data.reshape(-1, H, W)[:, np.newaxis, :, :]
-        self.diff_data = diff_data.astype("float32")
-        self.ampli_data = ampli_data.reshape(-1, H, W)[:, np.newaxis, :, :]
-        self.phase_data = phase_data.reshape(-1, H, W)[:, np.newaxis, :, :]
-
-        self.full_iterations = len(self.diff_data) // batch_size
+        self.full_iterations = len(self.random_indices) // batch_size
 
     def __call__(self, sample_info):
         if sample_info.iteration >= self.full_iterations:
             raise StopIteration
         sample_idx = sample_info.idx_in_epoch
         return (
-            self.diff_data[sample_idx],
-            self.ampli_data[sample_idx],
-            self.phase_data[sample_idx],
+            self.diff_data[self.random_indices[sample_idx]],
+            self.ampli_data[self.random_indices[sample_idx]],
+            self.phase_data[self.random_indices[sample_idx]],
             np.int32([self.task_id]),
         )
 
@@ -297,7 +250,39 @@ class PtychoDaliDataLoader:
     ):
         cuda = torch.cuda.is_available()
         decoder_device, device = ("mixed", "gpu") if cuda else ("cpu", "cpu")
-        crop_size = 256
+        crop_size = 128
+
+        file_paths = taskset.get_raw_samples()[0]
+        diffraction_paths = [f"{p}/cropped_exp_diffr_data.npy" for p in file_paths]
+        rspace_paths = [f"{p}/patched_psi.npy" for p in file_paths]
+
+        task_diff_data = []
+        task_ampli_data = []
+        task_phase_data = []
+        for i, _ in enumerate(tqdm(file_paths, desc=f"Loading {len(file_paths)} perspectives for task {task_id+1}")):
+            # Calculating the phase and amplitude from the real-space data
+            rspace_data = np.load(rspace_paths[i])
+            ampli_data = np.abs(rspace_data)
+            phase_data = np.angle(rspace_data)
+
+            # Filtering out void patterns
+            av_vals = np.mean(phase_data**2, axis=(1, 2))
+            mean_phsqr_val = 0.02
+            idx = np.argwhere(av_vals >= mean_phsqr_val)
+
+            shard_size = len(idx) // num_shards
+            shard_offset = shard_id * shard_size
+
+            # Concatenating scan position(s) for this task
+            diff_data = np.load(diffraction_paths[i])
+            task_diff_data.extend(diff_data[idx][shard_offset : shard_offset + shard_size])
+            task_ampli_data.extend(ampli_data[idx][shard_offset : shard_offset + shard_size])
+            task_phase_data.extend(phase_data[idx][shard_offset : shard_offset + shard_size])
+
+        task_diff_data = np.array(task_diff_data, dtype=np.float32)
+        task_ampli_data = np.array(task_ampli_data, dtype=np.float32)
+        task_phase_data = np.array(task_phase_data, dtype=np.float32)
+        taskset = (task_diff_data, task_ampli_data, task_phase_data)
 
         # Not used yet because of https://github.com/NVIDIA/DALI/issues/5265
         # In the future, maybe the two pipelines should be chained?
@@ -360,7 +345,7 @@ class PtychoDaliDataLoader:
                 num_outputs=4,
                 dtype=[types.FLOAT, types.FLOAT, types.FLOAT, types.INT32],
                 batch=False,
-                parallel=True,
+                parallel=False,
             )
 
             # Cropping down from 256x256 to 128x128

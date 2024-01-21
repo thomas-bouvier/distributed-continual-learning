@@ -10,7 +10,6 @@ from tqdm import tqdm
 from evaluate.evaluate import evaluate_one_epoch
 from utils.log import get_logging_level
 from utils.meters import AverageMeter, get_timer
-from utils.utils import move_cuda
 
 
 def measure_performance(step):
@@ -39,7 +38,7 @@ def train_one_epoch(
     meters = {metric: AverageMeter(f"{prefix}_{metric}") for metric in metrics}
 
     batch = 0
-    step = dict(task_id=task_id, epoch=epoch, batch=-1)
+    step = {"task_id": task_id, "epoch": epoch, "batch": -1}
 
     epoch_time = 0
     last_batch_time = 0
@@ -63,9 +62,13 @@ def train_one_epoch(
         for data in loader:
             timer.__exit__(None, None, None)
 
-            step = dict(
-                task_id=task_id, epoch=epoch, batch=batch, global_epoch=global_epoch
-            )
+            step = {
+                "task_id": task_id,
+                "epoch": epoch,
+                "batch": batch,
+                "global_epoch": global_epoch,
+                "global_batch": global_batch,
+            }
             train_fn = (
                 model.train_one_step
                 if scenario != "reconstruction"
@@ -86,6 +89,7 @@ def train_one_epoch(
 
                 wandb.log(
                     {
+                        "task_id": task_id,
                         "epoch": global_epoch,
                         "batch": global_batch,
                         "lr": model.optimizer_regime.get_lr()[0],
@@ -105,9 +109,9 @@ def train_one_epoch(
                 for key, value in meters.items():
                     logging.debug(f"{key} {value.avg}\t")
 
-                if measure_performance(dict(task_id=task_id, epoch=epoch, batch=batch)):
+                if measure_performance({"task_id": task_id, "epoch": epoch, "batch": batch}):
                     batch_metrics = model.batch_metrics.get(
-                        dict(task_id=task_id, epoch=epoch, batch=batch)
+                        {"task_id": task_id, "epoch": epoch, "batch": batch}
                     )
                     logging.debug(f"batch {batch} time {last_batch_time} sec")
                     logging.debug(
@@ -153,6 +157,7 @@ def train_one_epoch(
             progress.update(1)
 
             batch += 1
+            global_batch += 1
 
             timer = get_timer(
                 "load",
@@ -170,7 +175,7 @@ def train_one_epoch(
     avg_meters["time"] = epoch_time
     avg_meters["batch"] = batch
 
-    logging.info(f"\nCUMULATED VALUES:")
+    logging.info("\nCUMULATED VALUES:")
     logging.info(f"\tlocal_rehearsal_size {avg_meters['local_rehearsal_size']}")
     logging.info(f"epoch time {epoch_time} sec")
 
@@ -199,7 +204,7 @@ def train(
     # In case of an in-memory dataset that does not fit entirely in memory,
     # num_tasks should be defined however len(tasksets) will be wrong.
     num_tasks = train_data_regime.get("tasks").get("num_tasks") or len(
-        train_data_regime.tasksets
+        train_data_regime.scenario
     )
     if not isinstance(epochs, list):
         epochs = [epochs] * num_tasks
@@ -377,11 +382,11 @@ def train(
             # Log metrics
             if hvd.rank() == 0:
                 # DL metrics
-                dl_metrics_values = dict(
-                    task_id=task_id,
-                    epoch=global_epoch,
-                    batch=global_batch,
-                )
+                dl_metrics_values = {
+                    "task_id": task_id,
+                    "epoch": global_epoch,
+                    "batch": global_batch,
+                }
                 dl_metrics_values.update(
                     {"train_" + k: v for k, v in train_results.items()}
                 )
