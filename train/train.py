@@ -82,7 +82,7 @@ def train_one_epoch(
             if hvd.rank() == 0:
                 # Performance metrics
                 if (
-                    measure_performance(dict(task_id=task_id, epoch=epoch, batch=batch))
+                    measure_performance({"task_id": task_id, "epoch": epoch, "batch": batch})
                     and model.batch_metrics is not None
                 ):
                     model.batch_metrics.save()
@@ -201,11 +201,8 @@ def train(
     epochs: a number of epochs, or a list of number of epochs if you want to be
     task-specific
     """
-    # In case of an in-memory dataset that does not fit entirely in memory,
-    # num_tasks should be defined however len(tasksets) will be wrong.
-    num_tasks = train_data_regime.get("tasks").get("num_tasks") or len(
-        train_data_regime.scenario
-    )
+    num_tasks = train_data_regime.get("tasks").get("num_tasks")
+
     if not isinstance(epochs, list):
         epochs = [epochs] * num_tasks
     if len(epochs) < num_tasks:
@@ -230,7 +227,6 @@ def train(
 
     for task_id in range(resume_from_task, num_tasks):
         start = time.perf_counter()
-        training_time = time.perf_counter()
         task_metrics = {
             "task_id": task_id,
             "test_tasks_metrics": [],
@@ -259,7 +255,12 @@ def train(
                 log_interval=log_interval,
             )
 
+            # Log the training loss after the epoch
             if hvd.rank() == 0:
+                meters = {}
+                for key, value in train_results.items():
+                    meters[f"train_{key}"] = train_results[key]
+
                 img_sec = (
                     len(loader) * train_results["num_samples"] / train_results["time"]
                 )
@@ -281,8 +282,14 @@ def train(
                         train=train_results,
                     )
                 )
+                wandb.log(
+                    {
+                        "epoch": global_epoch,
+                        **meters,
+                    }
+                )
 
-            # evaluate on test set
+            # Evaluate the model on current and previous tasks
             before_evaluate_time = time.perf_counter()
             tasks_meters = []
             if evaluate and epoch + 1 == epochs[task_id]:
@@ -343,11 +350,8 @@ def train(
                     }
                 )
 
+                # Log the continual validation loss
                 if hvd.rank() == 0:
-                    meters = {}
-                    for key, value in train_results.items():
-                        meters[f"train_{key}"] = train_results[key]
-
                     continual_meters = {}
                     for key in metrics_to_average:
                         continual_meters[f"continual_task1_val_{key}"] = tasks_meters[
@@ -361,7 +365,6 @@ def train(
                     wandb.log(
                         {
                             "epoch": global_epoch,
-                            **meters,
                             **continual_meters,
                         }
                     )

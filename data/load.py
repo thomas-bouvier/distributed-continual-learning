@@ -195,12 +195,13 @@ class DaliDataLoader:
 
 class PtychoExternalInputCallable:
     def __init__(
-        self, taskset, task_id, batch_size, shard_id, num_shards, training=True, shuffle=False,
+        self, taskset, task_id, batch_size, shard_id, num_shards, shuffle=False, training=True,
     ):
         self.task_id = task_id
         self.batch_size = batch_size
         self.shard_id = shard_id
         self.num_shards = num_shards
+        self.shuffle = shuffle and training
 
         self.diff_data, self.ampli_data, self.phase_data = taskset
         num_samples = len(self.diff_data)
@@ -216,16 +217,32 @@ class PtychoExternalInputCallable:
                 if j not in self.random_indices:
                     train_indices.append(j)
             # Shuffle inside the current task
-            if shuffle:
-                train_indices = shuffle(train_indices)
+            if self.shuffle:
+                random.shuffle(train_indices)
             self.random_indices = train_indices
 
         self.full_iterations = len(self.random_indices) // batch_size
 
+        self.perm = None  # permutation of indices
+        # so that we don't have to recompute the `self.perm` for every sample
+        self.last_seen_epoch = None
+
     def __call__(self, sample_info):
         if sample_info.iteration >= self.full_iterations:
+            # Indicate end of the epoch
             raise StopIteration
-        sample_idx = sample_info.idx_in_epoch
+        # From my experiments, shuffling at every epoch doesn't increase the acc.
+        # Same effect as shuffling only once. Still doing it.
+        if self.shuffle:
+            if self.last_seen_epoch != sample_info.epoch_idx:
+                self.last_seen_epoch = sample_info.epoch_idx
+                self.perm = np.random.default_rng(
+                    seed=42 + sample_info.epoch_idx
+                ).permutation(len(self.random_indices))
+            sample_idx = self.perm[sample_info.idx_in_epoch]
+        else:
+            sample_idx = sample_info.idx_in_epoch
+
         return (
             self.diff_data[self.random_indices[sample_idx]],
             self.ampli_data[self.random_indices[sample_idx]],

@@ -1,7 +1,8 @@
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+
+from torch import nn
 
 from cross_entropy import ScaledMeanAbsoluteErrorLoss
 
@@ -52,10 +53,10 @@ class PtychoNNModel(nn.Module):
                 stride=1,
                 padding=(1, 1),
             ),
-            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else nn.Identity(),
             nn.ReLU(),
             nn.Conv2d(filters_out, filters_out, 3, stride=1, padding=(1, 1)),
-            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else nn.Identity(),
             nn.ReLU(),
             nn.MaxPool2d((2, 2)),
         ]
@@ -64,10 +65,10 @@ class PtychoNNModel(nn.Module):
     def up_block(self, filters_in, filters_out):
         block = [
             nn.Conv2d(filters_in, filters_out, 3, stride=1, padding=(1, 1)),
-            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else nn.Identity(),
             nn.ReLU(),
             nn.Conv2d(filters_out, filters_out, 3, stride=1, padding=(1, 1)),
-            nn.BatchNorm2d(filters_out) if self.use_batch_norm else torch.nn.Identity(),
+            nn.BatchNorm2d(filters_out) if self.use_batch_norm else nn.Identity(),
             nn.ReLU(),
             nn.Upsample(scale_factor=2, mode="bilinear"),
         ]
@@ -90,12 +91,7 @@ def ptychonn(config):
     world_size = config.pop("world_size", 1)
     lr = config.pop("lr", 5e-4) * world_size
     lr_min = config.pop("lr_min", 1e-4) * world_size
-    warmup_epochs = config.pop("warmup_epochs", 0)
-    num_steps_per_epoch = config.pop("num_steps_per_epoch")
-    num_epochs = config.pop("num_epochs")
-    num_samples = config.pop("total_num_samples") / world_size
-    epoch_cycle_size = config.pop("epoch_cycle_size", 16)
-    weight_decay = config.pop("weight_decay", 0.001)
+    step_cycle_size = config.pop("step_cycle_size", 184)
     lr_schedule = config.pop("lr_schedule", "exp_range_cyclic_lr")
 
     model = PtychoNNModel()
@@ -106,7 +102,6 @@ def ptychonn(config):
         step_size: number of GLOBAL batches to complete a cycle
         """
         lr_batch = step["global_batch"]
-        # lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
         cycle = np.floor(1 + lr_batch / (2 * step_size))
         x = np.abs(lr_batch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x))
@@ -117,21 +112,19 @@ def ptychonn(config):
         step_size: number of GLOBAL batches to complete a cycle
         """
         lr_batch = step["global_batch"]
-        # lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
         cycle = np.floor(1 + lr_batch / (2 * step_size))
         x = np.abs(lr_batch / step_size - 2 * cycle + 1)
         return lr + (max_lr - lr) * np.maximum(0, (1 - x)) / float(2 ** (cycle - 1))
 
     # https://github.com/bckenstler/CLR
-    def exp_range_cyclic_lr(step, lr, max_lr, step_size, gamma=0.996):
+    def exp_range_cyclic_lr(step, lr, max_lr, step_size, gamma=0.99985):
         """
-        step_size: number of GLOBAL epochs to complete a cycle
+        step_size: number of GLOBAL batches to complete a cycle
         """
         lr_batch = step["global_batch"]
-        lr_epoch = step["global_epoch"] + step["batch"] / num_steps_per_epoch
         cycle = np.floor(1 + lr_batch / (2 * step_size))
         x = np.abs(lr_batch / step_size - 2 * cycle + 1)
-        return lr + (max_lr - lr) * np.maximum(0, (1 - x)) * gamma ** (lr_epoch)
+        return lr + (max_lr - lr) * np.maximum(0, (1 - x)) * gamma ** (lr_batch)
 
     schedules = {
         "triangular_cyclic_lr": triangular_cyclic_lr,
@@ -140,7 +133,7 @@ def ptychonn(config):
     }
 
     def config_by_step(step):
-        return {"lr": schedules[lr_schedule](step, lr_min, lr, epoch_cycle_size)}
+        return {"lr": schedules[lr_schedule](step, lr_min, lr, step_cycle_size)}
 
     model.regime = [
         {
