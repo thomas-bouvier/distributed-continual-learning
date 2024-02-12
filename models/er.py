@@ -1,15 +1,14 @@
-import horovod.torch as hvd
-import logging
 import os
-import torch
-import torch.nn as nn
 
+import horovod.torch as hvd
+import torch
+
+from torch import nn
 from torch.cuda.amp import autocast
 
 from modules import ContinualLearner, Buffer
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
-from utils.log import display
 
 __all__ = ["Er"]
 
@@ -28,7 +27,7 @@ class Er(ContinualLearner):
         buffer_config,
         batch_metrics=None,
     ):
-        super(Er, self).__init__(
+        super().__init__(
             backbone,
             optimizer_regime,
             use_amp,
@@ -54,7 +53,7 @@ class Er(ContinualLearner):
         self.buffer.add_data(
             data[0][: self.batch_size],
             data[1][: self.batch_size],
-            dict(batch=-1),
+            {"batch": -1},
             ground_truth=data[2:-1][: self.batch_size],
         )
 
@@ -81,7 +80,7 @@ class Er(ContinualLearner):
             y_batch = y[i : i + self.batch_size]
 
             # Get data from the last iteration (blocking)
-            aug_x, _, aug_y, aug_w = self.buffer.update(
+            aug_x, _, aug_y, aug_w, _ = self.buffer.update(
                 x_batch,
                 y_batch,
                 step,
@@ -172,22 +171,13 @@ class Er(ContinualLearner):
             ph_batch = ph[i : i + self.batch_size]
 
             # Get data from the last iteration (blocking)
-            aug_x, aug_ground_truth, aug_y, aug_w = self.buffer.update(
+            aug_x, aug_ground_truth, _, _, _ = self.buffer.update(
                 x_batch,
                 y_batch,
                 step,
                 batch_metrics=self.batch_metrics,
                 ground_truth=[amp_batch, ph_batch],
             )
-
-            """
-            if hvd.rank() == 0 and step["batch"] % 10 == 0:
-                repr_size = aug_x.size(0) - self.batch_size
-                if repr_size > 0:
-                    display(f"aug_x_{step['task_id']}_{step['epoch']}_{step['batch']}", aug_x[-repr_size:])
-                    display(f"aug_amp_{step['task_id']}_{step['epoch']}_{step['batch']}", aug_ground_truth[0][-repr_size:])
-                    display(f"aug_ph_{step['task_id']}_{step['epoch']}_{step['batch']}", aug_ground_truth[1][-repr_size:])
-            """
 
             with get_timer(
                 "train",

@@ -308,7 +308,7 @@ class PtychoDaliDataLoader:
         @pipeline_def(batch_size=1, num_threads=1, device_id=device_id)
         def input_pipeline():
             """
-            This pipeline reads scan positions from the disk. One scan position
+            This pipeline reads scan positions from the disk. One scan perspective
             (containing many diffraction patterns) is returned at every
             iteration.
 
@@ -328,7 +328,7 @@ class PtychoDaliDataLoader:
                 num_shards=num_shards,
             )
             # This npy file contains complex numbers, unfortunately not
-            # supported yet by DALI.
+            # supported by DALI (https://github.com/NVIDIA/DALI/issues/5265).
             rspace_data = fn.readers.numpy(
                 device="gpu",
                 files=rspace_paths,

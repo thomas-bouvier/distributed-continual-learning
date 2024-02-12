@@ -1,5 +1,4 @@
 import horovod.torch as hvd
-import logging
 import torch
 import torch.nn as nn
 
@@ -28,7 +27,7 @@ class Der(ContinualLearner):
         buffer_config,
         batch_metrics=None,
     ):
-        super(Der, self).__init__(
+        super().__init__(
             backbone,
             optimizer_regime,
             use_amp,
@@ -53,16 +52,17 @@ class Der(ContinualLearner):
             train_data_regime.sample_shape,
             self.batch_size,
             cuda=self._is_on_cuda(),
+            num_samples_per_activation=1,
             **self.buffer_config,
         )
 
-        x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        self.buffer.add_data(x, y, dict(batch=-1))
+        # x, y, _ = next(iter(train_data_regime.get_loader(0)))
+        # self.buffer.add_data(x, y, dict(batch=-1))
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
-        if task_id > 0 or self.nsys_run:
+        if task_id > self.buffer.augmentations_offset or self.nsys_run:
             self.buffer.enable_augmentations()
 
     def train_one_step(self, data, meters, step):

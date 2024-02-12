@@ -1,6 +1,4 @@
-import copy
 import horovod.torch as hvd
-import logging
 import torch
 import torch.nn as nn
 
@@ -27,7 +25,7 @@ class Vanilla(ContinualLearner):
         buffer_config,
         batch_metrics=None,
     ):
-        super(Vanilla, self).__init__(
+        super().__init__(
             backbone,
             optimizer_regime,
             use_amp,

@@ -1,5 +1,4 @@
 import argparse
-import copy
 import horovod.torch as hvd
 import json
 import logging
@@ -7,8 +6,6 @@ import math
 import os
 import signal
 import sys
-import subprocess
-import time
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
 import wandb
@@ -26,7 +23,6 @@ from optimizer_regime import OptimizerRegime
 from train.train import train
 from utils.log import setup_logging, ResultsLog, PerformanceResultsLog
 
-from utils.meters import AverageMeter
 from utils.model import save_checkpoint
 from utils.yaml_params import YParams
 from utils.utils import move_cuda
