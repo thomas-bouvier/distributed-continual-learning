@@ -201,7 +201,7 @@ def train(
     epochs: a number of epochs, or a list of number of epochs if you want to be
     task-specific
     """
-    num_tasks = train_data_regime.get("tasks").get("num_tasks")
+    num_tasks = len(train_data_regime.scenario)
 
     if not isinstance(epochs, list):
         epochs = [epochs] * num_tasks

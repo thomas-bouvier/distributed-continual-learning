@@ -7,7 +7,7 @@ import torch
 
 from train.train import measure_performance
 from utils.meters import get_timer
-from utils.log import get_shared_logging_level, display
+from utils.log import get_shared_logging_level
 
 
 class AugmentedMinibatch:
@@ -16,7 +16,6 @@ class AugmentedMinibatch:
         num_samples,
         shape,
         device,
-        total_num_classes,
         num_samples_per_representative=1,
         num_samples_per_activation=0,
     ):
@@ -29,7 +28,6 @@ class AugmentedMinibatch:
         self.weights = torch.ones(num_samples, device=device)
 
         # todo: we should have a way to support different shapes
-        # self.logits = torch.zeros(num_samples, total_num_classes, device=device)
         self.logits = [
             torch.zeros(num_samples, *shape, device=device, dtype=torch.float16)
             for _ in range(num_samples_per_activation)
@@ -115,7 +113,7 @@ class Buffer:
         labels. If `high_performance` is enabled, this instanciates Neomem.
         """
         logging.info(
-            f"Initializing the buffer with storage for {self.budget_per_class} representatives per class"
+            "Initializing the buffer with storage for %s representatives per class", self.budget_per_class
         )
         device = "cuda" if cuda else "cpu"
 
@@ -176,7 +174,6 @@ class Buffer:
                     num_samples,
                     self.sample_shape,
                     device,
-                    self.total_num_classes,
                     num_samples_per_representative=self.num_samples_per_representative,
                     num_samples_per_activation=self.num_samples_per_activation,
                 )
@@ -186,7 +183,6 @@ class Buffer:
                     num_samples,
                     self.sample_shape,
                     device,
-                    self.total_num_classes,
                     num_samples_per_representative=self.num_samples_per_representative,
                     num_samples_per_activation=self.num_samples_per_activation,
                 )
@@ -243,7 +239,7 @@ class Buffer:
                 concat_y = minibatch.labels[:aug_size]
                 concat_w = minibatch.weights[:aug_size]
                 for l in range(len(logits)):
-                    concat_logits.append(minibatches_logits[l][:aug_size])
+                    concat_logits.append(minibatch.logits[l][:aug_size])
 
         if not derpp:
             self.add_data(
@@ -276,7 +272,7 @@ class Buffer:
                     else aug_size - self.batch_size
                 )
                 if n > 0:
-                    logging.debug(f"Received {n} samples from other nodes")
+                    logging.debug("Received %s samples from other nodes", n)
 
                 if measure_performance(step) and batch_metrics is not None:
                     batch_metrics.add(
@@ -305,7 +301,7 @@ class Buffer:
                 # calculate the right value for i
                 j = -1
                 index_no_empty = 0
-                for index_no_empty in enumerate(self.rehearsal_metadata):
+                for index_no_empty, _ in enumerate(self.rehearsal_metadata):
                     if self.rehearsal_metadata[index_no_empty][0] == 0:
                         continue
                     j += 1
@@ -315,7 +311,7 @@ class Buffer:
                     index % self.budget_per_class
                 ) % self.rehearsal_metadata[index_no_empty][0]
 
-                if index_no_empty not in classes_to_sample.keys():
+                if index_no_empty not in classes_to_sample:
                     classes_to_sample[index_no_empty] = {
                         "weight": self.rehearsal_metadata[index_no_empty][1],
                         "indices": [],
@@ -400,7 +396,7 @@ class Buffer:
                         next_minibatch.ground_truth,
                     )
         else:
-            for i in enumerate(y):
+            for i in range(y.shape[0]):
                 label = y[i].item()
 
                 # picking an index to replace/append to
