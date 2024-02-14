@@ -1,19 +1,16 @@
-import horovod.torch as hvd
-import logging
-import numpy as np
 import os
-import random
+
+from typing import List, Tuple, Union
+
+import horovod.torch as hvd
+import numpy as np
 import torch
 
 from continuum import datasets
 from continuum.datasets import _ContinuumDataset
 from continuum.tasks import TaskType
 from filelock import FileLock
-from random import shuffle
-from scipy.stats import circmean
-from sklearn.utils import shuffle
 from tqdm import tqdm
-from typing import Callable, List, Optional, Tuple, Union
 
 
 COMPATIBILITY = ["class", "instance"]
@@ -115,8 +112,9 @@ def get_dataset(
         train_scans_paths = np.array([f"{root}/train/{scan}" for scan in train_scans])
 
         return DiffractionDataset(train_scans_paths), ["reconstruction"]
+
     else:
-        raise ValueError("Unknown dataset")
+        raise ValueError(f"Unknown dataset {dataset}")
 
 
 class DiffractionDataset(_ContinuumDataset):

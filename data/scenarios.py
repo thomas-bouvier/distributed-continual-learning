@@ -1,4 +1,3 @@
-import warnings
 import numpy as np
 
 from data.tasksets import DiffractionPathTaskSet
@@ -45,11 +44,11 @@ class ReconstructionIncremental(_BaseScenario):
             nb_tasks is not None and nb_tasks > 0
         ):  # If the user wants a particular nb of tasks
             task_ids = self._split_dataset(x, nb_tasks)
-            self.dataset = (x, task_ids)
+            self.dataset = (x, 0, task_ids)
         elif (
             t is not None
         ):  # Otherwise use the default task ids if provided by the dataset
-            self.dataset = (x, t)
+            self.dataset = (x, 0, t)
             nb_tasks = len(np.unique(t))
         else:
             raise Exception(
@@ -126,7 +125,7 @@ class ReconstructionIncremental(_BaseScenario):
         if isinstance(task_index, np.ndarray):
             task_index = list(task_index)
 
-        x, t = self.dataset  # type: ignore
+        x, _, t = self.dataset  # type: ignore
 
         if isinstance(task_index, list):
             task_index = [

@@ -49,8 +49,8 @@ _TRANSFORM_ARGS = {"transform_name"}
 
 
 class DataRegime:
-    def __init__(self, hvd, config={}):
-        self.hvd = hvd
+    def __init__(self, hvd_obj, config={}):
+        self.hvd = hvd_obj
         self.config = config
         self.epoch = 0
         self.task_id = -1
@@ -87,13 +87,8 @@ class DataRegime:
         scenario = self.get("tasks").get("scenario", "class")
         num_tasks = self.get("tasks").get("num_tasks", 1)
 
-        if scenario == "reconstruction":
-            dataset, compatibility = get_dataset(
-                **self.config["data"],
-            )
-        else:
-            dataset, compatibility = get_dataset(**self.config["data"])
-            self.total_num_samples = len(dataset.get_data()[0])
+        dataset, compatibility = get_dataset(**self.config["data"])
+        self.total_num_samples = len(dataset.get_data()[0])
 
         assert (
             scenario in compatibility
@@ -130,11 +125,9 @@ class DataRegime:
                 transformations=[self.config["transform"]["compose"]],
             )
         logging.info(
-            f"Prepared {len(self.scenario)} {self.config['data']['split']} tasksets"
+            "Prepared %d %s tasksets", len(self.scenario), self.config["data"]["split"]
         )
-        self.total_num_classes = (
-            self.scenario.nb_classes if scenario != "reconstruction" else 1
-        )
+        self.total_num_classes = self.scenario.nb_classes
 
     def get_taskset(self):
         """Get the taskset refered to by self.task_id, with all previous data

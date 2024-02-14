@@ -82,7 +82,9 @@ def train_one_epoch(
             if hvd.rank() == 0:
                 # Performance metrics
                 if (
-                    measure_performance({"task_id": task_id, "epoch": epoch, "batch": batch})
+                    measure_performance(
+                        {"task_id": task_id, "epoch": epoch, "batch": batch}
+                    )
                     and model.batch_metrics is not None
                 ):
                     model.batch_metrics.save()
@@ -109,7 +111,9 @@ def train_one_epoch(
                 for key, value in meters.items():
                     logging.debug(f"{key} {value.avg}\t")
 
-                if measure_performance({"task_id": task_id, "epoch": epoch, "batch": batch}):
+                if measure_performance(
+                    {"task_id": task_id, "epoch": epoch, "batch": batch}
+                ):
                     batch_metrics = model.batch_metrics.get(
                         {"task_id": task_id, "epoch": epoch, "batch": batch}
                     )

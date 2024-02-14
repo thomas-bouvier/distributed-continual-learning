@@ -10,13 +10,12 @@ from nvidia.dali.pipeline import Pipeline
 from tqdm import tqdm
 
 
-"""
-https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/frameworks/pytorch/pytorch-external_input.html
-https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/general/data_loading/parallel_external_source.html
-"""
-
-
 class ExternalInputCallable:
+    """
+    https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/frameworks/pytorch/pytorch-external_input.html
+    https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/general/data_loading/parallel_external_source.html
+    """
+
     def __init__(self, taskset, task_id, batch_size, shard_id, num_shards):
         self.task_id = task_id
         self.batch_size = batch_size
@@ -195,7 +194,14 @@ class DaliDataLoader:
 
 class PtychoExternalInputCallable:
     def __init__(
-        self, taskset, task_id, batch_size, shard_id, num_shards, shuffle=False, training=True,
+        self,
+        taskset,
+        task_id,
+        batch_size,
+        shard_id,
+        num_shards,
+        shuffle=False,
+        training=True,
     ):
         self.task_id = task_id
         self.batch_size = batch_size
@@ -276,7 +282,12 @@ class PtychoDaliDataLoader:
         task_diff_data = []
         task_ampli_data = []
         task_phase_data = []
-        for i, _ in enumerate(tqdm(file_paths, desc=f"Loading {len(file_paths)} perspectives for task {task_id+1}")):
+        for i, _ in enumerate(
+            tqdm(
+                file_paths,
+                desc=f"Loading {len(file_paths)} perspectives for task {task_id+1}",
+            )
+        ):
             # Calculating the phase and amplitude from the real-space data
             rspace_data = np.load(rspace_paths[i])
             ampli_data = np.abs(rspace_data)
@@ -292,9 +303,15 @@ class PtychoDaliDataLoader:
 
             # Concatenating scan position(s) for this task
             diff_data = np.load(diffraction_paths[i])
-            task_diff_data.extend(diff_data[idx][shard_offset : shard_offset + shard_size])
-            task_ampli_data.extend(ampli_data[idx][shard_offset : shard_offset + shard_size])
-            task_phase_data.extend(phase_data[idx][shard_offset : shard_offset + shard_size])
+            task_diff_data.extend(
+                diff_data[idx][shard_offset : shard_offset + shard_size]
+            )
+            task_ampli_data.extend(
+                ampli_data[idx][shard_offset : shard_offset + shard_size]
+            )
+            task_phase_data.extend(
+                phase_data[idx][shard_offset : shard_offset + shard_size]
+            )
 
         task_diff_data = np.array(task_diff_data, dtype=np.float32)
         task_ampli_data = np.array(task_ampli_data, dtype=np.float32)

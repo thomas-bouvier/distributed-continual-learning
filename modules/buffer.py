@@ -113,7 +113,8 @@ class Buffer:
         labels. If `high_performance` is enabled, this instanciates Neomem.
         """
         logging.info(
-            "Initializing the buffer with storage for %s representatives per class", self.budget_per_class
+            "Initializing the buffer with storage for %d representatives per class",
+            self.budget_per_class,
         )
         device = "cuda" if cuda else "cpu"
 
@@ -152,7 +153,9 @@ class Buffer:
 
             # todo: we should have a way to support different shapes
             reharsal_logits_size = (
-                self.total_num_classes * self.budget_per_class * self.num_samples_per_activation
+                self.total_num_classes
+                * self.budget_per_class
+                * self.num_samples_per_activation
             )
             self.rehearsal_logits = torch.empty(
                 [reharsal_logits_size] + list(self.sample_shape), dtype=torch.float16
@@ -373,7 +376,9 @@ class Buffer:
             ), "Some ground-truth tensors should be provided"
 
         if self.num_samples_per_activation > 0:
-            assert len(logits) == self.num_samples_per_activation, "Some logits should be provided"
+            assert (
+                len(logits) == self.num_samples_per_activation
+            ), "Some logits should be provided"
 
         if self.high_performance:
             with get_timer(

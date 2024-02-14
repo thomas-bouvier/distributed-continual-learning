@@ -311,12 +311,12 @@ def main():
         if not path.exists(save_path):
             makedirs(save_path)
 
-        with open(path.join(save_path, "args.json"), "w") as f:
+        with open(path.join(save_path, "args.json"), "w", encoding="utf-8") as f:
             json.dump(args.__dict__, f, indent=2)
             wandb.save(path.join(save_path, "args.json"))
         wandb.config.update(args)
 
-        logging.info(f"Saving to {save_path}")
+        logging.info("Saving to %s", save_path)
 
     setup_logging(
         path.join(save_path, f"log_{hvd.rank()}.txt"),
@@ -324,8 +324,8 @@ def main():
     )
 
     device = "GPU" if args.cuda else "CPU"
-    logging.info(f"Number of {device}s: {hvd.size()}")
-    logging.info(f"Run arguments: {args}")
+    logging.info("Number of %ss: %d", device, hvd.size())
+    logging.info("Run arguments: %s", args)
 
     xp = Experiment(args, save_path)
     xp.run()
@@ -374,10 +374,12 @@ class Experiment:
             )
         backbone_model = getattr(backbone, self.args.backbone)(backbone_config)
         logging.info(
-            f"Created backbone model {self.args.backbone} with configuration: {json.dumps(backbone_config, indent=2)}"
+            "Created backbone model %s with configuration: %s",
+            self.args.backbone,
+            json.dumps(backbone_config, indent=2),
         )
         num_parameters = sum([l.nelement() for l in backbone_model.parameters()])
-        logging.info(f"Number of parameters: {num_parameters}")
+        logging.info("Number of parameters: %d", num_parameters)
         backbone_model = move_cuda(backbone_model, self.args.cuda)
 
         # Building the optimizer regime
@@ -385,7 +387,7 @@ class Experiment:
             optimizer_regime_dict = literal_eval(self.args.optimizer_regime)
         else:
             optimizer_regime_dict = getattr(backbone_model, "regime")
-        logging.info(f"Optimizer regime: {optimizer_regime_dict}")
+        logging.info("Optimizer regime: %s", optimizer_regime_dict)
         optimizer_regime = OptimizerRegime(
             backbone_model,
             hvd.Compression.fp16 if self.args.fp16_allreduce else hvd.Compression.none,
@@ -404,13 +406,20 @@ class Experiment:
 
         buffer_config = literal_eval(self.args.buffer_config)
         rehearsal_ratio = buffer_config.pop("rehearsal_ratio", 30)
-        if (
-            bool(buffer_config)
-            and literal_eval(self.args.tasksets_config).get("scenario", "class")
-            != "reconstruction"
-        ):
+        if bool(buffer_config):
+            total_num_samples = self.train_data_regime.total_num_samples
+            if (
+                literal_eval(self.args.tasksets_config).get("scenario", "class")
+                == "reconstruction"
+            ):
+                # This is a workaround, as the ptycho dataset contains perspectives
+                # and not individual diffraction patterns i.e., samples, contained
+                # in a perspective. After filtering out empty diffractions, ~450 of
+                # them are contained in a perspective.
+                total_num_samples *= 450
+
             budget_per_class = math.floor(
-                self.train_data_regime.total_num_samples
+                total_num_samples
                 * rehearsal_ratio
                 / 100
                 / total_num_classes
@@ -420,7 +429,6 @@ class Experiment:
                 budget_per_class > 0
             ), "Choose rehearsal_ratio so as to to store at least some samples per class on all processes"
             buffer_config |= {"budget_per_class": budget_per_class}
-
         # -------------------------------------------------------------------------------------------------#
 
         # -----------------#
@@ -442,7 +450,8 @@ class Experiment:
             batch_metrics,
         )
         logging.info(
-            f"Created model with buffer configuration: {json.dumps(buffer_config, indent=2)}"
+            "Created model with buffer configuration: %s",
+            json.dumps(buffer_config, indent=2),
         )
 
         # -------------------------------------------------------------------------------------------------#
@@ -460,7 +469,7 @@ class Experiment:
             checkpoint = torch.load(self.args.load_checkpoint, map_location="cpu")
 
             # Load checkpoint
-            logging.info(f"Loading model {self.args.load_checkpoint}...")
+            logging.info("Loading model %s...", self.args.load_checkpoint)
             self.model.backbone.load_state_dict(checkpoint["state_dict"])
             # optimizer_regime.load_state_dict(checkpoint["optimizer_state_dict"])
 
@@ -468,7 +477,7 @@ class Experiment:
             resume_from_task = checkpoint["task"]
             resume_from_epoch = checkpoint["epoch"]
             logging.info(
-                f"Resuming from task {resume_from_task} epoch {resume_from_epoch}"
+                "Resuming from task %d epoch %d", resume_from_task, resume_from_epoch
             )
 
         self.resume_from_task = hvd.broadcast(
@@ -491,7 +500,7 @@ class Experiment:
             is_initial=True,
             dummy=hvd.rank() > 0,
         )
-        logging.info(f"Initial checkpoint created")
+        logging.info("Initial checkpoint created")
 
     def prepare_dataset(self):
         defaults = {
@@ -513,7 +522,9 @@ class Experiment:
                 "batch_size": self.args.batch_size * self.args.batches_per_allreduce,
             },
         )
-        logging.info(f"Created train data regime: {str(self.train_data_regime.config)}")
+        logging.info(
+            "Created train data regime: %s", str(self.train_data_regime.config)
+        )
 
         self.validate_data_regime = DataRegime(
             hvd,
@@ -526,7 +537,7 @@ class Experiment:
             },
         )
         logging.info(
-            f"Created test data regime: {str(self.validate_data_regime.config)}"
+            "Created test data regime: %s", str(self.validate_data_regime.config)
         )
 
         return self.train_data_regime.total_num_classes
@@ -535,19 +546,19 @@ class Experiment:
         dl_metrics_path = path.join(self.save_path, "dl_metrics")
         dl_metrics = ResultsLog(
             dl_metrics_path,
-            title="DL metrics - %s" % self.args.save_dir,
+            title=f"DL metrics - {self.args.save_dir}",
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
         tasks_metrics_path = path.join(self.save_path, "tasks_metrics")
         tasks_metrics = ResultsLog(
             tasks_metrics_path,
-            title="Tasks metrics - %s" % self.args.save_dir,
+            title=f"Tasks metrics - {self.args.save_dir}",
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
         time_metrics_path = path.join(self.save_path, "time_metrics")
         time_metrics = ResultsLog(
             time_metrics_path,
-            title="Time metrics - %s" % self.args.save_dir,
+            title=f"Time metrics - {self.args.save_dir}",
             dummy=hvd.rank() > 0 or hvd.local_rank() > 0,
         )
 
