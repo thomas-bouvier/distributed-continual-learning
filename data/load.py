@@ -200,7 +200,7 @@ class PtychoExternalInputCallable:
         batch_size,
         shard_id,
         num_shards,
-        shuffle=False,
+        shuffle=True,
         training=True,
     ):
         self.task_id = task_id
