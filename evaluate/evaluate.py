@@ -7,7 +7,7 @@ import wandb
 from tqdm import tqdm
 from torch.cuda.amp import autocast
 
-from utils.meters import AverageMeter, accuracy
+from utils.meters import AverageMeter
 from utils.log import get_logging_level
 
 
@@ -15,8 +15,6 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch, scenario):
     model.backbone.eval()
 
     with torch.no_grad():
-        previous_task = test_task_id != task_id
-
         prefix = "val"
         metrics = (
             ["loss", "prec1", "prec5", "num_samples", "local_rehearsal_size"]
@@ -37,7 +35,7 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch, scenario):
             start_batch_time = time.perf_counter()
 
             for data in loader:
-                step = dict(task_id=task_id, epoch=epoch, batch=batch)
+                step = {"task_id": task_id, "epoch": epoch, "batch": batch}
                 evaluate_fn = (
                     model.evaluate_one_step
                     if scenario != "reconstruction"
@@ -62,6 +60,6 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch, scenario):
         avg_meters["time"] = epoch_time
         avg_meters["batch"] = batch
 
-        logging.info(f"epoch time {epoch_time} sec")
+        logging.info("epoch time %d sec", epoch_time)
 
         return avg_meters

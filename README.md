@@ -50,7 +50,11 @@ Values for `optimizer_regime` will override regimes defined by `backbone/` in Py
 
 To run a hyperparameter search, first adapt the `sweep.py` (located in this directory) file if needed. Then, configure your optimization objective in `sweep.yaml`.
 
-Make sure you exported your WandB API key before running anything `export WANDB_API_KEY=key` and set `WANDB_MODE=run`. Once you are ready, execute the `sweep_launcher.sh <hostname> [<existing_sweep_id>]` script on the master machine, not forgetting to provide the address of the current machine e.g., `chifflot-7.lille.grid5000.fr:1`.
+Make sure you exported your WandB API key before running anything `export WANDB_API_KEY=key` and set `WANDB_MODE=run`. Once you are ready, execute the `sweep_launcher.sh <hostname> <wandb_project> <sweep_conf> [<existing_sweep_id>]` script on the master machine, providing the following parameters:
+
+- `hostname`: the address of the current machine e.g., `chifflot-7.lille.grid5000.fr:1`
+- `wandb_project`: the name of an existing W&B project where the run will be saved
+- `sweep_conf`: the name of a sweep config defined in `sweep.py`
 
 To stop a sweep run, go to the online WandB dashboard and click "Stop run". To stop the whole sweep process, `ps aux | grep agent` on the machine and kill the process, then `ps aux | grep wandb` and kill that process too.
 
