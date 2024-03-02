@@ -39,6 +39,7 @@ class Er(ContinualLearner):
         )
 
         self.use_memory_buffer = True
+        self.first_iteration = True
 
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(
@@ -72,14 +73,24 @@ class Er(ContinualLearner):
             y_batch = y[i : i + self.batch_size]
 
             # Get data from the last iteration (blocking)
-            aug_x, aug_y, _, _, _ = self.buffer.update(
-                [x_batch],
-                y_batch,
-                step,
-                batch_metrics=self.batch_metrics,
-                activations=[],
-            )
-            aug_x = aug_x[0]
+            if not self.first_iteration:
+                aug_x, aug_y, _, _, _ = self.buffer.update(
+                    [x_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                )
+                aug_x = aug_x[0]
+            else:
+                self.buffer.add_data(
+                    [x_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                )
+                aug_x = x_batch
+                aug_y = y_batch
+                self.first_iteration = False
 
             with get_timer(
                 "train",
@@ -166,13 +177,23 @@ class Er(ContinualLearner):
             amp_batch = amp[i : i + self.batch_size]
             ph_batch = ph[i : i + self.batch_size]
 
-            # Get data from the last iteration (blocking)
-            aug_x, _, _, _, _ = self.buffer.update(
-                [x_batch, amp_batch, ph_batch],
-                y_batch,
-                step,
-                batch_metrics=self.batch_metrics,
-            )
+            if not self.first_iteration:
+                # Get data from the last iteration (blocking)
+                aug_x, _, _, _, _ = self.buffer.update(
+                    [x_batch, amp_batch, ph_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                )
+            else:
+                self.buffer.add_data(
+                    [x_batch, amp_batch, ph_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                )
+                aug_x = [x_batch, amp_batch, ph_batch]
+                self.first_iteration = False
 
             with get_timer(
                 "train",

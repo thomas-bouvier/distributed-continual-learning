@@ -66,8 +66,8 @@ Specific implementations have to be selected using `--buffer-config "{'implement
 |---|---|---|
 | Experience Replay (ER) | `Er` | `standard`, `flyweight`, `python` |
 | Averaged (A-GEM) | `Agem` | `python` |
-| Dark Experience Replay (DER) | `Der` | `python` |
-| Dark Experience Replay ++ (DER++) | `Derpp` | `python` |
+| Dark Experience Replay (DER) | `Der` | `standard`, `flyweight`, `python` |
+| Dark Experience Replay ++ (DER++) | `Derpp` | `standard`, `flyweight`, `python` |
 
 ### Baselines
 

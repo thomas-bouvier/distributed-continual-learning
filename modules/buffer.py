@@ -126,11 +126,12 @@ class Buffer:
         device = "cuda" if cuda else "cpu"
 
         if self.high_performance:
-            engine = neomem.EngineLoader(
+            # The engine should be stored.
+            self.engine = neomem.EngineLoader(
                 provider, ctypes.c_uint16(hvd.rank()).value, cuda_rdma
             )
             self.dsl = neomem.DistributedStreamLoader.create(
-                engine,
+                self.engine,
                 neomem.Rehearsal,
                 self.total_num_classes,
                 self.budget_per_class,
@@ -217,6 +218,10 @@ class Buffer:
 
         assert len(samples)
         assert len(samples) == self.num_samples_per_representative
+        if self.num_samples_per_activation > 0:
+            assert (
+                len(activations) == self.num_samples_per_activation
+            ), "Some activations should be provided"
 
         if self.high_performance:
             self.dsl.measure_performance(measure_performance(step))
@@ -433,12 +438,6 @@ class Buffer:
         if activations is None:
             activations = []
 
-        assert len(samples) == self.num_samples_per_representative
-        if self.num_samples_per_activation > 0:
-            assert (
-                len(activations) == self.num_samples_per_activation
-            ), "Some activations should be provided"
-
         if self.high_performance:
             with get_timer(
                 "accumulate",
@@ -454,7 +453,7 @@ class Buffer:
                         samples,
                         targets,
                         activations,
-                        next_minibatch.input,
+                        next_minibatch.samples,
                         next_minibatch.labels,
                         next_minibatch.weights,
                         next_minibatch.activations,

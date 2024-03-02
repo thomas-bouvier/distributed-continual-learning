@@ -1,7 +1,7 @@
 import horovod.torch as hvd
 import torch
-import torch.nn as nn
 
+from torch import nn
 from torch.cuda.amp import autocast
 
 from modules import ContinualLearner, Buffer
@@ -55,9 +55,6 @@ class Der(ContinualLearner):
             **self.buffer_config,
         )
 
-        # x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        # self.buffer.add_data(x, y, dict(batch=-1))
-
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
@@ -85,6 +82,13 @@ class Der(ContinualLearner):
                     step,
                     batch_metrics=self.batch_metrics,
                     activations=[self.activations],
+                )
+            else:
+                self.buffer.add_data(
+                    [x_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
                 )
 
             with get_timer(

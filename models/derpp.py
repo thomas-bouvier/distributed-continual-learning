@@ -50,8 +50,6 @@ class Derpp(ContinualLearner):
         self.activations_ph = None
 
     def before_all_tasks(self, train_data_regime):
-        self.buffer_config["implementation"] = "flyweight"
-
         self.buffer = Buffer(
             train_data_regime.total_num_classes,
             train_data_regime.sample_shape,
@@ -59,9 +57,6 @@ class Derpp(ContinualLearner):
             cuda=self._is_on_cuda(),
             **self.buffer_config,
         )
-
-        # x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        # self.buffer.add_data(x, y, dict(batch=-1))
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
@@ -76,57 +71,74 @@ class Derpp(ContinualLearner):
         x, y, _ = data
         x, y = x.to(self._device()), y.long().to(self._device())
 
-        if self.activations is not None:
-            aug_x, aug_y, _, buf_activations, buf_activations_rep = self.buffer.update(
-                [x],
-                y,
+        # If making multiple backward passes per step, we need to cut the
+        # current effective batch into local mini-batches.
+        for i in range(0, len(x), self.batch_size):
+            x_batch = x[i : i + self.batch_size]
+            y_batch = y[i : i + self.batch_size]
+            if self.activations is not None:
+                (
+                    aug_x,
+                    aug_y,
+                    _,
+                    buf_activations,
+                    buf_activations_rep,
+                ) = self.buffer.update(
+                    [x_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                    activations=[self.activations],
+                )
+                aug_x = aug_x[0]
+            else:
+                self.buffer.add_data(
+                    [x_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                )
+                aug_x = x_batch
+                aug_y = y_batch
+
+            with get_timer(
+                "train",
                 step,
                 batch_metrics=self.batch_metrics,
-                activations=[self.activations],
-            )
-            aug_x = aug_x[0]
-        else:
-            aug_x = x
-            aug_y = y
+                dummy=not measure_performance(step),
+            ):
+                self.optimizer_regime.update(step)
+                self.optimizer_regime.zero_grad()
 
-        with get_timer(
-            "train",
-            step,
-            batch_metrics=self.batch_metrics,
-            dummy=not measure_performance(step),
-        ):
-            self.optimizer_regime.update(step)
-            self.optimizer_regime.zero_grad()
+                # Forward pass
+                with autocast(enabled=self.use_amp):
+                    output = self.backbone(aug_x)
+                    loss = self.criterion(output, aug_y)
 
-            # Forward pass
-            with autocast(enabled=self.use_amp):
-                output = self.backbone(aug_x)
-                loss = self.criterion(output, aug_y)
+                # Knowledge distillation
+                if self.activations is not None:
+                    buf_outputs = self.backbone(buf_activations_rep)
+                    loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
 
-            # Knowledge distillation
-            if self.activations is not None:
-                buf_outputs = self.backbone(buf_activations_rep)
-                loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
+                self.activations = output.data
 
-            self.activations = output.data
+                if self.use_amp:
+                    self.scaler.scale(loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
+                else:
+                    (loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.step()
 
-            if self.use_amp:
-                self.scaler.scale(loss.sum() / loss.size(0)).backward()
-                self.optimizer_regime.optimizer.synchronize()
-                with self.optimizer_regime.optimizer.skip_synchronize():
-                    self.scaler.step(self.optimizer_regime.optimizer)
-                    self.scaler.update()
-            else:
-                (loss.sum() / loss.size(0)).backward()
-                self.optimizer_regime.step()
-
-            # Measure accuracy and record metrics
-            prec1, prec5 = accuracy(output, y, topk=(1, 5))
-            meters["loss"].update(loss.mean())
-            meters["prec1"].update(prec1, x.size(0))
-            meters["prec5"].update(prec5, x.size(0))
-            meters["num_samples"].update(x.size(0))
-            meters["local_rehearsal_size"].update(self.buffer.get_size())
+                # Measure accuracy and record metrics
+                prec1, prec5 = accuracy(output, y, topk=(1, 5))
+                meters["loss"].update(loss.mean())
+                meters["prec1"].update(prec1, x.size(0))
+                meters["prec5"].update(prec5, x.size(0))
+                meters["num_samples"].update(x.size(0))
+                meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_one_step(self, data, meters):
         x, y, _ = data
@@ -178,6 +190,12 @@ class Derpp(ContinualLearner):
                     activations=[self.activations_amp, self.activations_ph],
                 )
             else:
+                self.buffer.add_data(
+                    [x_batch, amp_batch, ph_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                )
                 aug_x = [x_batch, amp_batch, ph_batch]
 
             with get_timer(
