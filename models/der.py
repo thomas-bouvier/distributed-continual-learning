@@ -40,11 +40,11 @@ class Der(ContinualLearner):
 
         try:
             self.alpha = config["alpha"]
-        except:
-            raise Exception("Parameter alpha is required for Der")
+        except Exception as exc:
+            raise Exception("Parameter alpha is required for Der") from exc
 
         self.use_memory_buffer = True
-        self.temp = False
+        self.activations = None
 
     def before_all_tasks(self, train_data_regime):
         self.buffer = Buffer(
@@ -52,7 +52,6 @@ class Der(ContinualLearner):
             train_data_regime.sample_shape,
             self.batch_size,
             cuda=self._is_on_cuda(),
-            num_samples_per_activation=1,
             **self.buffer_config,
         )
 
@@ -72,55 +71,62 @@ class Der(ContinualLearner):
         x, y, _ = data
         x, y = x.to(self._device()), y.long().to(self._device())
 
-        with get_timer(
-            "train",
-            step,
-            batch_metrics=self.batch_metrics,
-            dummy=not measure_performance(step),
-        ):
-            self.optimizer_regime.update(step)
-            self.optimizer_regime.zero_grad()
+        # If making multiple backward passes per step, we need to cut the
+        # current effective batch into local mini-batches.
+        for i in range(0, len(x), self.batch_size):
+            x_batch = x[i : i + self.batch_size]
+            y_batch = y[i : i + self.batch_size]
 
-            # Forward pass
-            with autocast(enabled=self.use_amp):
-                output = self.backbone(x)
-                loss = self.criterion(output, y)
+            # Get data from the last iteration (blocking)
+            if self.activations is not None:
+                _, _, _, buf_activations, buf_activations_rep = self.buffer.update(
+                    [x_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                    activations=[self.activations],
+                )
 
-            # loss = loss.sum() / loss.size(0)
+            with get_timer(
+                "train",
+                step,
+                batch_metrics=self.batch_metrics,
+                dummy=not measure_performance(step),
+            ):
+                # If performing multiple passes, update the optimizer only once.
+                if i == 0:
+                    self.optimizer_regime.update(step)
+                    self.optimizer_regime.zero_grad()
 
-            if self.temp:
-                buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
-                buf_inputs, buf_logits = buf.x, buf.logits
-                buf_outputs = self.backbone(buf_inputs)
-                loss += self.alpha * F.mse_loss(buf_outputs, buf_logits)
+                # Forward pass
+                with autocast(enabled=self.use_amp):
+                    output = self.backbone(x)
+                    loss = self.criterion(output, y)
 
-            elif step["task_id"] > 0:
-                self.temp = True
+                # Knowledge distillation
+                if self.activations is not None:
+                    buf_outputs = self.backbone(buf_activations_rep)
+                    loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
 
-            self.scaler.scale(loss.sum() / loss.size(0)).backward()
+                self.activations = output.data
 
-            self.optimizer_regime.optimizer.synchronize()
-            with self.optimizer_regime.optimizer.skip_synchronize():
-                self.scaler.step(self.optimizer_regime.optimizer)
-                self.scaler.update()
+                if self.use_amp:
+                    self.scaler.scale(loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
+                else:
+                    (loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.step()
 
-            # If scaler doesn't work use this classic backward
-            # loss.backward()
-
-            self.buffer.update_with_logits(
-                x, y, output.data, step, batch_metrics=self.batch_metrics
-            )
-
-            # If scaler doesn't work use this classic backward
-            # self.optimizer_regime.step()
-
-            # Measure accuracy and record metrics
-            prec1, prec5 = accuracy(output, y, topk=(1, 5))
-            meters["loss"].update(loss.mean())
-            meters["prec1"].update(prec1, x.size(0))
-            meters["prec5"].update(prec5, x.size(0))
-            meters["num_samples"].update(x.size(0))
-            meters["local_rehearsal_size"].update(self.buffer.get_size())
+                # Measure accuracy and record metrics
+                prec1, prec5 = accuracy(output, y, topk=(1, 5))
+                meters["loss"].update(loss.mean())
+                meters["prec1"].update(prec1, x.size(0))
+                meters["prec5"].update(prec5, x.size(0))
+                meters["num_samples"].update(x.size(0))
+                meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_one_step(self, data, meters, step):
         x, y, _ = data
@@ -134,3 +140,4 @@ class Der(ContinualLearner):
         meters["loss"].update(loss.sum() / loss.size(0))  # loss IF SCALER DESACTIVATED
         meters["prec1"].update(prec1, x.size(0))
         meters["prec5"].update(prec5, x.size(0))
+        meters["num_samples"].update(x.size(0))

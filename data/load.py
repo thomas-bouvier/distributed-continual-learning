@@ -139,7 +139,7 @@ class DaliDataLoader:
                 mirror = fn.random.coin_flip(probability=0.5)
             else:
                 images = fn.decoders.image(
-                    inputs, device=decoder_device, output_type=types.RGB
+                    images, device=decoder_device, output_type=types.RGB
                 )
                 images = fn.resize(
                     images,

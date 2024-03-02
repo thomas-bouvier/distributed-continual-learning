@@ -41,11 +41,13 @@ class Derpp(ContinualLearner):
         try:
             self.alpha = config["alpha"]
             self.beta = config["beta"]
-        except:
-            raise Exception("Parameters alpha and beta are required for Derpp")
+        except Exception as exc:
+            raise Exception("Parameters alpha and beta are required for Derpp") from exc
 
         self.use_memory_buffer = True
-        self.temp = False
+        self.activations = None
+        self.activations_amp = None
+        self.activations_ph = None
 
     def before_all_tasks(self, train_data_regime):
         self.buffer_config["implementation"] = "flyweight"
@@ -55,7 +57,6 @@ class Derpp(ContinualLearner):
             train_data_regime.sample_shape,
             self.batch_size,
             cuda=self._is_on_cuda(),
-            num_samples_per_activation=2,
             **self.buffer_config,
         )
 
@@ -75,6 +76,19 @@ class Derpp(ContinualLearner):
         x, y, _ = data
         x, y = x.to(self._device()), y.long().to(self._device())
 
+        if self.activations is not None:
+            aug_x, aug_y, _, buf_activations, buf_activations_rep = self.buffer.update(
+                [x],
+                y,
+                step,
+                batch_metrics=self.batch_metrics,
+                activations=[self.activations],
+            )
+            aug_x = aug_x[0]
+        else:
+            aug_x = x
+            aug_y = y
+
         with get_timer(
             "train",
             step,
@@ -86,45 +100,25 @@ class Derpp(ContinualLearner):
 
             # Forward pass
             with autocast(enabled=self.use_amp):
-                output = self.backbone(x)
-                loss = self.criterion(output, y)
+                output = self.backbone(aug_x)
+                loss = self.criterion(output, aug_y)
 
-            loss = loss.sum() / loss.size(0)
+            # Knowledge distillation
+            if self.activations is not None:
+                buf_outputs = self.backbone(buf_activations_rep)
+                loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
 
-            if self.temp:
-                # Same part common to DER
-                buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
-                buf_inputs, buf_logits = buf.x, buf.logits
-                buf_outputs = self.backbone(buf_inputs)
-                loss += self.alpha * F.mse_loss(buf_outputs, buf_logits)
+            self.activations = output.data
 
-                # Additional Part
-                buf = self.buffer._Buffer__get_current_augmented_minibatch(step)
-                buf_inputs, buf_y = buf.x, buf.y
-                buf_outputs = self.backbone(buf_inputs)
-                buf_loss = self.criterion(buf_outputs, buf_y)
-                buf_loss = buf_loss.sum() / buf_loss.size(0)
-                loss += self.beta * buf_loss
-
-            elif step["task_id"] > 0:
-                self.temp = True
-
-            self.scaler.scale(loss).backward()
-
-            self.optimizer_regime.optimizer.synchronize()
-            with self.optimizer_regime.optimizer.skip_synchronize():
-                self.scaler.step(self.optimizer_regime.optimizer)
-                self.scaler.update()
-
-            # If scaler doesn't work use this classic backward
-            # loss.backward()
-
-            self.buffer.update_with_logits(
-                x, y, output.data, step, batch_metrics=self.batch_metrics
-            )
-
-            # If scaler doesn't work use this classic backward
-            # self.optimizer_regime.step()
+            if self.use_amp:
+                self.scaler.scale(loss.sum() / loss.size(0)).backward()
+                self.optimizer_regime.optimizer.synchronize()
+                with self.optimizer_regime.optimizer.skip_synchronize():
+                    self.scaler.step(self.optimizer_regime.optimizer)
+                    self.scaler.update()
+            else:
+                (loss.sum() / loss.size(0)).backward()
+                self.optimizer_regime.step()
 
             # Measure accuracy and record metrics
             prec1, prec5 = accuracy(output, y, topk=(1, 5))
@@ -174,92 +168,56 @@ class Derpp(ContinualLearner):
             amp_batch = amp[i : i + self.batch_size]
             ph_batch = ph[i : i + self.batch_size]
 
-            # If performing multiple passes, update the optimizer only once.
-            if i == 0:
-                self.optimizer_regime.update(step)
-                self.optimizer_regime.zero_grad()
-
-            # Get the activations for the buffer
-            # Forward pass
-            with autocast(enabled=self.use_amp):
-                amp_output, ph_output = self.backbone(x_batch)
-                amp_loss = self.criterion(amp_output, amp_batch)
-                ph_loss = self.criterion(ph_output, ph_batch)
-                loss = amp_loss + ph_loss
-                total_loss = loss.sum() / loss.size(0)
-
             # Get data from the last iteration (blocking)
-            aug_x, aug_ground_truth, aug_y, aug_w, aug_logits = self.buffer.update(
-                x_batch,
-                y_batch,
-                step,
-                batch_metrics=self.batch_metrics,
-                logits=[amp_output.data, ph_output.data],
-                ground_truth=[amp_batch, ph_batch],
-            )
+            if self.activations_amp is not None and self.activations_ph is not None:
+                aug_x, _, _, buf_activations, buf_activations_rep = self.buffer.update(
+                    [x_batch, amp_batch, ph_batch],
+                    y_batch,
+                    step,
+                    batch_metrics=self.batch_metrics,
+                    activations=[self.activations_amp, self.activations_ph],
+                )
+            else:
+                aug_x = [x_batch, amp_batch, ph_batch]
 
-            # todo: timing not correct with that one
             with get_timer(
                 "train",
                 step,
                 batch_metrics=self.batch_metrics,
                 dummy=not measure_performance(step),
             ):
-                if step["task_id"] > self.buffer.soft_augmentations_offset:
-                    # Forward pass using the soft labels
-                    with autocast(enabled=self.use_amp):
-                        amp_output1, ph_output1 = self.backbone(
-                            aug_x[self.batch_size :]
-                        )
-                        amp_loss1 = F.mse_loss(
-                            amp_output1, aug_logits[0][self.batch_size :]
-                        )
-                        ph_loss1 = F.mse_loss(
-                            ph_output1, aug_logits[1][self.batch_size :]
-                        )
-                        loss1 = self.alpha * (amp_loss1 + ph_loss1)
-                        total_loss += loss1
+                # If performing multiple passes, update the optimizer only once.
+                if i == 0:
+                    self.optimizer_regime.update(step)
+                    self.optimizer_regime.zero_grad()
 
-                if self.buffer.augmentations_enabled:
-                    # Get data from the last iteration (blocking)
-                    (
-                        aug_x_2,
-                        aug_ground_truth_2,
-                        aug_y_2,
-                        aug_w_2,
-                        aug_logits_2,
-                    ) = self.buffer.update(
-                        x_batch,  # not actually adding anything to the buffer
-                        y_batch,
-                        step,
-                        batch_metrics=self.batch_metrics,
-                        logits=[amp_output.data, ph_output.data],
-                        ground_truth=[amp_batch, ph_batch],
-                        derpp=True,
+                # Forward pass
+                with autocast(enabled=self.use_amp):
+                    amp_output, ph_output = self.backbone(aug_x[0])
+                    amp_loss = self.criterion(amp_output, aug_x[1])
+                    ph_loss = self.criterion(ph_output, aug_x[2])
+                    loss = amp_loss + ph_loss
+
+                # Knowledge distillation
+                if self.activations_amp is not None and self.activations_ph is not None:
+                    buf_output_amp, buf_output_ph = self.backbone(buf_activations_rep)
+                    loss += self.alpha * (
+                        F.mse_loss(buf_output_amp, buf_activations[0])
+                        + F.mse_loss(buf_output_ph, buf_activations[1])
                     )
 
-                    # Forward pass using the hard labels
-                    with autocast(enabled=self.use_amp):
-                        amp_output2, ph_output2 = self.backbone(
-                            aug_x_2[self.batch_size :]
-                        )
-                        amp_loss2 = self.criterion(
-                            amp_output2, aug_ground_truth_2[0][self.batch_size :]
-                        )
-                        ph_loss2 = self.criterion(
-                            ph_output2, aug_ground_truth_2[1][self.batch_size :]
-                        )
-                        loss2 = self.beta * (amp_loss2 + ph_loss2)
-                        total_loss += loss2.sum() / loss2.size(0)
-
                 # Backward pass
-                self.scaler.scale(total_loss).backward()
-                self.optimizer_regime.optimizer.synchronize()
-                with self.optimizer_regime.optimizer.skip_synchronize():
-                    self.scaler.step(self.optimizer_regime.optimizer)
-                    self.scaler.update()
+                if self.use_amp:
+                    self.scaler.scale(loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.optimizer.synchronize()
+                    with self.optimizer_regime.optimizer.skip_synchronize():
+                        self.scaler.step(self.optimizer_regime.optimizer)
+                        self.scaler.update()
+                else:
+                    (loss.sum() / loss.size(0)).backward()
+                    self.optimizer_regime.step()
 
-                meters["loss"].update(total_loss)
+                meters["loss"].update(loss.sum() / loss.size(0))
                 # meters["loss_amp"].update(amp_loss.sum() / aug_x.size(0))
                 # meters["loss_ph"].update(ph_loss.sum() / aug_x.size(0))
                 # meters["num_samples"].update(aug_x.size(0))

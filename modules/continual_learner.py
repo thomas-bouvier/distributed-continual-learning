@@ -7,7 +7,6 @@ from torch.cuda.amp import GradScaler
 from torch.distributions import Categorical
 
 from cross_entropy import CrossEntropyLoss
-from utils.log import PerformanceResultsLog
 
 
 class ContinualLearner:
@@ -32,6 +31,7 @@ class ContinualLearner:
         self.config = config
         self.buffer_config = buffer_config
         self.batch_metrics = batch_metrics
+        self.buffer = None
 
         self.initial_snapshot = copy.deepcopy(self.backbone.state_dict())
         self.minimal_eval_loss = float("inf")

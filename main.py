@@ -332,7 +332,6 @@ def main():
     wandb.finish()
 
     logging.info("Done 🎉🎉🎉")
-    os.exit()  # will crash, good to save some walltime
     sys.exit(0)
 
 
@@ -367,6 +366,7 @@ class Experiment:
             "num_epochs": self.args.epochs,
             "total_num_samples": self.train_data_regime.total_num_samples,
             "num_steps_per_epoch": len(self.train_data_regime.get_loader(0)),
+            "batch_size": self.args.batch_size,
         }
         if self.args.backbone_config != "":
             backbone_config = dict(

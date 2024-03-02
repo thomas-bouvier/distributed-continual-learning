@@ -88,11 +88,12 @@ class PtychoNNModel(nn.Module):
 
 
 def ptychonn(config):
-    # world_size = config.pop("world_size", 1)
+    world_size = config.pop("world_size", 1)
     # Scaling by the global rank degraded the accuracy when doing rehearsal
     lr = config.pop("lr", 5e-4)
     lr_min = config.pop("lr_min", 1e-4)
-    step_cycle_size = config.pop("step_cycle_size", 184)
+    batch_size = config.pop("batch_size")
+    step_cycle_size = config.pop("step_cycle_size", 2944) / batch_size / world_size
     lr_schedule = config.pop("lr_schedule", "exp_range_cyclic_lr")
 
     model = PtychoNNModel()

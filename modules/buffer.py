@@ -5,6 +5,8 @@ import math
 import random
 import torch
 
+from typing import List
+
 from train.train import measure_performance
 from utils.meters import get_timer
 from utils.log import get_shared_logging_level
@@ -14,24 +16,28 @@ class AugmentedMinibatch:
     def __init__(
         self,
         num_samples,
-        shape,
+        representative_shape,
         device,
         num_samples_per_representative=1,
+        num_samples_distillation=0,
+        activation_shape=None,
         num_samples_per_activation=0,
     ):
-        self.input = torch.zeros(num_samples, *shape, device=device)
-        self.ground_truth = [
-            torch.zeros(num_samples, *shape, device=device)
-            for _ in range(num_samples_per_representative - 1)
+        self.device = device
+        self.samples = [
+            torch.zeros(num_samples, *representative_shape, device=device)
+            for _ in range(num_samples_per_representative)
         ]
         self.labels = torch.randint(high=1000, size=(num_samples,), device=device)
         self.weights = torch.ones(num_samples, device=device)
 
-        # todo: we should have a way to support different shapes
-        self.logits = [
-            torch.zeros(num_samples, *shape, device=device, dtype=torch.float16)
+        self.activations = [
+            torch.zeros(num_samples_distillation, *activation_shape, device=device)
             for _ in range(num_samples_per_activation)
         ]
+        self.activations_rep = torch.zeros(
+            num_samples_distillation, *representative_shape, device=device
+        )
 
 
 class Buffer:
@@ -42,37 +48,38 @@ class Buffer:
     def __init__(
         self,
         total_num_classes,
-        sample_shape,
+        representative_shape,
         batch_size,
         budget_per_class=16,
         num_representatives=8,
+        num_representatives_distillation=8,
         num_candidates=8,
         augmentations_offset=0,
         soft_augmentations_offset=0,
+        activation_shape=None,
         provider="na+sm",
         discover_endpoints=True,
         cuda=True,
         cuda_rdma=False,
-        mode="separate",
         implementation="standard",
         num_samples_per_representative=1,
         num_samples_per_activation=0,
     ):
-        assert mode in ("separate")
         assert implementation in ("standard", "flyweight")
 
         self.total_num_classes = total_num_classes
-        self.sample_shape = sample_shape
+        self.representative_shape = representative_shape
+        self.activation_shape = activation_shape
         self.batch_size = batch_size
         self.budget_per_class = budget_per_class
         self.num_representatives = num_representatives
+        self.num_representatives_distillation = num_representatives_distillation
         self.num_candidates = num_candidates
         self.augmentations_offset = augmentations_offset
         self.soft_augmentations_offset = soft_augmentations_offset
         self.next_minibatches = []
-        self.next_minibatches_derpp = []
-        self.mode = mode
         self.implementation = implementation
+        self.minibatches_ahead = 1 if self.implementation == "flyweight" else 2
 
         self.num_samples_per_representative = num_samples_per_representative
         self.num_samples_per_activation = num_samples_per_activation
@@ -81,7 +88,7 @@ class Buffer:
         self.rehearsal_tensor = None
         self.rehearsal_metadata = None
         self.rehearsal_counts = None
-        self.rehearsal_logits = None
+        self.rehearsal_activations = None
 
         self.high_performance = True
         try:
@@ -124,19 +131,21 @@ class Buffer:
             )
             self.dsl = neomem.DistributedStreamLoader.create(
                 engine,
-                neomem.Classification,
+                neomem.Rehearsal,
                 self.total_num_classes,
                 self.budget_per_class,
-                self.num_representatives,
                 self.num_candidates,
                 ctypes.c_int64(torch.random.initial_seed() + hvd.rank()).value,
+                self.num_representatives,
                 self.num_samples_per_representative,
-                list(self.sample_shape),
+                self.representative_shape,
+                self.num_representatives_distillation,
+                self.num_samples_per_activation,
+                self.activation_shape or [],
                 neomem.CPUBuffer,
                 discover_endpoints,
                 get_shared_logging_level() < logging.INFO,
             )
-
             self.init_augmented_minibatch(device=device)
             self.dsl.start()
         else:
@@ -146,25 +155,24 @@ class Buffer:
                 * self.num_samples_per_representative
             )
             self.rehearsal_tensor = torch.empty(
-                [rehearsal_tensor_size] + list(self.sample_shape)
+                [rehearsal_tensor_size] + list(self.representative_shape)
             )
             self.rehearsal_metadata = [[0, 1.0] for _ in range(self.total_num_classes)]
             self.rehearsal_counts = [0] * self.total_num_classes
 
-            # todo: we should have a way to support different shapes
-            reharsal_logits_size = (
-                self.total_num_classes
-                * self.budget_per_class
-                * self.num_samples_per_activation
-            )
-            self.rehearsal_logits = torch.empty(
-                [reharsal_logits_size] + list(self.sample_shape), dtype=torch.float16
-            )
+            if self.num_samples_per_activation:
+                reharsal_logits_size = (
+                    self.total_num_classes
+                    * self.budget_per_class
+                    * self.num_samples_per_activation
+                )
+                self.rehearsal_activations = torch.empty(
+                    [reharsal_logits_size] + list(self.activation_shape)
+                )
 
             self.init_augmented_minibatch(device=device)
 
     def init_augmented_minibatch(self, device="gpu"):
-        self.minibatches_ahead = 1 if self.implementation == "flyweight" else 2
         num_samples = (
             self.num_representatives
             if self.implementation == "flyweight"
@@ -175,89 +183,137 @@ class Buffer:
             self.next_minibatches.append(
                 AugmentedMinibatch(
                     num_samples,
-                    self.sample_shape,
+                    self.representative_shape,
                     device,
                     num_samples_per_representative=self.num_samples_per_representative,
                     num_samples_per_activation=self.num_samples_per_activation,
-                )
-            )
-            self.next_minibatches_derpp.append(
-                AugmentedMinibatch(
-                    num_samples,
-                    self.sample_shape,
-                    device,
-                    num_samples_per_representative=self.num_samples_per_representative,
-                    num_samples_per_activation=self.num_samples_per_activation,
+                    num_samples_distillation=self.num_representatives_distillation,
+                    activation_shape=self.activation_shape,
                 )
             )
 
         if self.high_performance and self.implementation == "flyweight":
             self.dsl.use_these_allocated_variables(
                 self.next_minibatches[0].input,
-                self.next_minibatches[0].ground_truth,
                 self.next_minibatches[0].labels,
                 self.next_minibatches[0].weights,
+                self.next_minibatches[0].activations,
+                self.next_minibatches[0].activations_rep,
             )
 
     def update(
-        self, x, y, step, batch_metrics=None, logits=[], ground_truth=[], derpp=False
+        self,
+        samples: List[torch.Tensor],
+        targets: torch.Tensor,
+        step,
+        batch_metrics=None,
+        activations=None,
     ):
         """
         Updates the buffer with incoming data. Get some data from (x, y) pairs.
         """
-        if self.num_samples_per_representative > 1:
-            assert len(ground_truth) > 0, "Some ground-truth tensors should be provided"
+        if activations is None:
+            activations = []
+
+        assert len(samples)
+        assert len(samples) == self.num_samples_per_representative
 
         if self.high_performance:
             self.dsl.measure_performance(measure_performance(step))
 
-        aug_size = self.__get_data(step, batch_metrics=batch_metrics, derpp=derpp)
+        aug_size1, aug_size2 = self.__get_data(step, batch_metrics=batch_metrics)
 
-        # Assemble the minibatch
+        # Assemble the minibatch, consuming the augmented part from the staged
+        # buffer.
         with get_timer(
             "assemble",
             step,
             batch_metrics=batch_metrics,
             dummy=not measure_performance(step),
         ):
-            minibatch = self.__get_current_augmented_minibatch(step, derpp=derpp)
-            concat_ground_truth = []
-            concat_logits = []
+            minibatch = self.__get_current_augmented_minibatch(step)
+            concat_x = []
+            concat_activations = []
+            concat_activations_rep = []
 
             if self.implementation == "flyweight":
-                w = torch.ones(x.size(0), device=x.device)
-                concat_x = torch.cat((x, minibatch.input[:aug_size]))
-                for i, v in enumerate(ground_truth):
-                    concat_ground_truth.append(
-                        torch.cat((v, minibatch.ground_truth[i][:aug_size]))
-                    )
-                concat_y = torch.cat((y, minibatch.labels[:aug_size]))
-                concat_w = torch.cat((w, minibatch.weights[:aug_size]))
-                for i, v in enumerate(logits):
-                    concat_logits.append(torch.cat((v, minibatch.logits[i][:aug_size])))
+                w = torch.ones(samples[0].size(0), device=samples[0].device)
+                for i, v in enumerate(samples):
+                    concat_x.append(torch.cat((v, minibatch.samples[i][:aug_size1])))
+                concat_y = torch.cat((targets, minibatch.labels[:aug_size1]))
+                concat_w = torch.cat((w, minibatch.weights[:aug_size1]))
             else:
-                concat_x = minibatch.input[:aug_size]
-                for i in range(len(ground_truth)):
-                    concat_ground_truth.append(minibatch.ground_truth[i][:aug_size])
-                concat_y = minibatch.labels[:aug_size]
-                concat_w = minibatch.weights[:aug_size]
-                for l in range(len(logits)):
-                    concat_logits.append(minibatch.logits[l][:aug_size])
+                for i, _ in enumerate(samples):
+                    concat_x.append(minibatch.samples[i][:aug_size1])
+                concat_y = minibatch.labels[:aug_size1]
+                concat_w = minibatch.weights[:aug_size1]
 
-        if not derpp:
-            self.add_data(
-                x,
-                y,
-                step,
-                batch_metrics=batch_metrics,
-                logits=logits,
-                ground_truth=ground_truth,
+            # Activations and associated representatives are always in "standard"
+            # mode.
+            for i in range(self.num_samples_per_activation):
+                concat_activations.append(minibatch.activations[i][:aug_size2])
+            if activations:
+                concat_activations_rep = minibatch.activations_rep[:aug_size2]
+
+        self.add_data(
+            samples,
+            targets,
+            step,
+            batch_metrics=batch_metrics,
+            activations=activations,
+        )
+
+        return concat_x, concat_y, concat_w, concat_activations, concat_activations_rep
+
+    def __get_random_index(self, nsamples):
+        """Returns a dict containing classes as keys and weights/corresponding indices
+        as values.
+
+        nsamples: number of indices to sample
+        """
+        choices = random.sample(
+            range(self.total_num_classes * self.budget_per_class),
+            nsamples,
+        )
+
+        classes_to_sample = {}
+        for index in choices:
+            rehearsal_class_index = math.floor(index / self.budget_per_class)
+            num_zeros = sum(
+                1 for metadata in self.rehearsal_metadata if metadata[0] == 0
             )
 
-        return concat_x, concat_ground_truth, concat_y, concat_w, concat_logits
+            if len(self.rehearsal_metadata) - num_zeros == 0:
+                continue
+            rehearsal_class_index %= len(self.rehearsal_metadata) - num_zeros
 
-    def __get_data(self, step, batch_metrics=None, derpp=False):
-        aug_size = 0
+            # calculate the right value for i
+            j = -1
+            index_no_empty = 0
+            for index_no_empty, _ in enumerate(self.rehearsal_metadata):
+                if self.rehearsal_metadata[index_no_empty][0] == 0:
+                    continue
+                j += 1
+                if j == rehearsal_class_index:
+                    break
+            rehearsal_repr_of_class_index = (
+                index % self.budget_per_class
+            ) % self.rehearsal_metadata[index_no_empty][0]
+
+            if index_no_empty not in classes_to_sample:
+                classes_to_sample[index_no_empty] = {
+                    "weight": self.rehearsal_metadata[index_no_empty][1],
+                    "indices": [],
+                }
+            classes_to_sample[index_no_empty]["indices"].append(
+                index_no_empty * self.budget_per_class + rehearsal_repr_of_class_index
+            )
+
+        return classes_to_sample
+
+    def __get_data(self, step, batch_metrics=None):
+        aug_size1 = 0
+        aug_size2 = 0
 
         if self.high_performance:
             # Get the representatives
@@ -268,14 +324,16 @@ class Buffer:
                 previous_iteration=True,
                 dummy=not measure_performance(step),
             ):
-                aug_size = self.dsl.wait()
+                aug_size1, aug_size2 = self.dsl.wait()
                 n = (
-                    aug_size
+                    aug_size1
                     if self.implementation == "flyweight"
-                    else aug_size - self.batch_size
+                    else aug_size1 - self.batch_size
                 )
                 if n > 0:
-                    logging.debug("Received %s samples from other nodes", n)
+                    logging.debug("Received %s representatives from other nodes", n)
+                if aug_size2 > 0:
+                    logging.debug("Received %s activations from other nodes", aug_size2)
 
                 if measure_performance(step) and batch_metrics is not None:
                     batch_metrics.add(
@@ -284,101 +342,102 @@ class Buffer:
                     )
         else:
             if not self.augmentations_enabled:
-                return 0
+                return 0, 0
 
-            minibatch = self.__get_current_augmented_minibatch(step, derpp=derpp)
+            if self.num_samples_per_representative:
+                aug_size1 = self.__get_representatives_data(step)
+            if self.num_samples_per_activation:
+                aug_size2 = self.__get_activations_data(step)
 
-            choices = random.sample(
-                range(self.total_num_classes * self.budget_per_class),
-                self.num_representatives,
-            )
+        return aug_size1, aug_size2
 
-            classes_to_sample = {}
-            for index in choices:
-                rehearsal_class_index = math.floor(index / self.budget_per_class)
-                num_zeros = sum(
-                    1 for metadata in self.rehearsal_metadata if metadata[0] == 0
-                )
-                rehearsal_class_index %= len(self.rehearsal_metadata) - num_zeros
+    def __get_representatives_data(self, step):
+        aug_size = 0
 
-                # calculate the right value for i
-                j = -1
-                index_no_empty = 0
-                for index_no_empty, _ in enumerate(self.rehearsal_metadata):
-                    if self.rehearsal_metadata[index_no_empty][0] == 0:
-                        continue
-                    j += 1
-                    if j == rehearsal_class_index:
-                        break
-                rehearsal_repr_of_class_index = (
-                    index % self.budget_per_class
-                ) % self.rehearsal_metadata[index_no_empty][0]
+        minibatch = self.__get_current_augmented_minibatch(step)
+        classes_to_sample = self.__get_random_index(self.num_representatives)
 
-                if index_no_empty not in classes_to_sample:
-                    classes_to_sample[index_no_empty] = {
-                        "weight": self.rehearsal_metadata[index_no_empty][1],
-                        "indices": [],
-                    }
-                classes_to_sample[index_no_empty]["indices"].append(
-                    index_no_empty * self.budget_per_class
-                    + rehearsal_repr_of_class_index
-                )
+        for classn, v in classes_to_sample.items():
+            for index in v["indices"]:
+                ti = (torch.tensor([aug_size]),)
+                device = minibatch.device
 
-            for k, v in classes_to_sample.items():
-                for index in v["indices"]:
-                    ti = (torch.tensor([aug_size]),)
-                    device = minibatch.input.device
-
-                    rehearsal_tensor_index = index * self.num_samples_per_representative
-
-                    # input tensor
-                    minibatch.input.index_put_(
-                        ti, self.rehearsal_tensor[rehearsal_tensor_index].to(device)
+                # representatives
+                rehearsal_tensor_index = index * self.num_samples_per_representative
+                for r in range(0, self.num_samples_per_representative):
+                    k = rehearsal_tensor_index + r
+                    minibatch.samples[r].index_put_(
+                        ti, self.rehearsal_tensor[k].to(device)
                     )
 
-                    # other ground_truth tensors
-                    for r in range(0, self.num_samples_per_representative - 1):
-                        k = rehearsal_tensor_index + r + 1
-                        minibatch.ground_truth[r].index_put_(
-                            ti, self.rehearsal_tensor[k].to(device)
-                        )
-
-                    # logits
-                    rehearsal_logits_index = index * self.num_samples_per_activation
-                    for l in range(0, self.num_samples_per_activation):
-                        m = rehearsal_logits_index + l
-                        minibatch.logits[l].index_put_(
-                            ti, self.rehearsal_logits[m].to(device)
-                        )
-
-                    minibatch.labels.index_put_(ti, torch.tensor(k, device=device))
+                    minibatch.labels.index_put_(ti, torch.tensor(classn, device=device))
                     minibatch.weights.index_put_(
                         ti, torch.tensor(v["weight"], device=device)
                     )
 
-                    aug_size += 1
+                aug_size += 1
 
         return aug_size
 
-    def add_data(self, x, y, step, batch_metrics=None, logits=[], ground_truth=[]):
+    def __get_activations_data(self, step):
+        aug_size = 0
+
+        minibatch = self.__get_current_augmented_minibatch(step)
+        classes_to_sample = self.__get_random_index(
+            self.num_representatives_distillation
+        )
+
+        for v in classes_to_sample.values():
+            for index in v["indices"]:
+                ti = (torch.tensor([aug_size]),)
+                device = minibatch.device
+
+                # activations
+                rehearsal_activations_index = index * self.num_samples_per_activation
+                for l in range(0, self.num_samples_per_activation):
+                    m = rehearsal_activations_index + l
+                    minibatch.activations[l].index_put_(
+                        ti, self.rehearsal_activations[m].to(device)
+                    )
+
+                # associated representatives
+                rehearsal_tensor_index = index * self.num_samples_per_representative
+                for r in range(0, self.num_samples_per_representative):
+                    k = rehearsal_tensor_index + r
+                    minibatch.activations_rep[r].index_put_(
+                        ti, self.rehearsal_tensor[k].to(device)
+                    )
+
+                aug_size += 1
+
+        return aug_size
+
+    def add_data(
+        self,
+        samples: List[torch.Tensor],
+        targets: torch.Tensor,
+        step,
+        batch_metrics=None,
+        activations=None,
+    ):
         """
         Fills the rehearsal buffer with (x, y) pairs, sampled randomly from the
         incoming batch of data. Only `num_candidates` will be added to the
         buffer.
 
-        :param x: tensor containing input images
-        :param y: tensor containing targets
+        :param samples: tensor containing a batch of input training samples
+        :param targets: tensor containing a batch of targets
         :param step: step number, for logging purposes
+        :param activations: tensor containing
         """
-        if self.num_samples_per_representative > 1:
-            assert (
-                len(ground_truth) == self.num_samples_per_representative - 1
-            ), "Some ground-truth tensors should be provided"
+        if activations is None:
+            activations = []
 
+        assert len(samples) == self.num_samples_per_representative
         if self.num_samples_per_activation > 0:
             assert (
-                len(logits) == self.num_samples_per_activation
-            ), "Some logits should be provided"
+                len(activations) == self.num_samples_per_activation
+            ), "Some activations should be provided"
 
         if self.high_performance:
             with get_timer(
@@ -388,21 +447,22 @@ class Buffer:
                 dummy=not measure_performance(step),
             ):
                 if self.implementation == "flyweight":
-                    self.dsl.accumulate(x, y)
+                    self.dsl.accumulate(samples, targets, activations)
                 else:
                     next_minibatch = self.__get_next_augmented_minibatch(step)
                     self.dsl.accumulate(
-                        x,
-                        y,
-                        ground_truth,
+                        samples,
+                        targets,
+                        activations,
                         next_minibatch.input,
                         next_minibatch.labels,
                         next_minibatch.weights,
-                        next_minibatch.ground_truth,
+                        next_minibatch.activations,
+                        next_minibatch.activations_rep,
                     )
         else:
-            for i in range(y.shape[0]):
-                label = y[i].item()
+            for i in range(targets.shape[0]):
+                label = targets[i].item()
 
                 # picking an index to replace/append to
                 index = -1
@@ -417,25 +477,20 @@ class Buffer:
                 rehearsal_tensor_index = (
                     self.budget_per_class * label + index
                 ) * self.num_samples_per_representative
-                self.rehearsal_tensor.index_put_(
-                    (torch.tensor([rehearsal_tensor_index]),), x[i].cpu()
-                )
-
-                # other ground_truth tensors
-                for r in range(0, self.num_samples_per_representative - 1):
-                    k = rehearsal_tensor_index + r + 1
+                for r in range(0, self.num_samples_per_representative):
+                    k = rehearsal_tensor_index + r
                     self.rehearsal_tensor.index_put_(
-                        (torch.tensor([k]),), ground_truth[r][i].cpu()
+                        (torch.tensor([k]),), samples[r][i].cpu()
                     )
 
                 # logits
-                rehearsal_logits_index = (
+                rehearsal_activations_index = (
                     self.budget_per_class * label + index
                 ) * self.num_samples_per_activation
-                for l in range(0, self.num_samples_per_activation):
-                    m = rehearsal_logits_index + l
-                    self.rehearsal_logits.index_put_(
-                        (torch.tensor([m]),), logits[l][i].cpu()
+                for l in range(self.num_samples_per_activation):
+                    m = rehearsal_activations_index + l
+                    self.rehearsal_activations.index_put_(
+                        (torch.tensor([m]),), activations[l][i].float().cpu()
                     )
 
                 if index >= self.rehearsal_metadata[label][0]:
@@ -449,16 +504,10 @@ class Buffer:
         if self.high_performance:
             self.dsl.enable_augmentation(enabled)
 
-    def __get_current_augmented_minibatch(self, step, derpp=False):
-        if derpp:
-            return self.next_minibatches_derpp[step["batch"] % self.minibatches_ahead]
+    def __get_current_augmented_minibatch(self, step):
         return self.next_minibatches[step["batch"] % self.minibatches_ahead]
 
-    def __get_next_augmented_minibatch(self, step, derpp=False):
-        if derpp:
-            return self.next_minibatches_derpp[
-                (step["batch"] + 1) % self.minibatches_ahead
-            ]
+    def __get_next_augmented_minibatch(self, step):
         return self.next_minibatches[(step["batch"] + 1) % self.minibatches_ahead]
 
     def __len__(self):

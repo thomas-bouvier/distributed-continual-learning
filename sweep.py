@@ -31,7 +31,7 @@ baseline_scratch_ptycho_command = (
     f"--dataset-dir /my-spack/datasets "
     f"--tasksets-config \"{{'scenario': 'reconstruction', 'num_tasks': 156, 'concatenate_tasksets': True}}\" "
     f"--batch-size {args.batch_size} "
-    f"--eval-batch-size: 5 "
+    f"--eval-batch-size 5 "
     f"--lr {args.lr} "
     f"--epochs {args.epochs} "
     f"--use-amp "
@@ -49,7 +49,7 @@ er_ptycho_command = (
     f"--tasksets-config \"{{'scenario': 'reconstruction', 'num_tasks': 156}}\" "
     f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 3, 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'rehearsal_ratio': {args.rehearsal_ratio}, 'augmentations_offset': {args.augmentations_offset}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
     f"--batch-size {args.batch_size} "
-    f"--eval-batch-size: 5 "
+    f"--eval-batch-size 5 "
     f"--lr {args.lr} "
     f"--epochs {args.epochs} "
     f"--use-amp "
@@ -68,7 +68,7 @@ derpp_ptycho_command = (
     f"--tasksets-config \"{{'scenario': 'reconstruction', 'num_tasks': 156}}\" "
     f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 3, 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'rehearsal_ratio': {args.rehearsal_ratio}, 'augmentations_offset': {args.augmentations_offset}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
     f"--batch-size {args.batch_size} "
-    f"--eval-batch-size: 5 "
+    f"--eval-batch-size 5 "
     f"--lr {args.lr} "
     f"--epochs {args.epochs} "
     f"--use-amp "
@@ -87,7 +87,7 @@ beta_derpp_ptycho_command = (
     f"--tasksets-config \"{{'scenario': 'reconstruction', 'num_tasks': 156}}\" "
     f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 3, 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'rehearsal_ratio': {args.rehearsal_ratio}, 'augmentations_offset': {args.augmentations_offset}, 'soft_augmentations_offset': {args.soft_augmentations_offset}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
     f"--batch-size {args.batch_size} "
-    f"--eval-batch-size: 5 "
+    f"--eval-batch-size 5 "
     f"--lr {args.lr} "
     f"--epochs 1 "
     f"--use-amp "
@@ -95,7 +95,7 @@ beta_derpp_ptycho_command = (
     f"--load-checkpoint /root/distributed-continual-learning/checkpoint_initial_ptychonn_1.pth.tar "
 )
 
-er_ptycho_8gpus_command = (
+er_8gpus_ptycho_command = (
     f"horovodrun -np 8 -H {host} python main.py "
     f"--backbone ptychonn "
     f"--backbone-config \"{{'lr_schedule': 'exp_range_cyclic_lr', 'step_cycle_size': {args.step_cycle_size}}}\" "
@@ -118,7 +118,7 @@ command = {
     "er_ptycho": er_ptycho_command,
     "derpp_ptycho": derpp_ptycho_command,
     "beta_derpp_ptycho": beta_derpp_ptycho_command,
-    "er_ptycho_8gpus": er_ptycho_8gpus_command,
+    "er_8gpus_ptycho": er_8gpus_ptycho_command,
 }[sweep_conf]
 
 os.system(command)

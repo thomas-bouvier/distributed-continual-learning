@@ -49,14 +49,6 @@ class Er(ContinualLearner):
             **self.buffer_config,
         )
 
-        data = next(iter(train_data_regime.get_loader(0)))
-        self.buffer.add_data(
-            data[0][: self.batch_size],
-            data[1][: self.batch_size],
-            {"batch": -1},
-            ground_truth=data[2:-1][: self.batch_size],
-        )
-
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
@@ -80,12 +72,14 @@ class Er(ContinualLearner):
             y_batch = y[i : i + self.batch_size]
 
             # Get data from the last iteration (blocking)
-            aug_x, _, aug_y, aug_w, _ = self.buffer.update(
-                x_batch,
+            aug_x, aug_y, _, _, _ = self.buffer.update(
+                [x_batch],
                 y_batch,
                 step,
                 batch_metrics=self.batch_metrics,
+                activations=[],
             )
+            aug_x = aug_x[0]
 
             with get_timer(
                 "train",
@@ -104,16 +98,17 @@ class Er(ContinualLearner):
                     loss = self.criterion(output, aug_y)
 
                 # https://stackoverflow.com/questions/43451125/pytorch-what-are-the-gradient-arguments
-                total_weight = hvd.allreduce(
-                    torch.sum(aug_w), name="total_weight", op=hvd.Sum
-                )
-                dw = (
-                    aug_w
-                    / total_weight
-                    * self.batch_size
-                    * hvd.size()
-                    / self.batch_size
-                )
+                # The aug_w variabled can be obtained via the update() primitive above.
+                # total_weight = hvd.allreduce(
+                #    torch.sum(aug_w), name="total_weight", op=hvd.Sum
+                # )
+                # dw = (
+                #    aug_w
+                #    / total_weight
+                #    * self.batch_size
+                #    * hvd.size()
+                #    / self.batch_size
+                # )
 
                 # Backward pass
                 if self.use_amp:
@@ -149,6 +144,7 @@ class Er(ContinualLearner):
         meters["loss"].update(loss.sum() / loss.size(0))
         meters["prec1"].update(prec1, x.size(0))
         meters["prec5"].update(prec5, x.size(0))
+        meters["num_samples"].update(x.size(0))
 
     def train_recon_one_step(self, data, meters, step):
         """
@@ -171,12 +167,11 @@ class Er(ContinualLearner):
             ph_batch = ph[i : i + self.batch_size]
 
             # Get data from the last iteration (blocking)
-            aug_x, aug_ground_truth, _, _, _ = self.buffer.update(
-                x_batch,
+            aug_x, _, _, _, _ = self.buffer.update(
+                [x_batch, amp_batch, ph_batch],
                 y_batch,
                 step,
                 batch_metrics=self.batch_metrics,
-                ground_truth=[amp_batch, ph_batch],
             )
 
             with get_timer(
@@ -192,9 +187,9 @@ class Er(ContinualLearner):
 
                 # Forward pass
                 with autocast(enabled=self.use_amp):
-                    amp_output, ph_output = self.backbone(aug_x)
-                    amp_loss = self.criterion(amp_output, aug_ground_truth[0])
-                    ph_loss = self.criterion(ph_output, aug_ground_truth[1])
+                    amp_output, ph_output = self.backbone(aug_x[0])
+                    amp_loss = self.criterion(amp_output, aug_x[1])
+                    ph_loss = self.criterion(ph_output, aug_x[2])
                     loss = amp_loss + ph_loss
 
                 # Backward pass
@@ -204,10 +199,10 @@ class Er(ContinualLearner):
                     self.scaler.step(self.optimizer_regime.optimizer)
                     self.scaler.update()
 
-                meters["loss"].update(loss.sum() / aug_x.size(0))
-                meters["loss_amp"].update(amp_loss.sum() / aug_x.size(0))
-                meters["loss_ph"].update(ph_loss.sum() / aug_x.size(0))
-                meters["num_samples"].update(aug_x.size(0))
+                meters["loss"].update(loss.sum() / aug_x[0].size(0))
+                meters["loss_amp"].update(amp_loss.sum() / aug_x[0].size(0))
+                meters["loss_ph"].update(ph_loss.sum() / aug_x[0].size(0))
+                meters["num_samples"].update(aug_x[0].size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_recon_one_step(self, data, meters, step):
