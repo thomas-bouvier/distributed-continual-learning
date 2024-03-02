@@ -128,7 +128,7 @@ class Der(ContinualLearner):
                 meters["num_samples"].update(x.size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_one_step(self, data, meters, step):
+    def evaluate_one_step(self, data, meters):
         x, y, _ = data
         x, y = x.to(self._device()), y.long().to(self._device())
 

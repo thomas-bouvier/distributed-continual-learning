@@ -1,8 +1,8 @@
 import horovod.torch as hvd
 import torch
-import torch.nn as nn
 
 from torch.cuda.amp import autocast
+from torch import nn
 
 from modules import ContinualLearner, Buffer
 from train.train import measure_performance
@@ -128,7 +128,7 @@ class Derpp(ContinualLearner):
             meters["num_samples"].update(x.size(0))
             meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_one_step(self, data, meters, step):
+    def evaluate_one_step(self, data, meters):
         x, y, _ = data
         x, y = x.to(self._device()), y.long().to(self._device())
 
@@ -223,7 +223,7 @@ class Derpp(ContinualLearner):
                 # meters["num_samples"].update(aug_x.size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_recon_one_step(self, data, meters, step):
+    def evaluate_recon_one_step(self, data, meters):
         x, _, amp, ph, _ = data
         x, amp, ph = x.to(self._device()), amp.to(self._device()), ph.to(self._device())
 

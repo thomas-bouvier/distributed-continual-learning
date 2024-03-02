@@ -35,13 +35,12 @@ def evaluate_one_epoch(model, loader, task_id, test_task_id, epoch, scenario):
             start_batch_time = time.perf_counter()
 
             for data in loader:
-                step = {"task_id": task_id, "epoch": epoch, "batch": batch}
                 evaluate_fn = (
                     model.evaluate_one_step
                     if scenario != "reconstruction"
                     else model.evaluate_recon_one_step
                 )
-                evaluate_fn(data, meters, step)
+                evaluate_fn(data, meters)
 
                 last_batch_time = time.perf_counter() - start_batch_time
                 epoch_time += last_batch_time

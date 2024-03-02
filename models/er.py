@@ -129,7 +129,7 @@ class Er(ContinualLearner):
                 meters["num_samples"].update(aug_x.size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_one_step(self, data, meters, step):
+    def evaluate_one_step(self, data, meters):
         x, y, _ = data
         x, y = x.to(self._device()), y.long().to(self._device())
 
@@ -205,7 +205,7 @@ class Er(ContinualLearner):
                 meters["num_samples"].update(aug_x[0].size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
-    def evaluate_recon_one_step(self, data, meters, step):
+    def evaluate_recon_one_step(self, data, meters):
         x, _, amp, ph, _ = data
         x, amp, ph = x.to(self._device()), amp.to(self._device()), ph.to(self._device())
 
