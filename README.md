@@ -20,7 +20,7 @@ The current version of the code has been tested with Python 3.10 with the follow
 * `continuum 1.2.7`
 * `nvidia-dali-cuda110 1.27.0` (optional)
 
-Make sure to install [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/neomem) to benefit from global sampling of representatives. Simlink it using `ln -s ../neomem cpp_loader`. If not available, this code will fallback to a Python, local only, low performance rehearsal buffer implementation.
+Make sure to install [Neomem](https://github.com/thomas-bouvier/neomem) to benefit from global sampling of representatives. Simlink it using `ln -s ../neomem cpp_loader`. If not available, this code will fallback to a Python, local only, low performance rehearsal buffer implementation.
 
 Further Python packages used are listed in requirements.txt. Assuming Python and pip are set up, these packages can be installed using:
 

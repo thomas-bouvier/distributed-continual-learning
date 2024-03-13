@@ -3,12 +3,11 @@ import torch
 
 from torch import nn
 from torch.cuda.amp import autocast
+from torch.nn import functional as F
 
-from modules import ContinualLearner, Buffer
+from modules import ContinualLearner, Buffer, BufferMode
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
-
-from torch.nn import functional as F
 
 __all__ = ["Der"]
 
@@ -44,6 +43,7 @@ class Der(ContinualLearner):
             raise Exception("Parameter alpha is required for Der") from exc
 
         self.use_memory_buffer = True
+        self.first_iteration = True
         self.activations = None
 
     def before_all_tasks(self, train_data_regime):
@@ -52,6 +52,7 @@ class Der(ContinualLearner):
             train_data_regime.sample_shape,
             self.batch_size,
             cuda=self._is_on_cuda(),
+            mode=BufferMode.KD,
             **self.buffer_config,
         )
 
@@ -76,20 +77,24 @@ class Der(ContinualLearner):
 
             # Get data from the last iteration (blocking)
             if self.activations is not None:
-                _, _, _, buf_activations, buf_activations_rep = self.buffer.update(
-                    [x_batch],
-                    y_batch,
-                    step,
-                    batch_metrics=self.batch_metrics,
-                    activations=[self.activations],
-                )
-            else:
-                self.buffer.add_data(
-                    [x_batch],
-                    y_batch,
-                    step,
-                    batch_metrics=self.batch_metrics,
-                )
+                if not self.first_iteration:
+                    _, _, _, buf_activations, buf_activations_rep = self.buffer.update(
+                        [x_batch],
+                        y_batch,
+                        step,
+                        batch_metrics=self.batch_metrics,
+                        activations=[self.activations],
+                    )
+                else:
+                    self.buffer.add_data(
+                        [x_batch],
+                        y_batch,
+                        step,
+                        batch_metrics=self.batch_metrics,
+                        activations=[self.activations],
+                    )
+                    buf_activations_rep = None
+                    self.first_iteration = False
 
             with get_timer(
                 "train",
@@ -104,11 +109,11 @@ class Der(ContinualLearner):
 
                 # Forward pass
                 with autocast(enabled=self.use_amp):
-                    output = self.backbone(x)
-                    loss = self.criterion(output, y)
+                    output = self.backbone(x_batch)
+                    loss = self.criterion(output, y_batch)
 
                 # Knowledge distillation
-                if self.activations is not None:
+                if self.activations is not None and buf_activations_rep is not None:
                     buf_outputs = self.backbone(buf_activations_rep)
                     loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
 
@@ -141,7 +146,7 @@ class Der(ContinualLearner):
             loss = self.criterion(output, y)
 
         prec1, prec5 = accuracy(output, y, topk=(1, 5))
-        meters["loss"].update(loss.sum() / loss.size(0))  # loss IF SCALER DESACTIVATED
+        meters["loss"].update(loss.sum() / loss.size(0))
         meters["prec1"].update(prec1, x.size(0))
         meters["prec5"].update(prec5, x.size(0))
         meters["num_samples"].update(x.size(0))

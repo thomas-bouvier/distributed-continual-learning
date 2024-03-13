@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.cuda.amp import autocast
 
-from modules import ContinualLearner, Buffer
+from modules import ContinualLearner, Buffer, BufferMode
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
 
@@ -47,6 +47,7 @@ class Er(ContinualLearner):
             train_data_regime.sample_shape,
             self.batch_size,
             cuda=self._is_on_cuda(),
+            mode=BufferMode.REHEARSAL,
             **self.buffer_config,
         )
 

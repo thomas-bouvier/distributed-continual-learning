@@ -5,7 +5,8 @@ import math
 import random
 import torch
 
-from typing import List
+from enum import Enum
+from typing import List, Optional
 
 from train.train import measure_performance
 from utils.meters import get_timer
@@ -40,6 +41,12 @@ class AugmentedMinibatch:
         )
 
 
+class BufferMode(Enum):
+    REHEARSAL = 1
+    KD = 2
+    REHEARSAL_KD = 3
+
+
 class Buffer:
     """
     The memory buffer of rehearsal method.
@@ -64,6 +71,7 @@ class Buffer:
         implementation="standard",
         num_samples_per_representative=1,
         num_samples_per_activation=0,
+        mode=BufferMode.REHEARSAL,
     ):
         assert implementation in ("standard", "flyweight")
 
@@ -89,6 +97,7 @@ class Buffer:
         self.rehearsal_metadata = None
         self.rehearsal_counts = None
         self.rehearsal_activations = None
+        self.mode = mode
 
         self.high_performance = True
         try:
@@ -126,13 +135,20 @@ class Buffer:
         device = "cuda" if cuda else "cpu"
 
         if self.high_performance:
-            # The engine should be stored.
+            mode_to_neomem_mode = {
+                BufferMode.REHEARSAL: neomem.Rehearsal,
+                BufferMode.KD: neomem.KD,
+                BufferMode.REHEARSAL_KD: neomem.Rehearsal_KD,
+            }
+
+            # The engine should be stored otherwise Python will try to deallocate
+            # it at the end of this function.
             self.engine = neomem.EngineLoader(
                 provider, ctypes.c_uint16(hvd.rank()).value, cuda_rdma
             )
             self.dsl = neomem.DistributedStreamLoader.create(
                 self.engine,
-                neomem.Rehearsal,
+                mode_to_neomem_mode[self.mode],
                 self.total_num_classes,
                 self.budget_per_class,
                 self.num_candidates,
@@ -161,7 +177,7 @@ class Buffer:
             self.rehearsal_metadata = [[0, 1.0] for _ in range(self.total_num_classes)]
             self.rehearsal_counts = [0] * self.total_num_classes
 
-            if self.num_samples_per_activation:
+            if self.mode in (BufferMode.KD, BufferMode.REHEARSAL_KD):
                 reharsal_logits_size = (
                     self.total_num_classes
                     * self.budget_per_class
@@ -195,7 +211,7 @@ class Buffer:
 
         if self.high_performance and self.implementation == "flyweight":
             self.dsl.use_these_allocated_variables(
-                self.next_minibatches[0].input,
+                self.next_minibatches[0].samples,
                 self.next_minibatches[0].labels,
                 self.next_minibatches[0].weights,
                 self.next_minibatches[0].activations,
@@ -218,7 +234,7 @@ class Buffer:
 
         assert len(samples)
         assert len(samples) == self.num_samples_per_representative
-        if self.num_samples_per_activation > 0:
+        if self.mode in (BufferMode.KD, BufferMode.REHEARSAL_KD):
             assert (
                 len(activations) == self.num_samples_per_activation
             ), "Some activations should be provided"
@@ -349,9 +365,9 @@ class Buffer:
             if not self.augmentations_enabled:
                 return 0, 0
 
-            if self.num_samples_per_representative:
+            if self.mode in (BufferMode.REHEARSAL, BufferMode.REHEARSAL_KD):
                 aug_size1 = self.__get_representatives_data(step)
-            if self.num_samples_per_activation:
+            if self.mode in (BufferMode.KD, BufferMode.REHEARSAL_KD):
                 aug_size2 = self.__get_activations_data(step)
 
         return aug_size1, aug_size2
@@ -423,7 +439,7 @@ class Buffer:
         targets: torch.Tensor,
         step,
         batch_metrics=None,
-        activations=None,
+        activations: Optional[List[torch.Tensor]] = None,
     ):
         """
         Fills the rehearsal buffer with (x, y) pairs, sampled randomly from the
@@ -472,7 +488,7 @@ class Buffer:
                         continue
                     index = random.randint(0, self.budget_per_class - 1)
 
-                # input tensor
+                # representatives
                 rehearsal_tensor_index = (
                     self.budget_per_class * label + index
                 ) * self.num_samples_per_representative
@@ -482,7 +498,7 @@ class Buffer:
                         (torch.tensor([k]),), samples[r][i].cpu()
                     )
 
-                # logits
+                # activations
                 rehearsal_activations_index = (
                     self.budget_per_class * label + index
                 ) * self.num_samples_per_activation

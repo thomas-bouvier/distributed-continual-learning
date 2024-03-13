@@ -3,12 +3,12 @@ import torch
 
 from torch.cuda.amp import autocast
 from torch import nn
+from torch.nn import functional as F
 
-from modules import ContinualLearner, Buffer
+from modules import ContinualLearner, Buffer, BufferMode
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
 
-from torch.nn import functional as F
 
 __all__ = ["Derpp"]
 
@@ -45,6 +45,7 @@ class Derpp(ContinualLearner):
             raise Exception("Parameters alpha and beta are required for Derpp") from exc
 
         self.use_memory_buffer = True
+        self.first_iteration = True
         self.activations = None
         self.activations_amp = None
         self.activations_ph = None
@@ -55,6 +56,7 @@ class Derpp(ContinualLearner):
             train_data_regime.sample_shape,
             self.batch_size,
             cuda=self._is_on_cuda(),
+            mode=BufferMode.REHEARSAL_KD,
             **self.buffer_config,
         )
 
