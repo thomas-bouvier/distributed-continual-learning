@@ -4,7 +4,7 @@ This is a PyTorch + Horovod implementation of the continual learning experiments
 
 * [Three types of incremental learning](https://www.nature.com/articles/s42256-022-00568-3) (2022, *Nature Machine Intelligence*)
 
-Continual learning approaches implemented here are based on rehearsal, which is delegated in a separate high-performance C++ backend [Neomem](https://gitlab.inria.fr/Kerdata/Kerdata-Codes/neomem).
+Continual learning approaches implemented here are based on rehearsal, which is delegated in a separate high-performance C++ backend [Neomem](https://github.com/thomas-bouvier/neomem).
 
 This repository primarily supports experiments in the academic continual learning setting, whereby a classification-based problem is split up into multiple, non-overlapping tasks that must be learned sequentially (class-incremental scenario). Instance-incremental scenarios are supported too.
 

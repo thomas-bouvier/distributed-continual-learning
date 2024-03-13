@@ -78,30 +78,41 @@ class Derpp(ContinualLearner):
         for i in range(0, len(x), self.batch_size):
             x_batch = x[i : i + self.batch_size]
             y_batch = y[i : i + self.batch_size]
+
+            # Get data from the last iteration (blocking)
             if self.activations is not None:
-                (
-                    aug_x,
-                    aug_y,
-                    _,
-                    buf_activations,
-                    buf_activations_rep,
-                ) = self.buffer.update(
-                    [x_batch],
-                    y_batch,
-                    step,
-                    batch_metrics=self.batch_metrics,
-                    activations=[self.activations],
-                )
-                aug_x = aug_x[0]
+                if not self.first_iteration:
+                    (
+                        aug_x,
+                        aug_y,
+                        _,
+                        buf_activations,
+                        buf_activations_rep,
+                    ) = self.buffer.update(
+                        [x_batch],
+                        y_batch,
+                        step,
+                        batch_metrics=self.batch_metrics,
+                        activations=[self.activations],
+                    )
+                    aug_x = aug_x[0]
+                else:
+                    self.buffer.add_data(
+                        [x_batch],
+                        y_batch,
+                        step,
+                        batch_metrics=self.batch_metrics,
+                        activations=[self.activations],
+                    )
+                    aug_x = x_batch
+                    aug_y = y_batch
+                    buf_activations_rep = None
+                    self.first_iteration = False
             else:
-                self.buffer.add_data(
-                    [x_batch],
-                    y_batch,
-                    step,
-                    batch_metrics=self.batch_metrics,
-                )
                 aug_x = x_batch
                 aug_y = y_batch
+                buf_activations_rep = None
+                self.first_iteration = True
 
             with get_timer(
                 "train",
@@ -118,7 +129,7 @@ class Derpp(ContinualLearner):
                     loss = self.criterion(output, aug_y)
 
                 # Knowledge distillation
-                if self.activations is not None:
+                if self.activations is not None and buf_activations_rep is not None:
                     buf_outputs = self.backbone(buf_activations_rep)
                     loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
 
@@ -184,21 +195,35 @@ class Derpp(ContinualLearner):
 
             # Get data from the last iteration (blocking)
             if self.activations_amp is not None and self.activations_ph is not None:
-                aug_x, _, _, buf_activations, buf_activations_rep = self.buffer.update(
-                    [x_batch, amp_batch, ph_batch],
-                    y_batch,
-                    step,
-                    batch_metrics=self.batch_metrics,
-                    activations=[self.activations_amp, self.activations_ph],
-                )
+                if not self.first_iteration:
+                    (
+                        aug_x,
+                        _,
+                        _,
+                        buf_activations,
+                        buf_activations_rep,
+                    ) = self.buffer.update(
+                        [x_batch, amp_batch, ph_batch],
+                        y_batch,
+                        step,
+                        batch_metrics=self.batch_metrics,
+                        activations=[self.activations_amp, self.activations_ph],
+                    )
+                else:
+                    self.buffer.add_data(
+                        [x_batch, amp_batch, ph_batch],
+                        y_batch,
+                        step,
+                        batch_metrics=self.batch_metrics,
+                        activations=[self.activations_amp, self.activations_ph],
+                    )
+                    aug_x = [x_batch, amp_batch, ph_batch]
+                    buf_activations_rep = None
+                    self.first_iteration = False
             else:
-                self.buffer.add_data(
-                    [x_batch, amp_batch, ph_batch],
-                    y_batch,
-                    step,
-                    batch_metrics=self.batch_metrics,
-                )
                 aug_x = [x_batch, amp_batch, ph_batch]
+                buf_activations_rep = None
+                self.first_iteration = True
 
             with get_timer(
                 "train",
@@ -219,7 +244,11 @@ class Derpp(ContinualLearner):
                     loss = amp_loss + ph_loss
 
                 # Knowledge distillation
-                if self.activations_amp is not None and self.activations_ph is not None:
+                if (
+                    self.activations_amp is not None
+                    and self.activations_ph is not None
+                    and buf_activations_rep is not None
+                ):
                     buf_output_amp, buf_output_ph = self.backbone(buf_activations_rep)
                     loss += self.alpha * (
                         F.mse_loss(buf_output_amp, buf_activations[0])
