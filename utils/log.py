@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
-import shutil
 import torch
 import wandb
 
@@ -279,9 +278,7 @@ def display(filename, outputs, columns=2, captions=None):
     fig = plt.figure()
     fig.set_size_inches(16, 6 * rows)
     gs = gridspec.GridSpec(rows, columns)
-    row = 0
-    col = 0
-    for i in range(len(outputs)):
+    for i, _ in enumerate(outputs):
         plt.subplot(gs[i])
         plt.axis("off")
         if captions is not None:

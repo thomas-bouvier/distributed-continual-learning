@@ -55,6 +55,7 @@ class Derpp(ContinualLearner):
             train_data_regime.total_num_classes,
             train_data_regime.sample_shape,
             self.batch_size,
+            half_precision=self.use_amp,
             cuda=self._is_on_cuda(),
             mode=BufferMode.REHEARSAL_KD,
             **self.buffer_config,

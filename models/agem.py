@@ -1,5 +1,4 @@
 import horovod.torch as hvd
-import logging
 import torch
 import torch.nn as nn
 import numpy as np
@@ -9,7 +8,6 @@ from torch.cuda.amp import autocast
 from modules import ContinualLearner, Buffer
 from train.train import measure_performance
 from utils.meters import get_timer, accuracy
-from utils.log import PerformanceResultsLog
 
 from torch.optim import SGD
 
@@ -29,7 +27,7 @@ class Agem(ContinualLearner):
         buffer_config,
         batch_metrics=None,
     ):
-        super(Agem, self).__init__(
+        super().__init__(
             backbone,
             optimizer_regime,
             use_amp,
@@ -60,12 +58,13 @@ class Agem(ContinualLearner):
             train_data_regime.total_num_classes,
             train_data_regime.sample_shape,
             self.batch_size,
+            half_precision=self.use_amp,
             cuda=self._is_on_cuda(),
             **self.buffer_config,
         )
 
         x, y, _ = next(iter(train_data_regime.get_loader(0)))
-        self.buffer.add_data(x, y, dict(batch=-1))
+        self.buffer.add_data(x, y, {"batch": -1})
 
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
@@ -76,7 +75,7 @@ class Agem(ContinualLearner):
     def after_every_task(self, task_id, train_data_regime):
         for i in range(100):
             x, y, _ = next(iter(train_data_regime.get_loader(task_id)))
-            self.buffer.update(x, y, dict(batch=-1))
+            self.buffer.update(x, y, {"batch": -1})
 
     def store_grad(self, params, grads, grad_dims):
         grads.fill_(0.0)

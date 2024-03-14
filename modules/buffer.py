@@ -33,7 +33,11 @@ class AugmentedMinibatch:
         self.weights = torch.ones(num_samples, device=device)
 
         self.activations = [
-            torch.zeros(num_samples_distillation, *activation_shape, device=device)
+            torch.zeros(
+                num_samples_distillation,
+                *activation_shape,
+                device=device,
+            )
             for _ in range(num_samples_per_activation)
         ]
         self.activations_rep = torch.zeros(
@@ -66,6 +70,7 @@ class Buffer:
         activation_shape=None,
         provider="na+sm",
         discover_endpoints=True,
+        half_precision=False,
         cuda=True,
         cuda_rdma=False,
         implementation="standard",
@@ -119,10 +124,16 @@ class Buffer:
             cuda=cuda,
             cuda_rdma=cuda_rdma,
             discover_endpoints=discover_endpoints,
+            half_precision=half_precision,
         )
 
     def init_buffer(
-        self, provider=None, cuda=True, cuda_rdma=False, discover_endpoints=True
+        self,
+        provider=None,
+        cuda=True,
+        cuda_rdma=False,
+        discover_endpoints=True,
+        half_precision=False,
     ):
         """
         Initializes the memory required to store representatives and their
@@ -161,6 +172,7 @@ class Buffer:
                 self.activation_shape or [],
                 neomem.CPUBuffer,
                 discover_endpoints,
+                half_precision,
                 get_shared_logging_level() < logging.INFO,
             )
             self.init_augmented_minibatch(device=device)

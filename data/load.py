@@ -234,6 +234,8 @@ class PtychoExternalInputCallable:
         self.last_seen_epoch = None
 
     def __call__(self, sample_info):
+        # TODO: add support for partial batches
+        # https://github.com/NVIDIA/DALI/issues/5199
         if sample_info.iteration >= self.full_iterations:
             # Indicate end of the epoch
             raise StopIteration
