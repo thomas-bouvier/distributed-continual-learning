@@ -14,7 +14,7 @@ Some Python code has been inspired by the [mammoth](https://github.com/aimagelab
 
 The current version of the code has been tested with Python 3.10 with the following package versions:
 
-* `pytorch 2.0.1`
+* `pytorch 2.2`
 * `timm 0.9.2`
 * `horovod 0.28.1`
 * `continuum 1.2.7`

@@ -25,3 +25,4 @@ base:
   weight_decay:
   results_dir:
   save_dir:
+  load_checkpoint:

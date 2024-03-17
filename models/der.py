@@ -60,7 +60,7 @@ class Der(ContinualLearner):
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
-        if task_id > self.buffer.augmentations_offset or self.nsys_run:
+        if task_id >= self.buffer.augmentations_offset or self.nsys_run:
             self.buffer.enable_augmentations()
 
     def train_one_step(self, data, meters, step):
@@ -151,3 +151,6 @@ class Der(ContinualLearner):
         meters["prec1"].update(prec1, x.size(0))
         meters["prec5"].update(prec5, x.size(0))
         meters["num_samples"].update(x.size(0))
+
+    def after_all_tasks(self):
+        self.buffer.finalize()

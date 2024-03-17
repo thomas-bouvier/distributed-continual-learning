@@ -64,7 +64,7 @@ class Derpp(ContinualLearner):
     def before_every_task(self, task_id, train_data_regime):
         super().before_every_task(task_id, train_data_regime)
 
-        if task_id > self.buffer.augmentations_offset or self.nsys_run:
+        if task_id >= self.buffer.augmentations_offset or self.nsys_run:
             self.buffer.enable_augmentations()
 
     def train_one_step(self, data, meters, step):
@@ -289,3 +289,6 @@ class Derpp(ContinualLearner):
         meters["loss_amp"].update(amp_loss.sum() / amp_loss.size(0))
         meters["loss_ph"].update(ph_loss.sum() / ph_loss.size(0))
         meters["num_samples"].update(x.size(0))
+
+    def after_all_tasks(self):
+        self.buffer.finalize()

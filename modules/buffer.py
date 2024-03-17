@@ -531,6 +531,11 @@ class Buffer:
         if self.high_performance:
             self.dsl.enable_augmentation(enabled)
 
+    def finalize(self):
+        if self.high_performance:
+            self.dsl.finalize()
+            self.engine.wait_for_finalize()
+
     def __get_current_augmented_minibatch(self, step):
         return self.next_minibatches[step["batch"] % self.minibatches_ahead]
 

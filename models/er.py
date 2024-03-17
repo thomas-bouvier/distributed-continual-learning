@@ -57,9 +57,6 @@ class Er(ContinualLearner):
 
         if task_id >= self.buffer.augmentations_offset or self.nsys_run:
             self.buffer.enable_augmentations()
-        if task_id > 0 and self.nsys_run:
-            # todo: this function doesn't exist, so the app will be killed.
-            os.exit()
 
     def train_one_step(self, data, meters, step):
         """
@@ -244,3 +241,6 @@ class Er(ContinualLearner):
         meters["loss_amp"].update(amp_loss.sum() / amp_loss.size(0))
         meters["loss_ph"].update(ph_loss.sum() / ph_loss.size(0))
         meters["num_samples"].update(x.size(0))
+
+    def after_all_tasks(self):
+        self.buffer.finalize()
