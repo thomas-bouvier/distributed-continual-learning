@@ -22,13 +22,24 @@ def save_checkpoint(
     if is_initial:
         file_path = os.path.join(save_path, "checkpoint_initial.pth.tar")
         shutil.copyfile(filename, file_path)
-        wandb.save(file_path)
+
+        try:
+            wandb.save(file_path)
+        except:
+            pass
+
     if is_final:
         file_path = os.path.join(save_path, "checkpoint_final.pth.tar")
         shutil.copyfile(filename, file_path)
-        wandb.save(file_path)
+
+        try:
+            wandb.save(file_path)
+        except:
+            pass
+
     if is_best:
         shutil.copyfile(filename, os.path.join(save_path, "checkpoint_best.pth.tar"))
+
     if save_all:
         shutil.copyfile(
             filename,

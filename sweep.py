@@ -22,8 +22,43 @@ args = parser.parse_args()
 host = ""
 sweep_conf = ""
 
+er_command = (
+    f"horovodrun -np 8 -H {host} python main.py "
+    f"--backbone resnet50 "
+    f"--model Er "
+    f"--dataset imagenet_blurred "
+    f"--dataset-dir /my-spack/datasets "
+    f"--tasksets-config \"{{'scenario': 'class', 'initial_increment': 250, 'increment': 250}}\" "
+    f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 1, 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'rehearsal_ratio': 30, 'augmentations_offset': {args.augmentations_offset}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
+    f"--batch-size 56 "
+    f"--lr 0.0125 "
+    f"--epochs 30 "
+    f"--warmup-epochs 5 "
+    f"--use-amp "
+    f"--use-dali "
+    f"--load-checkpoint /root/distributed-continual-learning/checkpoint_initial_resnet50_imagenet_1.pth.tar "
+)
+
+der_command = (
+    f"horovodrun -np 8 -H {host} python main.py "
+    f"--backbone resnet50 "
+    f"--model Der "
+    f"--model-config \"{{'alpha': {args.alpha}}}\" "
+    f"--dataset imagenet_blurred "
+    f"--dataset-dir /my-spack/datasets "
+    f"--tasksets-config \"{{'scenario': 'class', 'initial_increment': 250, 'increment': 250}}\" "
+    f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 1, 'num_samples_per_activation': 1, 'activation_shape': [1000], 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'rehearsal_ratio': 30, 'augmentations_offset': {args.augmentations_offset}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
+    f"--batch-size 56 "
+    f"--lr 0.0125 "
+    f"--epochs 30 "
+    f"--warmup-epochs 5 "
+    f"--use-amp "
+    f"--use-dali "
+    f"--load-checkpoint /root/distributed-continual-learning/checkpoint_initial_resnet50_imagenet_1.pth.tar "
+)
+
 baseline_scratch_ptycho_command = (
-    f"horovodrun -np 1 -H {host} python main.py "
+    f"horovodrun -np 8 -H {host} python main.py "
     f"--backbone ptychonn "
     f"--backbone-config \"{{'lr_schedule': '{args.lr_schedule}', 'step_cycle_size': {args.step_cycle_size}, 'weight_decay': {args.weight_decay}}}\" "
     f"--model Vanilla "
@@ -40,7 +75,7 @@ baseline_scratch_ptycho_command = (
 )
 
 er_ptycho_command = (
-    f"horovodrun -np 1 -H {host} python main.py "
+    f"horovodrun -np 8 -H {host} python main.py "
     f"--backbone ptychonn "
     f"--backbone-config \"{{'lr_schedule': '{args.lr_schedule}', 'step_cycle_size': {args.step_cycle_size}, 'weight_decay': {args.weight_decay}}}\" "
     f"--model Er "
@@ -58,7 +93,7 @@ er_ptycho_command = (
 )
 
 derpp_ptycho_command = (
-    f"horovodrun -np 1 -H {host} python main.py "
+    f"horovodrun -np 8 -H {host} python main.py "
     f"--backbone ptychonn "
     f"--backbone-config \"{{'lr_schedule': '{args.lr_schedule}', 'step_cycle_size': {args.step_cycle_size}, 'weight_decay': {args.weight_decay}}}\" "
     f"--model Derpp "
@@ -77,7 +112,7 @@ derpp_ptycho_command = (
 )
 
 beta_derpp_ptycho_command = (
-    f"horovodrun -np 1 -H {host} python main.py "
+    f"horovodrun -np 8 -H {host} python main.py "
     f"--backbone ptychonn "
     f"--backbone-config \"{{'lr_schedule': '{args.lr_schedule}', 'step_cycle_size': {args.step_cycle_size}, 'weight_decay': {args.weight_decay}}}\" "
     f"--model Derpp "
@@ -95,30 +130,13 @@ beta_derpp_ptycho_command = (
     f"--load-checkpoint /root/distributed-continual-learning/checkpoint_initial_ptychonn_1.pth.tar "
 )
 
-er_8gpus_ptycho_command = (
-    f"horovodrun -np 8 -H {host} python main.py "
-    f"--backbone ptychonn "
-    f"--backbone-config \"{{'lr_schedule': 'exp_range_cyclic_lr', 'step_cycle_size': {args.step_cycle_size}}}\" "
-    f"--model Er "
-    f"--dataset ptycho "
-    f"--dataset-dir /my-spack/datasets "
-    f"--tasksets-config \"{{'scenario': 'reconstruction', 'num_tasks': 156}}\" "
-    f"--buffer-config \"{{'implementation': 'standard', 'num_samples_per_representative': 3, 'num_candidates': {args.num_candidates}, 'num_representatives': {args.num_representatives}, 'provider': 'na+sm', 'discover_endpoints': True, 'cuda_rdma': False}}\" "
-    f"--batch-size {args.batch_size} "
-    f"--eval-batch-size 5 "
-    f"--lr {args.lr} "
-    f"--epochs 1 "
-    f"--use-amp "
-    f"--use-dali "
-    f"--load-checkpoint /root/distributed-continual-learning/checkpoint_initial_ptychonn_1.pth.tar "
-)
-
 command = {
+    "er": er_command,
+    "der": der_command,
     "baseline_scratch_ptycho": baseline_scratch_ptycho_command,
     "er_ptycho": er_ptycho_command,
     "derpp_ptycho": derpp_ptycho_command,
     "beta_derpp_ptycho": beta_derpp_ptycho_command,
-    "er_8gpus_ptycho": er_8gpus_ptycho_command,
 }[sweep_conf]
 
 os.system(command)

@@ -5,7 +5,6 @@ import numpy as np
 import torch.multiprocessing as mp
 
 from continuum import ClassIncremental, InstanceIncremental
-from continuum.tasks import TaskSet
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 

@@ -8,12 +8,13 @@ import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
 import torch
-import wandb
 
+"""
 from bokeh.io import output_file, save
 from bokeh.plotting import figure
 from bokeh.layouts import column
 from bokeh.models import Div
+"""
 from itertools import cycle
 
 
@@ -93,6 +94,11 @@ def plot_figure(
     f.legend.click_policy = "hide"
     return f
 
+def plot_metric(data):
+    try:
+        wandb.log(data)
+    except:
+        pass
 
 class ResultsLog:
     supported_data_formats = ["csv", "json"]
@@ -206,7 +212,10 @@ class ResultsLog:
             holder_dictionary = self.results.to_dict(orient="records")
             with open(self.data_path, "w") as outfile:
                 json.dump(holder_dictionary, outfile)
-                wandb.save(self.data_path)
+                try:
+                    wandb.save(self.data_path)
+                except:
+                    pass
         else:
             self.results.to_csv(self.data_path, index=False, index_label=False)
 

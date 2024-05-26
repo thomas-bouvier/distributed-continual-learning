@@ -1,5 +1,3 @@
-import horovod.torch as hvd
-
 from copy import deepcopy
 from utils.utils import eval_func
 

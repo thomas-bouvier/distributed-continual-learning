@@ -8,7 +8,7 @@ import wandb
 from tqdm import tqdm
 
 from evaluate.evaluate import evaluate_one_epoch
-from utils.log import get_logging_level
+from utils.log import get_logging_level, plot_metric
 from utils.meters import AverageMeter, get_timer
 
 
@@ -89,7 +89,7 @@ def train_one_epoch(
                 ):
                     model.batch_metrics.save()
 
-                wandb.log(
+                plot_metric(
                     {
                         "task_id": task_id,
                         "epoch": global_epoch,
@@ -286,7 +286,7 @@ def train(
                         train=train_results,
                     )
                 )
-                wandb.log(
+                plot_metric(
                     {
                         "epoch": global_epoch,
                         **meters,
@@ -318,7 +318,7 @@ def train(
                         meters = {}
                         for key, value in validate_results.items():
                             meters[f"val_{key}"] = validate_results[key]
-                        wandb.log(
+                        plot_metric(
                             {
                                 "epoch": global_epoch,
                                 **meters,
@@ -366,7 +366,7 @@ def train(
                         logging.info(
                             f"Averaged eval {key} on all previous tasks: {averages[key]}"
                         )
-                    wandb.log(
+                    plot_metric(
                         {
                             "epoch": global_epoch,
                             **continual_meters,
@@ -411,7 +411,7 @@ def train(
                     dl_metrics.save()
 
                 # Time metrics
-                wandb.log(
+                plot_metric(
                     {
                         "epoch": global_epoch,
                         "train_time": dl_metrics_values["train_time"],

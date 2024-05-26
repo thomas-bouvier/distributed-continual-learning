@@ -8,7 +8,6 @@ import signal
 import sys
 import torch.multiprocessing as mp
 import torch.utils.data.distributed
-import wandb
 
 from argparse import Namespace
 from ast import literal_eval
@@ -289,8 +288,7 @@ def main():
 
     if args.cuda:
         # Horovod: pin GPU to local rank.
-        # Pin to rank() instead. This is a hack.
-        torch.cuda.set_device(hvd.rank() % torch.cuda.device_count())
+        torch.cuda.set_device(hvd.local_rank())
         torch.cuda.manual_seed(args.seed)
 
     # Horovod: limit # of CPU threads to be used per worker.
@@ -298,25 +296,29 @@ def main():
 
     save_path = ""
     if hvd.rank() == 0:
-        wandb.init(project=args.wandb_project)
+        try:
+            import wandb
+            wandb.init(project=args.wandb_project)
 
-        run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
-        if args.model is not None:
-            run_name = f"{args.model}-{run_name}"
-        wandb.run.name = run_name
+            run_name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{wandb.run.name}"
+            if args.model is not None:
+                run_name = f"{args.model}-{run_name}"
+            wandb.run.name = run_name
 
-        if args.save_dir == "":
-            args.save_dir = run_name
-        save_path = path.join(args.results_dir, args.save_dir)
-        if not path.exists(save_path):
-            makedirs(save_path)
+            if args.save_dir == "":
+                args.save_dir = run_name
+            save_path = path.join(args.results_dir, args.save_dir)
+            if not path.exists(save_path):
+                makedirs(save_path)
 
-        with open(path.join(save_path, "args.json"), "w", encoding="utf-8") as f:
-            json.dump(args.__dict__, f, indent=2)
-            wandb.save(path.join(save_path, "args.json"))
-        wandb.config.update(args)
+            with open(path.join(save_path, "args.json"), "w", encoding="utf-8") as f:
+                json.dump(args.__dict__, f, indent=2)
+                wandb.save(path.join(save_path, "args.json"))
+            wandb.config.update(args)
 
-        logging.info("Saving to %s", save_path)
+            logging.info("Saving to %s", save_path)
+        except:
+            pass
 
     setup_logging(
         path.join(save_path, f"log_{hvd.rank()}.txt"),
@@ -329,7 +331,10 @@ def main():
 
     xp = Experiment(args, save_path)
     xp.run()
-    wandb.finish()
+    try:
+        wandb.finish()
+    except:
+        pass
 
     logging.info("Done 🎉🎉🎉")
     sys.exit(0)
@@ -586,7 +591,10 @@ class Experiment:
 
 def on_exit(sig, frame):
     logging.info("Interrupted")
-    wandb.finish()
+    try:
+        wandb.finish()
+    except:
+        pass
     os.system(
         "kill $(ps aux | grep multiprocessing.spawn | grep -v grep | awk '{print $2}')"
     )
