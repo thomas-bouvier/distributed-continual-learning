@@ -106,3 +106,23 @@ python main.py --backbone resnet18 --model Der --buffer-config "{'rehearsal_rati
 python main.py --backbone resnet18 --model Derpp --buffer-config "{'rehearsal_ratio': 20}" --dataset imagenet100small --tasksets-config "{'scenario': 'class', 'initial_increment': 40, 'increment': 30}"
 python main.py --backbone resnet50 --model Agem --dataset tinyimagenet --tasksets-config "{'scenario': 'instance', 'num_tasks': 5}"
 ```
+
+# Citation
+
+```
+@inproceedings{bouvier:hal-04600107,
+  TITLE = {{Efficient Data-Parallel Continual Learning with Asynchronous Distributed Rehearsal Buffers}},
+  AUTHOR = {Bouvier, Thomas and Nicolae, Bogdan and Chaugier, Hugo and Costan, Alexandru and Foster, Ian and Antoniu, Gabriel},
+  URL = {https://inria.hal.science/hal-04600107},
+  BOOKTITLE = {{CCGrid 2024 - IEEE 24th International Symposium on Cluster, Cloud and Internet Computing}},
+  ADDRESS = {Philadelphia (PA), United States},
+  PAGES = {1-10},
+  YEAR = {2024},
+  MONTH = May,
+  DOI = {10.1109/CCGrid59990.2024.00036},
+  KEYWORDS = {continual learning ; data-parallel training ; experience replay ; distributed rehearsal buffers ; asynchronous data management ; scalability},
+  PDF = {https://inria.hal.science/hal-04600107/file/paper.pdf},
+  HAL_ID = {hal-04600107},
+  HAL_VERSION = {v1},
+}
+```
