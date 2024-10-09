@@ -172,6 +172,7 @@ class Buffer:
                 self.activation_shape or [],
                 neomem.CPUBuffer,
                 discover_endpoints,
+                True, # global sampling
                 half_precision,
                 get_shared_logging_level() < logging.INFO,
             )
