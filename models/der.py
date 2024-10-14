@@ -131,11 +131,11 @@ class Der(ContinualLearner):
                     self.optimizer_regime.step()
 
                 # Measure accuracy and record metrics
-                prec1, prec5 = accuracy(output, y, topk=(1, 5))
+                prec1, prec5 = accuracy(output, aug_y, topk=(1, 5))
                 meters["loss"].update(loss.mean())
-                meters["prec1"].update(prec1, x.size(0))
-                meters["prec5"].update(prec5, x.size(0))
-                meters["num_samples"].update(x.size(0))
+                meters["prec1"].update(prec1, aug_x.size(0))
+                meters["prec5"].update(prec5, aug_x.size(0))
+                meters["num_samples"].update(aug_x.size(0))
                 meters["local_rehearsal_size"].update(self.buffer.get_size())
 
     def evaluate_one_step(self, data, meters):
