@@ -90,17 +90,17 @@ class Derpp(ContinualLearner):
                         buf_activations,
                         buf_activations_rep,
                     ) = self.buffer.update(
-                        [x_batch],
-                        y_batch,
+                        [self.save_x],
+                        self.save_y,
                         step,
                         batch_metrics=self.batch_metrics,
                         activations=[self.activations],
                     )
-                    aug_x = aug_x[0]
+                    aug_x = aug_x[0] # only one item in the tuple
                 else:
                     self.buffer.add_data(
-                        [x_batch],
-                        y_batch,
+                        [self.save_x],
+                        self.save_y,
                         step,
                         batch_metrics=self.batch_metrics,
                         activations=[self.activations],
@@ -130,11 +130,14 @@ class Derpp(ContinualLearner):
                     loss = self.criterion(output, aug_y)
 
                 # Knowledge distillation
-                if self.activations is not None and buf_activations_rep is not None:
-                    buf_outputs = self.backbone(buf_activations_rep)
-                    loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
+                if step["task_id"] >= self.buffer.soft_augmentations_offset:
+                    if self.activations is not None and buf_activations_rep is not None:
+                        buf_outputs = self.backbone(buf_activations_rep)
+                        loss += self.alpha * F.mse_loss(buf_outputs, buf_activations[0])
 
-                self.activations = output.data
+                self.save_x = aug_x[: self.batch_size]
+                self.save_y = aug_y[: self.batch_size]
+                self.activations = output.data[: self.batch_size]
 
                 if self.use_amp:
                     self.scaler.scale(loss.sum() / loss.size(0)).backward()
