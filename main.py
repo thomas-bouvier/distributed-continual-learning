@@ -351,7 +351,7 @@ class Experiment:
         total_num_classes = self.prepare_dataset()
 
         batch_metrics_path = path.join(self.save_path, "batch_metrics")
-        batch_metrics = PerformanceResultsLog(batch_metrics_path)
+        batch_metrics = PerformanceResultsLog(batch_metrics_path, dummy=hvd.rank() > 0)
         self.create_model(total_num_classes, batch_metrics)
 
     def create_model(self, total_num_classes, batch_metrics=None):

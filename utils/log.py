@@ -232,8 +232,8 @@ class PerformanceResultsLog:
     last_step_added = {}
     last_values_added = {}
 
-    def __init__(self, save_path):
-        self.results_logs = ResultsLog(save_path, "batch_metrics")
+    def __init__(self, save_path, dummy=False):
+        self.results_logs = ResultsLog(save_path, title="batch_metrics", dummy=dummy)
 
     # todo: adapt to store a task id along epoch and batch
     def add(self, step, values):
