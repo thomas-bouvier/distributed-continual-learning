@@ -44,6 +44,9 @@ class Derpp(ContinualLearner):
         except Exception as exc:
             raise Exception("Parameters alpha and beta are required for Derpp") from exc
 
+        if self.beta != 1:
+            raise Exception("As rehearsal is part of minibatch augmentations, parameter beta must be set to 1")
+
         self.use_memory_buffer = True
         self.first_iteration = True
         self.activations = None
